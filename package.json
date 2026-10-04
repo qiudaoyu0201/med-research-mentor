@@ -1,0 +1,47 @@
+{
+  "name": "medical-research-tutor",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "engines": {
+    "node": ">=22.13"
+  },
+  "scripts": {
+    "dev": "tsx server/index.ts",
+    "build": "tsc --noEmit && vite build",
+    "start": "tsx server/index.ts --production",
+    "test": "tsx --test checks/*.test.ts",
+    "check": "npm run build && npm test",
+    "model:check": "tsx scripts/model-check.ts",
+    "eval": "tsx scripts/replay.ts",
+    "test:browser": "tsx checks/browser.ts",
+    "format": "prettier --write app server shared scripts checks evals examples vite.config.ts tsconfig.json package.json"
+  },
+  "dependencies": {
+    "@napi-rs/canvas": "^1.0.10",
+    "express": "^5.1.0",
+    "multer": "^2.0.2",
+    "pdfjs-dist": "^6.4.299",
+    "pptxgenjs": "^4.0.1",
+    "react": "^19.1.1",
+    "react-dom": "^19.1.1",
+    "zod": "^4.1.11"
+  },
+  "devDependencies": {
+    "@types/express": "^5.0.3",
+    "@types/multer": "^2.0.0",
+    "@types/node": "^24.5.2",
+    "@types/react": "^19.1.16",
+    "@types/react-dom": "^19.1.9",
+    "@vitejs/plugin-react": "^5.0.4",
+    "fflate": "^0.8.2",
+    "playwright": "^1.55.1",
+    "prettier": "^3.9.9",
+    "tsx": "^4.20.6",
+    "typescript": "^5.9.2",
+    "vite": "^7.1.7"
+  },
+  "overrides": {
+    "image-size": "2.0.3"
+  }
+}

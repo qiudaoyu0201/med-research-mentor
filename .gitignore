@@ -1,0 +1,8 @@
+node_modules/
+dist/
+data/
+exports/
+runs/
+.env*
+*.log
+test-results/
