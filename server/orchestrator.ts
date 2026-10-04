@@ -17,6 +17,7 @@ import {
   groundedTeachingSchema,
   groundedReviewSchema,
   groundingContractVersion,
+  unitSchema,
 } from "./schemas.ts";
 import { loadSkills, assistantRules } from "./skills.ts";
 import { z } from "zod";
@@ -70,7 +71,8 @@ export function validateCitations(
     throw new Error("输出引用了本任务未提供的来源，未保存为完成结果。");
   if (
     unit.sections.some(
-      (s) => s.kind !== "interpretation" && s.citations.length === 0,
+      (s) =>
+        ["paper", "foundation"].includes(s.kind) && s.citations.length === 0,
     )
   )
     throw new Error("事实或基础知识缺少可定位的引用。");
@@ -78,7 +80,7 @@ export function validateCitations(
     throw new Error("汇报页缺少来源。");
   for (const section of unit.sections) {
     if (
-      section.kind !== "interpretation" &&
+      ["paper", "foundation"].includes(section.kind) &&
       !section.citations.some(
         (id) => sources.find((s) => s.id === id)?.kind === section.kind,
       )
@@ -276,7 +278,16 @@ export class TaskManager {
       const profile = profiles.find((p) => p.id === input.profileId);
       if (!profile) throw new Error("新手画像不存在");
       const skills =
-        snapshot || (await loadSkills(input.modules ?? input.module, override));
+        snapshot ||
+        (await loadSkills(input.modules ?? input.module, override, {
+          readability:
+            input.workflow !== "direct" && (input.checks?.readability ?? true),
+          grounding: input.workflow !== "direct",
+        }));
+      if (input.workflow === "direct")
+        skills.versions["medical-research-assistant"] = (
+          await assistantRules()
+        ).version;
       if (input.sourceIds.some((id) => !paper.sources.some((s) => s.id === id)))
         throw new Error("所选来源不存在");
       const selected = paper.sources.filter((s) =>
@@ -288,8 +299,13 @@ export class TaskManager {
         visibleImage:
           input.visibleImage || selected.find((s) => s.image)?.image,
       };
-      if (sources.length === 0)
+      if (sources.length === 0 && input.workflow !== "direct")
         throw new Error("请先选择本任务的原文或基础资料。");
+      if (
+        input.workflow === "direct" &&
+        (input.module === "ppt" || sources.some((s) => s.kind === "paper"))
+      )
+        throw new Error("论文事实与汇报必须走来源核对流程。");
       if (input.mode === "live") materialPacket(sources);
       const run: TaskRun = {
         id: execution?.id ?? randomUUID(),
@@ -481,6 +497,43 @@ export class TaskManager {
         };
         validateCitations(run.result, run.review, paper.sources, run.deck);
         await set("completed");
+      } else if (run.input.workflow === "direct") {
+        const rules = await assistantRules();
+        await set("teaching");
+        const result = await call(
+          "assistant-explain",
+          rules.text +
+            "\n" +
+            skills.shared +
+            "\n" +
+            skills.modules.map((m) => m.text).join("\n"),
+          {
+            responseMode: "explain",
+            question: run.input.question,
+            focusedText: run.input.focusedText ?? null,
+            depth: run.input.depth ?? "standard",
+            previous: run.input.previous ?? null,
+            contextSummary: run.input.contextSummary ?? "",
+            sources: materialPacket(sources),
+            boundary:
+              "普通背景解释，不核验论文事实。只用 background 或 interpretation 段落；无来源知识不用编造引用。",
+          },
+          unitSchema,
+        );
+        if (
+          result.sections.some(
+            (s) => !["background", "interpretation"].includes(s.kind),
+          )
+        )
+          throw new Error("直接解释不能冒充已核验的论文事实或基础资料。");
+        run.review = {
+          issues: [],
+          checkedSources: [],
+          limitations: ["本次为背景解释，未运行来源核对或模拟试读。"],
+        };
+        validateCitations(result, run.review, sources);
+        run.result = result;
+        await set("completed");
       } else {
         const teaching =
           skills.shared +
@@ -495,9 +548,10 @@ export class TaskManager {
             )
             .map((m) => m.text)
             .join("\n");
-        const novice = skills.modules.find(
-          (m) => m.id === "medical-novice-simulator",
-        )!.text;
+        const readCheck = run.input.checks?.readability ?? true;
+        const novice =
+          skills.modules.find((m) => m.id === "medical-novice-simulator")
+            ?.text ?? "";
         const checking =
           skills.shared +
           "\n" +
@@ -515,6 +569,8 @@ export class TaskManager {
           slideCount: run.input.slideCount ?? null,
           contextSummary: run.input.contextSummary ?? "",
           openQuestions: run.input.openQuestions ?? [],
+          focusedText: run.input.focusedText ?? null,
+          depth: run.input.depth ?? "standard",
         };
         await set("teaching");
         let generated = await call(
@@ -524,20 +580,22 @@ export class TaskManager {
           groundedTeachingSchema(sources),
         );
         run.draft = generated.unit;
-        await set("novice");
-        let feedback = await call(
-          "novice",
-          novice,
-          visibleInput(
-            run.input,
-            generated.unit,
-            profile,
-            sources,
-            undefined,
-            generated.deck,
-          ),
-          noviceSchema,
-        );
+        if (readCheck) await set("novice");
+        let feedback: NoviceFeedback = readCheck
+          ? await call(
+              "novice",
+              novice,
+              visibleInput(
+                run.input,
+                generated.unit,
+                profile,
+                sources,
+                undefined,
+                generated.deck,
+              ),
+              noviceSchema,
+            )
+          : { understood: [], breakpoints: [] };
         await set("checking");
         let review = await call(
           "grounding",
@@ -657,20 +715,22 @@ export class TaskManager {
             },
             groundedTeachingSchema(sources),
           );
-          await set("rereading");
-          feedback = await call(
-            "novice-reread",
-            novice,
-            visibleInput(
-              run.input,
-              generated.unit,
-              profile,
-              sources,
-              feedback,
-              generated.deck,
-            ),
-            noviceSchema,
-          );
+          if (readCheck) await set("rereading");
+          feedback = readCheck
+            ? await call(
+                "novice-reread",
+                novice,
+                visibleInput(
+                  run.input,
+                  generated.unit,
+                  profile,
+                  sources,
+                  feedback,
+                  generated.deck,
+                ),
+                noviceSchema,
+              )
+            : { understood: [], breakpoints: [] };
           await set("rechecking");
           review = await call(
             "grounding-final",
@@ -691,7 +751,7 @@ export class TaskManager {
           sources,
           generated.deck || undefined,
         );
-        run.novice = feedback;
+        if (readCheck) run.novice = feedback;
         run.review = review;
         for (const request of run.materialRequests ?? []) {
           const bp = feedback.breakpoints.find((b) => b.id === request.id);

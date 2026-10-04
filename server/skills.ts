@@ -104,13 +104,17 @@ export const routes: Record<Module, string[]> = {
 export async function loadSkills(
   module: Module | Module[],
   override?: { id: string; text: string; version: string },
+  roles: { readability: boolean; grounding: boolean } = {
+    readability: true,
+    grounding: true,
+  },
 ) {
   const ids = [
     ...new Set(
       (Array.isArray(module) ? module : [module]).flatMap((m) => routes[m]),
     ),
-    "medical-novice-simulator",
-    "medical-grounding-check",
+    ...(roles.readability ? ["medical-novice-simulator"] : []),
+    ...(roles.grounding ? ["medical-grounding-check"] : []),
   ];
   const shared = await readFile("skills/shared/rules.md", "utf8");
   const modules = await Promise.all(

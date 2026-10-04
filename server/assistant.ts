@@ -19,7 +19,7 @@ import {
   validateRunSurface,
 } from "./orchestrator.ts";
 import type { Provider } from "./provider.ts";
-import { assistantRules } from "./skills.ts";
+import { assistantRules, skillCatalog } from "./skills.ts";
 import { planSchema } from "./schemas.ts";
 import {
   digest,
@@ -161,6 +161,7 @@ export function validatePlan(
   value: unknown,
   paper: PaperBundle,
   message: AssistantMessage,
+  allowBackground = false,
 ): AssistantPlan {
   const plan = planSchema.parse(value);
   if (plan.sourceIds.some((id) => !paper.sources.some((s) => s.id === id)))
@@ -191,7 +192,8 @@ export function validatePlan(
   if (
     !plan.clarification &&
     !selectedActions.includes("ppt.export") &&
-    plan.sourceIds.length === 0
+    plan.sourceIds.length === 0 &&
+    !allowBackground
   )
     throw new Error("计划没有绑定教学资料。");
   return plan;
@@ -430,15 +432,75 @@ export class AssistantService {
         !message.sourceIds &&
         /^(为什么|这|那|继续|还是|上一)/.test(message.question) &&
         !/PCR|流式|Figure|图\s*\d|PPT|汇报/i.test(message.question);
-      const routed =
-        referential && last
+      let focusedText: string | undefined;
+      let focusedSources: string[] | undefined;
+      let focusedPaper = false;
+      if (message.focus) {
+        const focusedRun = this.manager.runs.get(message.focus.runId);
+        const section =
+          focusedRun?.result?.sections[message.focus.sectionIndex];
+        if (
+          !focusedRun ||
+          focusedRun.status !== "completed" ||
+          focusedRun.input.conversationId !== state.id ||
+          focusedRun.sourceVersion !== paper.version ||
+          focusedRun.input.paperId !== paper.id ||
+          !section ||
+          !section.text.includes(message.focus.excerpt)
+        )
+          throw new Error("追问句子未在当前会话及资料版本中交付。");
+        focusedText = message.focus.excerpt;
+        focusedSources = section.citations;
+        focusedPaper =
+          section.kind === "paper" ||
+          section.citations.some((id) =>
+            paper.sources.some((s) => s.id === id && s.kind === "paper"),
+          );
+      }
+      const explicitFacts =
+        /论文|本文|作者|Figure|图\s*\d|PPT|汇报|出处|引用|文献|数值|实验参数/i.test(
+          message.question,
+        ) ||
+        (message.module && message.module !== "method");
+      const direct =
+        !legacy &&
+        message.mode === "live" &&
+        !message.exportRunId &&
+        !message.readabilityCheck &&
+        !explicitFacts &&
+        !focusedPaper &&
+        !state.pending &&
+        (Boolean(focusedText) ||
+          /一句话|通俗|简单解释|简短说明/.test(message.question)) &&
+        !(message.sourceIds ?? []).some((id) =>
+          paper.sources.some((s) => s.id === id && s.kind === "paper"),
+        );
+      const routed = message.focus
+        ? {
+            ...message,
+            module: focusedPaper ? ("paper" as const) : ("method" as const),
+            sourceIds: focusedSources,
+          }
+        : referential && last
           ? {
               ...message,
               module: last.input.module,
               sourceIds: last.input.sourceIds,
             }
           : message;
-      let plan = rulePlan(routed, state, paper);
+      let plan: AssistantPlan | undefined = direct
+        ? {
+            goal: message.question,
+            modules: ["method"],
+            sourceIds: [],
+            slideCount: null,
+            groups: [
+              { id: "group-1", actions: ["method.explain"], dependsOn: [] },
+            ],
+            clarification: null,
+            estimatedCalls: 1,
+          }
+        : rulePlan(routed, state, paper);
       if (!plan) {
         if (message.mode === "example")
           throw new Error("请在示例模式选择具体功能。");
@@ -464,6 +526,7 @@ export class AssistantService {
               }),
             ),
             context: this.context(state),
+            skills: await skillCatalog(),
           },
           planSchema,
           signal,
@@ -478,7 +541,7 @@ export class AssistantService {
         );
         plan = result.output;
       }
-      plan = validatePlan(plan, paper, message);
+      plan = validatePlan(plan, paper, message, direct);
       if (
         !binding &&
         message.mode === "live" &&
@@ -506,7 +569,8 @@ export class AssistantService {
       if (
         message.mode === "live" &&
         !plan.clarification &&
-        !message.exportRunId
+        !message.exportRunId &&
+        !direct
       ) {
         const selected = paper.sources.filter((s) =>
           plan!.sourceIds.includes(s.id),
@@ -619,6 +683,12 @@ export class AssistantService {
               question: plan.goal,
               profileId: state.profileId,
               sourceIds: plan.sourceIds,
+              ...(direct ? { workflow: "direct" as const } : {}),
+              ...(focusedText ? { focusedText } : {}),
+              depth: message.depth ?? "standard",
+              checks: {
+                readability: message.readabilityCheck ?? !message.focus,
+              },
               ...(missingFoundations.length ? { missingFoundations } : {}),
               taughtConcepts: state.taughtConcepts
                 .slice(-20)

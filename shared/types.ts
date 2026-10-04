@@ -69,7 +69,7 @@ export interface PaperBundle {
 export interface Section {
   title: string;
   text: string;
-  kind: SourceKind;
+  kind: SourceKind | "background";
   citations: string[];
 }
 export interface LearningUnit {
@@ -139,6 +139,10 @@ export interface TaskInput {
   turnId?: string;
   groupId?: string;
   missingFoundations?: { id: string; title: string }[];
+  workflow?: "direct";
+  checks?: { readability: boolean };
+  focusedText?: string;
+  depth?: "brief" | "standard" | "deep";
 }
 export type RunStatus =
   | "queued"
@@ -248,6 +252,9 @@ export interface AssistantMessage {
   profileId?: string;
   visibleImage?: string;
   exportRunId?: string;
+  focus?: { runId: string; sectionIndex: number; excerpt: string };
+  depth?: "brief" | "standard" | "deep";
+  readabilityCheck?: boolean;
 }
 export interface ConversationState {
   id: string;

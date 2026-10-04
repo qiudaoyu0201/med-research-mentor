@@ -10,7 +10,7 @@ export const unitSchema = z.object({
       z.object({
         title: z.string().max(160),
         text: z.string().min(1).max(4000),
-        kind: z.enum(["paper", "foundation", "interpretation"]),
+        kind: z.enum(["paper", "foundation", "interpretation", "background"]),
         citations,
       }),
     )
@@ -68,7 +68,7 @@ export const teachingSchema = z.object({
   unit: unitSchema,
   deck: deckSchema.nullable(),
 });
-export const groundingContractVersion = "grounded-output-v2";
+export const groundingContractVersion = "grounded-output-v3-background";
 export function groundedTeachingSchema(sources: Source[]) {
   const ids = z.array(z.enum(sources.map((s) => s.id))).max(20);
   const sections = unitSchema.shape.sections.element.extend({ citations: ids });
@@ -134,6 +134,15 @@ export const messageSchema = z.object({
   profileId: z.enum(["beginner", "methods", "reasoning"]).optional(),
   visibleImage: inputSchema.shape.visibleImage,
   exportRunId: recordId.optional(),
+  focus: z
+    .object({
+      runId: recordId,
+      sectionIndex: z.number().int().min(0).max(9),
+      excerpt: z.string().min(1).max(2000),
+    })
+    .optional(),
+  depth: z.enum(["brief", "standard", "deep"]).optional(),
+  readabilityCheck: z.boolean().optional(),
 });
 export const planSchema = z.object({
   goal: z.string().min(1).max(2000),

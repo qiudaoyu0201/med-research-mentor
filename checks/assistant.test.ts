@@ -68,6 +68,123 @@ const method: AssistantMessage = {
 };
 const lesson = { unit: exampleUnits.qpcr, deck: null };
 
+const backgroundLesson = {
+  title: "对照是什么",
+  question: "用一句话解释对照",
+  sections: [
+    {
+      title: "背景解释",
+      text: "对照提供一个比较基准，帮助判断观察到的差异与哪种改变有关。",
+      kind: "background",
+      citations: [],
+    },
+  ],
+  terms: [],
+  nextQuestion: "要看一个例子吗？",
+};
+test("ordinary explanation and a focused continuation use one call each without grading roles", async () => {
+  const h = harness([backgroundLesson, backgroundLesson]);
+  const state = await h.conversations.create();
+  const first = await h.assistant.submit(state.id, {
+    ...method,
+    question: "用一句话解释对照",
+    depth: "brief",
+  });
+  await h.assistant.wait(first.id);
+  assert.equal(first.status, "completed", first.error);
+  assert.equal(first.budget.attempts.length, 1);
+  assert.equal(first.budget.attempts[0].role, "assistant-explain");
+  const second = await h.assistant.submit(state.id, {
+    ...method,
+    clientMessageId: "focused",
+    question: "这句话换个通俗说法",
+    focus: { runId: first.runId!, sectionIndex: 0, excerpt: "比较基准" },
+  });
+  await h.assistant.wait(second.id);
+  assert.equal(second.status, "completed", second.error);
+  const run = h.manager.runs.get(second.runId!)!;
+  assert.equal(run.calls, 1);
+  assert.equal(run.input.focusedText, "比较基准");
+  assert.equal(run.novice, undefined);
+  assert.deepEqual(run.review?.checkedSources, []);
+  assert.ok(!("medical-novice-simulator" in run.skillVersions));
+  assert.ok(!("medical-grounding-check" in run.skillVersions));
+  assert.deepEqual(h.conversations.get(state.id).userProgress, []);
+  const other = await h.conversations.create();
+  const bad = await h.assistant.submit(other.id, {
+    ...method,
+    question: "换个通俗说法",
+    focus: { runId: first.runId!, sectionIndex: 0, excerpt: "比较基准" },
+  });
+  await h.assistant.wait(bad.id);
+  assert.equal(bad.status, "failed");
+  assert.equal(bad.budget.attempts.length, 0);
+});
+test("focused paper explanation keeps source checking and does not force readability", async () => {
+  const paperLesson = { unit: exampleUnits.paper, deck: null };
+  const paperReview = {
+    issues: [],
+    checkedSources: paperLesson.unit.sections.flatMap((s) => s.citations),
+    limitations: [],
+  };
+  const focusedSection = paperLesson.unit.sections.find(
+    (s) => s.kind === "paper",
+  )!;
+  const focusedLesson = {
+    unit: { ...paperLesson.unit, sections: [focusedSection] },
+    deck: null,
+  };
+  const h = harness([
+    paperLesson,
+    novice,
+    paperReview,
+    focusedLesson,
+    { ...paperReview, checkedSources: focusedSection.citations },
+  ]);
+  const state = await h.conversations.create({ paperId: sample.id });
+  const first = await h.assistant.submit(state.id, {
+    ...method,
+    question: "带读论文",
+    module: "paper",
+  });
+  await h.assistant.wait(first.id);
+  assert.equal(first.status, "completed", first.error);
+  const index = first.reply!.content!.sections.findIndex(
+    (s) => s.kind === "paper",
+  );
+  const section = first.reply!.content!.sections[index];
+  const second = await h.assistant.submit(state.id, {
+    ...method,
+    clientMessageId: "paper-focus",
+    question: "这句话换个通俗说法",
+    focus: {
+      runId: first.runId!,
+      sectionIndex: index,
+      excerpt: section.text.slice(0, 15),
+    },
+  });
+  await h.assistant.wait(second.id);
+  assert.equal(second.status, "completed", second.error);
+  assert.deepEqual(
+    second.budget.attempts.map((a) => a.role),
+    ["teaching", "grounding"],
+  );
+});
+test("direct response cannot publish a paper fact as verified", async () => {
+  const bad = structuredClone(backgroundLesson);
+  bad.sections[0].kind = "paper";
+  const h = harness([bad]);
+  const state = await h.conversations.create();
+  const turn = await h.assistant.submit(state.id, {
+    ...method,
+    question: "用一句话解释对照",
+  });
+  await h.assistant.wait(turn.id);
+  assert.equal(turn.status, "failed");
+  assert.equal(turn.budget.attempts.length, 1);
+  assert.equal(turn.reply, undefined);
+});
+
 test("direct method route uses foundations, zero planning and three persisted attempts", async () => {
   const h = harness([lesson, novice, review]);
   const state = await h.conversations.create();
