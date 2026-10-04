@@ -1140,6 +1140,51 @@ footer {
   margin: 12px 0;
   object-fit: contain;
 }
+.conversation-panel {
+  padding: 18px 0;
+  border-bottom: 1px solid var(--line, #ddd);
+  margin-bottom: 24px;
+}
+.conversation-panel h3 {
+  margin: 0;
+}
+.conversation-panel select {
+  max-width: 100%;
+}
+.chat-history {
+  padding: 0;
+  list-style: none;
+  max-height: 260px;
+  overflow: auto;
+}
+.chat-history li {
+  padding: 12px;
+  margin: 8px 0;
+  background: #f4f6f3;
+  border-radius: 8px;
+}
+.chat-question {
+  font-weight: 600;
+}
+.chat-history p {
+  margin: 6px 0;
+  white-space: pre-wrap;
+}
+.focused-question,
+.pending-questions {
+  border-left: 3px solid #66806a;
+  padding: 8px 12px;
+  margin: 12px 0;
+}
+.check-option {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin: 12px 0;
+}
+.check-option input {
+  width: auto;
+}
 .crop-preview textarea {
   margin-top: 10px;
   font-size: 12px;

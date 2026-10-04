@@ -93,6 +93,26 @@ app.post("/api/conversations", async (req, res) => {
   if (input.paperId) await paperById(input.paperId);
   res.status(201).json(await assistant.conversations.create(input));
 });
+app.get("/api/conversations", (_req, res) => {
+  res.json(
+    [...assistant.conversations.states.values()].map((state) => ({
+      ...state,
+      goal: state.goal,
+    })),
+  );
+});
+app.get("/api/conversations/:id/turns", (req, res) => {
+  const state = assistant.conversations.get(req.params.id);
+  res.json(
+    state.recentTurnIds
+      .map((id) => assistant.turns.get(id))
+      .filter(Boolean)
+      .map((turn) => ({
+        ...turn,
+        run: turn?.runId ? manager.runs.get(turn.runId) : undefined,
+      })),
+  );
+});
 app.get("/api/conversations/:id", (req, res) => {
   res.json(assistant.conversations.get(req.params.id));
 });

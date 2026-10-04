@@ -13,6 +13,7 @@ import type {
   LearningUnit,
 } from "../shared/types.ts";
 import "./style.css";
+import { useConversation, ConversationPanel } from "./conversation.tsx";
 GlobalWorkerOptions.workerSrc = workerUrl;
 const moduleNames: Record<Module, string> = {
   paper: "论文带读",
@@ -224,6 +225,17 @@ function App() {
     sourceDetails = useRef<HTMLDetailsElement | null>(null),
     pollRef = useRef(0);
   const paper = papers.find((p) => p.id === paperId) || sample;
+  const chat = useConversation(
+    (run) => {
+      setCurrent(run);
+      if (run.input.paperId !== "foundation-only")
+        setPaperId(run.input.paperId);
+      setRuns((prev) => [run, ...prev.filter((r) => r.id !== run.id)]);
+      if (run.deck) setOutline(run.deck);
+    },
+    setError,
+    () => setCurrent(null),
+  );
   const sources = paper
     ? [
         ...paper.sources,
@@ -340,23 +352,14 @@ function App() {
     setBusy(true);
     setDeckUrl("");
     try {
-      const run = await api<TaskRun>(
-        "/api/tasks",
-        json({
-          paperId: paper.id,
-          module,
-          mode: actualMode,
-          question: q,
-          profileId,
-          sourceIds: selectedSources,
-          taughtConcepts: [],
-          ...(current?.result && actualMode === "live"
-            ? { previous: current.result }
-            : {}),
-          ...(image ? { visibleImage: image } : {}),
-        }),
-      );
-      setCurrent(run);
+      await chat.send(q, {
+        paperId: paper.id,
+        module,
+        mode: actualMode,
+        profileId,
+        sourceIds: selectedSources,
+        ...(image ? { visibleImage: image } : {}),
+      });
       setShowLibrary(false);
       setQuestion("");
     } catch (e) {
@@ -1246,6 +1249,11 @@ function App() {
                 />
               </div>
               <section className="tutor panel">
+                <ConversationPanel
+                  chat={chat}
+                  options={{ mode, paperId, profileId }}
+                  disabled={busy || isRunning}
+                />
                 <div className="tutor-heading">
                   <span className="tutor-symbol">研</span>
                   <div>
@@ -1286,9 +1294,13 @@ function App() {
                       {isRunning && (
                         <button
                           onClick={() =>
-                            void api(
-                              "/api/tasks/" + current.id + "/cancel",
-                              json({}),
+                            void (
+                              chat.active
+                                ? chat.cancel()
+                                : api(
+                                    "/api/tasks/" + current.id + "/cancel",
+                                    json({}),
+                                  )
                             )
                               .then(() =>
                                 api<TaskRun>("/api/tasks/" + current.id),
@@ -1333,7 +1345,7 @@ function App() {
                             </details>
                           ))}
                         </div>
-                        {current.result.sections.map((s) => (
+                        {current.result.sections.map((s, sectionIndex) => (
                           <article className="learning-section" key={s.title}>
                             <div className="section-title">
                               <h3>{s.title}</h3>
@@ -1342,10 +1354,40 @@ function App() {
                                   ? "论文事实"
                                   : s.kind === "foundation"
                                     ? "基础知识"
-                                    : "解释与推理"}
+                                    : s.kind === "background"
+                                      ? "背景解释 · 未核验"
+                                      : "解释与推理"}
                               </small>
                             </div>
                             <p>{s.text}</p>
+                            <button
+                              disabled={
+                                isRunning ||
+                                current.input.conversationId !== chat.state?.id
+                              }
+                              onClick={() => {
+                                const selected = window
+                                  .getSelection()
+                                  ?.toString()
+                                  .trim();
+                                chat.setFocus({
+                                  runId: current.id,
+                                  sectionIndex,
+                                  excerpt:
+                                    selected && s.text.includes(selected)
+                                      ? selected.slice(0, 2000)
+                                      : s.text.slice(0, 2000),
+                                });
+                                document
+                                  .querySelector('[aria-label="统一对话问题"]')
+                                  ?.scrollIntoView({
+                                    behavior: "smooth",
+                                    block: "center",
+                                  });
+                              }}
+                            >
+                              针对这句话追问
+                            </button>
                             <div className="citations">
                               {s.citations.map((id) => (
                                 <button key={id} onClick={() => locate(id)}>
