@@ -11,6 +11,7 @@ try {
   await page.getByRole("button", { name: "打开示例论文" }).waitFor();
   await page.screenshot({ path: "runs/screenshots/home.png", fullPage: true });
   await page.getByRole("button", { name: "打开示例论文" }).click();
+  await page.getByRole("button", { name: "论文带读", exact: true }).click();
   await page.getByRole("button", { name: "打开教学示例" }).click();
   await page
     .getByRole("heading", { name: "从一个问题，读懂一个实验" })

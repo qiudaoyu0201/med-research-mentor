@@ -490,7 +490,7 @@ function App() {
       <main className="loading">
         <div className="app-symbol">医</div>
         <h1>医学科研入门导师</h1>
-        <p>{error || "正在打开本机学习空间…"}</p>
+        <p>{error || "正在加载…"}</p>
       </main>
     );
   return (
@@ -510,15 +510,6 @@ function App() {
           设置与记录
         </button>
       </header>
-      <div className={"mode-banner " + mode}>
-        <span className="mode-dot" />
-        <strong>{mode === "example" ? "示例模式" : "实时模式"}</strong>
-        <span>
-          {mode === "example"
-            ? "固定教学内容 · 不调用模型 · 自由问题请切换实时模式"
-            : "选中的原文与图件将发送给云端模型 · 每次最多六次生成"}
-        </span>
-      </div>
       {error && (
         <div role="alert" className="alert">
           {error}
@@ -545,18 +536,23 @@ function App() {
                   onChange={(e) => setMode(e.target.value as Mode)}
                   disabled={isRunning}
                 >
-                  <option value="example">示例 · 离线固定内容</option>
-                  <option value="live">实时 · Codex 三角色协作</option>
+                  <option value="example">示例讲解</option>
+                  <option value="live">实时对话</option>
                 </select>
               </label>
               <p className="hint">
                 GPT-6.1 Sol ·{" "}
                 {model?.authenticated ? "ChatGPT 登录已识别" : "模型尚未连接"}
               </p>
-              <p className="hint">{model?.note || model?.error}</p>
+              {model?.error && <p className="hint">{model.error}</p>}
               <button onClick={() => void api("/api/model").then(setModel)}>
                 重新检查连接
               </button>
+              <details>
+                <summary>资料信息</summary>
+                <p className="hint">实时对话将选中的材料发送给云端模型。</p>
+                <p className="hint">{paper?.scope}</p>
+              </details>
             </div>
             <div>
               <label>
@@ -573,7 +569,6 @@ function App() {
                   ))}
                 </select>
               </label>
-              <p className="hint">这是模型试读配置，不是你的能力诊断。</p>
               <button onClick={() => setShowReplay(!showReplay)}>
                 规则版本与案例回放
               </button>
@@ -602,7 +597,7 @@ function App() {
                 >
                   {r.result?.title || r.input.question}
                   <small>
-                    {statusNames[r.status]} · {r.calls} 次 ·{" "}
+                    {statusNames[r.status]} ·{" "}
                     {new Date(r.createdAt).toLocaleString("zh-CN")}
                   </small>
                 </button>
@@ -631,10 +626,7 @@ function App() {
             <h2>跨案例规则比较</h2>
             <button onClick={() => setShowReplay(false)}>收起</button>
           </div>
-          <p className="hint">
-            一次比较一个教学模块。6 个开发案例 + 2
-            个留出案例；留出核验条件不加入角色提示。
-          </p>
+          <p className="hint">选择教学模块，对比修改前后的讲解。</p>
           <select value={skillId} onChange={(e) => setSkillId(e.target.value)}>
             {skills
               .filter(
@@ -662,7 +654,7 @@ function App() {
               value={replayMode}
               onChange={(e) => setReplayMode(e.target.value as any)}
             >
-              <option value="fixture">静态回放 · 不调用模型</option>
+              <option value="fixture">规则检查</option>
               <option value="live">实时完整回放 · 最多 96 次生成</option>
             </select>
             <button disabled={busy || isRunning} onClick={runReplay}>
@@ -672,7 +664,7 @@ function App() {
               <button
                 onClick={() =>
                   void api("/api/replays/cancel", json({})).then(() =>
-                    setNotice("已请求取消回放；不会继续新增模型任务。"),
+                    setNotice("正在取消回放…"),
                   )
                 }
               >
@@ -683,10 +675,8 @@ function App() {
           {batch && (
             <>
               <p>
-                {batch.mode === "fixture"
-                  ? "静态规则检查，不代表教学效果改善"
-                  : "实时案例比较"}{" "}
-                · {batch.calls} 次调用 ·{" "}
+                {batch.mode === "fixture" ? "规则检查结果" : "实时案例比较"} ·{" "}
+                {batch.calls} 次调用 ·{" "}
                 {batch.decision === "pending"
                   ? "待决定"
                   : batch.decision === "keep"
@@ -721,9 +711,6 @@ function App() {
                   ))}
                 </tbody>
               </table>
-              <p className="hint">
-                保留将候选存到本机，供开发侧审查发布；不会自动覆盖正式规则。
-              </p>
               <div className="action-row">
                 {["keep", "revert"].map((decision) => (
                   <button
@@ -760,7 +747,7 @@ function App() {
           <div className="library-grid">
             <section className="paper-card panel">
               <div className="paper-label">
-                代表性基础医学论文 <span>局部证据包</span>
+                基础医学 <span>示例论文</span>
               </div>
               <h2>
                 衰老细胞如何
@@ -773,7 +760,7 @@ function App() {
                 <i>→</i>
                 <span>移植实验</span>
                 <i>→</i>
-                <span>功能与边界</span>
+                <span>功能变化</span>
               </div>
               <button
                 className="primary"
@@ -783,9 +770,6 @@ function App() {
               >
                 打开示例论文 <span>↗</span>
               </button>
-              <p className="hint">
-                包含核验后的局部证据摘要；全文和原图需从来源获取或上传。
-              </p>
             </section>
             <section className="upload-card panel">
               <span className="upload-icon">＋</span>
@@ -794,7 +778,7 @@ function App() {
               <button onClick={() => file.current?.click()} disabled={busy}>
                 选择 PDF
               </button>
-              <small>最大 30 MB · 100 页 · 原文件保存在本机</small>
+              <small>PDF · 最大 30 MB · 100 页</small>
               {papers
                 .filter((p) => p.id !== "xu-2018")
                 .map((p) => (
@@ -895,9 +879,7 @@ function App() {
                   </div>
                   <span className="badge">{outline.slides.length} 页</span>
                 </div>
-                <p className="hint">
-                  每页文字、顺序与讲稿可修改；保留来源后导出。缺少论文原图时使用明确占位。
-                </p>
+                <p className="hint">调整标题、要点、顺序和讲稿。</p>
                 {!outline.slides.length && (
                   <p>请先用实时模式生成这篇论文的大纲。</p>
                 )}
@@ -1005,9 +987,7 @@ function App() {
               <aside className="panel export-panel">
                 <div className="eyebrow">汇报输出</div>
                 <h2>讲清每一页</h2>
-                <p>
-                  中文文本可编辑，讲稿放入备注。只使用已核对的结果与有效来源。
-                </p>
+                <p>导出可编辑 PPT，附每页讲稿。</p>
                 <button
                   onClick={() =>
                     mode === "example"
@@ -1018,7 +998,7 @@ function App() {
                   }
                   disabled={busy || isRunning}
                 >
-                  {mode === "example" ? "载入示例大纲" : "实时生成并核对大纲"}
+                  {mode === "example" ? "载入示例大纲" : "生成大纲"}
                 </button>
                 <button
                   className="primary"
@@ -1032,13 +1012,8 @@ function App() {
                     下载汇报 PPTX ↓
                   </a>
                 )}
-                <p className="hint">
-                  编辑后的表述由你检查。未导入图件时，PPT 明确写出“原图待导入”。
-                </p>
                 {current && (
-                  <p className="hint">
-                    {statusNames[current.status]} · {current.calls} 次生成
-                  </p>
+                  <p className="hint">{statusNames[current.status]}</p>
                 )}
               </aside>
             </div>
@@ -1056,10 +1031,9 @@ function App() {
                   <span className="badge">
                     {paper?.pdfUrl
                       ? `${page} / ${paper.pageCount || "?"}`
-                      : "局部资料"}
+                      : "阅读材料"}
                   </span>
                 </div>
-                <p className="source-scope">{paper?.scope}</p>
                 {paper?.pdfUrl && (
                   <>
                     <div className="reader-tools">
@@ -1152,9 +1126,9 @@ function App() {
                             <span>
                               {s.kind === "foundation"
                                 ? "基础知识"
-                                : s.verified
-                                  ? "来源已核对"
-                                  : "待检查"}
+                                : s.page && paper?.pdfUrl
+                                  ? "论文原文"
+                                  : "论文资料"}
                             </span>
                           </label>
                           <p>{s.text || "未提取到文字，请补充原文或图注。"}</p>
@@ -1308,8 +1282,7 @@ function App() {
                   <>
                     <div className={"run-status " + current.status}>
                       <span className={isRunning ? "spinner" : ""} />
-                      {statusNames[current.status]} · {current.calls} /{" "}
-                      {mode === "example" ? 0 : 6} 次生成
+                      {statusNames[current.status]}
                       {isRunning && (
                         <button
                           onClick={() =>
@@ -1333,8 +1306,8 @@ function App() {
                         <div className="unit-heading">
                           <div className="eyebrow">
                             {current.input.mode === "example"
-                              ? "固定教学示例"
-                              : "核对后的学习单元"}
+                              ? "示例讲解"
+                              : "导师讲解"}
                           </div>
                           <h2>{current.result.title}</h2>
                           <p>{current.result.question}</p>
@@ -1410,9 +1383,7 @@ function App() {
                                   "还是不懂，请定位当前讲解的断点，拆成一个更小的步骤。",
                                 );
                               else
-                                setNotice(
-                                  "已记录“表示不懂”。进一步追问需要实时模式。",
-                                );
+                                setNotice("已记录，切换实时对话后可继续追问。");
                             }}
                           >
                             仍不理解
@@ -1441,18 +1412,12 @@ function App() {
                     ) : (
                       !isRunning && (
                         <p className="empty-message">
-                          {current.error ||
-                            "本任务没有完成内容。可以查看下方保留的运行记录。"}
+                          {current.error || "讲解未完成，请查看任务记录。"}
                         </p>
                       )
                     )}
                     <details className="review-details">
-                      <summary>试读、核对与版本记录</summary>
-                      <p className="hint">
-                        {current.input.mode === "example"
-                          ? "本次未执行模型协作。"
-                          : "模拟反馈不替代真实新手或老师。"}
-                      </p>
+                      <summary>讲解检查</summary>
                       {current.novice && (
                         <>
                           <h4>模拟新手试读</h4>
@@ -1482,22 +1447,18 @@ function App() {
                               {i.resolved ? "已解决" : "待核验"}）
                             </p>
                           ))}
-                          {current.review.limitations.map((l, i) => (
-                            <p className="hint" key={i}>
-                              {l}
-                            </p>
-                          ))}
                         </>
                       )}
-                      <p className="hint">
-                        {current.model} · 来源 {current.sourceVersion}
-                      </p>
                       <details>
-                        <summary>模块版本与运行事件</summary>
+                        <summary>技术记录</summary>
                         <pre>
                           {JSON.stringify(
                             {
                               skills: current.skillVersions,
+                              model: current.model,
+                              sourceVersion: current.sourceVersion,
+                              limitations: current.review?.limitations,
+                              calls: current.calls,
                               profile: current.profileVersion,
                               events: current.events,
                               roles: current.roles.map((r) => ({
@@ -1531,7 +1492,7 @@ function App() {
                     </h3>
                     <p>
                       {module === "method"
-                        ? "方法可以独立学习，无需先读完论文。"
+                        ? "从原理、测量对象到结果含义。"
                         : module === "figure"
                           ? "认坐标、分组和图注，再比较结果与结论。"
                           : "从研究问题开始，逐步连接概念、对照与结果。"}
@@ -1585,7 +1546,7 @@ function App() {
                       aria-label="向导师提问"
                       placeholder={
                         mode === "example"
-                          ? "自由提问需要实时模式；示例不会冒充新回答。"
+                          ? "切换实时对话，向导师提问…"
                           : "把不懂的句子或步骤告诉导师…"
                       }
                       value={question}
@@ -1610,12 +1571,12 @@ function App() {
                       className="text-button"
                       onClick={() => setMode("live")}
                     >
-                      切换实时模式，提出自己的问题
+                      切换实时对话
                     </button>
                   )}
                   <p className="hint">
                     本次选择 {selectedSources.length} 条资料
-                    {image ? " · 含圈选图像" : ""} · 事实依据可点击返回左侧
+                    {image ? " · 含圈选图像" : ""}
                   </p>
                 </div>
               </section>
@@ -1630,7 +1591,6 @@ function App() {
         onChange={uploadPdf}
         hidden
       />
-      <footer>本机学习记录 · 实时推理使用云端模型 · 初版 0.1</footer>
     </div>
   );
 }
