@@ -90,3 +90,49 @@ export const cases: EvalCase[] = [
     condition: "不直接比较不同反应条件；说明其他因素",
   },
 ];
+
+// Deterministic assistant contracts run in checks/assistant.test.ts; quality of the real
+// Figure 1 report is additionally verified by scripts/assistant-check.ts.
+export const assistantCases = [
+  {
+    id: "assistant-method",
+    split: "development",
+    condition: "直接 PCR 请求选择方法与基础资料，规划为零次。",
+    checks: ["direct method route uses foundations"],
+  },
+  {
+    id: "assistant-followup",
+    split: "development",
+    condition: "继承上一单元来源和已教概念，当前解释发生变化。",
+    checks: ["follow-up inherits"],
+  },
+  {
+    id: "assistant-report",
+    split: "development",
+    condition:
+      "一个组合任务生成三页与讲稿，新手收到完整汇报，原图与来源进入 PPTX。",
+    checks: ["Figure + methods + three slides"],
+  },
+  {
+    id: "assistant-budget",
+    split: "development",
+    condition: "七次总额度、一次修订、取消与超时停止、重复消息及精确缓存失效。",
+    checks: [
+      "one planner plus one revision",
+      "budget cancellation",
+      "exact cache",
+    ],
+  },
+  {
+    id: "assistant-ambiguous",
+    split: "holdout",
+    condition: "无绑定的含糊指代提出具体问题，回答后续接原目标。",
+    checks: ["unbound pronoun"],
+  },
+  {
+    id: "assistant-transfer",
+    split: "holdout",
+    condition: "切换来源版本或论文后隔离旧证据与学习上下文。",
+    checks: ["paper change clears"],
+  },
+] as const;

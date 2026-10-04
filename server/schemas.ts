@@ -75,9 +75,63 @@ export const inputSchema = z.object({
   sourceIds: citations,
   taughtConcepts: z.array(z.string().max(150)).max(20),
   previous: unitSchema.optional(),
+  conversationId: z
+    .string()
+    .regex(/^[a-zA-Z0-9_-]{1,100}$/)
+    .optional(),
+  clientMessageId: z
+    .string()
+    .regex(/^[a-zA-Z0-9_-]{1,100}$/)
+    .optional(),
   visibleImage: z
     .string()
     .regex(/^data:image\/(png|jpeg);base64,/)
     .max(3_000_000)
     .optional(),
+});
+const recordId = z.string().regex(/^[a-zA-Z0-9_-]{1,100}$/);
+export const conversationSchema = z.object({
+  paperId: recordId.nullable().optional(),
+  goal: z.string().max(2000).optional(),
+  profileId: z.enum(["beginner", "methods", "reasoning"]).optional(),
+});
+export const messageSchema = z.object({
+  clientMessageId: recordId,
+  question: z.string().trim().min(1).max(2000),
+  mode: z.enum(["example", "live"]).default("live"),
+  paperId: recordId.nullable().optional(),
+  module: z.enum(["paper", "method", "figure", "ppt"]).optional(),
+  sourceIds: citations.optional(),
+  profileId: z.enum(["beginner", "methods", "reasoning"]).optional(),
+  visibleImage: inputSchema.shape.visibleImage,
+  exportRunId: recordId.optional(),
+});
+export const planSchema = z.object({
+  goal: z.string().min(1).max(2000),
+  modules: z.array(z.enum(["paper", "method", "figure", "ppt"])).max(4),
+  sourceIds: citations,
+  slideCount: z.number().int().min(1).max(16).nullable(),
+  groups: z
+    .array(
+      z.object({
+        id: recordId,
+        actions: z
+          .array(
+            z.enum([
+              "paper.read",
+              "method.explain",
+              "figure.explain",
+              "ppt.compose",
+              "ppt.export",
+              "material.request",
+            ]),
+          )
+          .min(1)
+          .max(6),
+        dependsOn: z.array(recordId).max(1),
+      }),
+    )
+    .max(1),
+  clarification: z.string().min(1).max(500).nullable(),
+  estimatedCalls: z.number().int().min(0).max(7),
 });

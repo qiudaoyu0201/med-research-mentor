@@ -16,11 +16,13 @@ export const routes: Record<Module, string[]> = {
   ],
 };
 export async function loadSkills(
-  module: Module,
+  module: Module | Module[],
   override?: { id: string; text: string; version: string },
 ) {
   const ids = [
-    ...routes[module],
+    ...new Set(
+      (Array.isArray(module) ? module : [module]).flatMap((m) => routes[m]),
+    ),
     "medical-novice-simulator",
     "medical-grounding-check",
   ];
@@ -50,6 +52,20 @@ export async function loadSkills(
       ["shared", digest(shared)],
       ...modules.map((m) => [m.id, `${m.version}:${digest(m.text)}`]),
     ]),
+  };
+}
+export async function assistantRules() {
+  const text = await readFile(
+    "skills/medical-research-assistant/SKILL.md",
+    "utf8",
+  );
+  const manifest = JSON.parse(
+    await readFile("skills/medical-research-assistant/manifest.json", "utf8"),
+  );
+  return {
+    text,
+    version:
+      manifest.version + ":" + createHash("sha256").update(text).digest("hex"),
   };
 }
 export async function allSkills() {

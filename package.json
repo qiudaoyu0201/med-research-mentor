@@ -13,6 +13,7 @@
     "test": "tsx --test checks/*.test.ts",
     "check": "npm run build && npm test",
     "model:check": "tsx scripts/model-check.ts",
+    "assistant:check": "tsx scripts/assistant-check.ts",
     "eval": "tsx scripts/replay.ts",
     "test:browser": "tsx checks/browser.ts",
     "format": "prettier --write app server shared scripts checks evals examples vite.config.ts tsconfig.json package.json"

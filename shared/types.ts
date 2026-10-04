@@ -90,6 +90,13 @@ export interface TaskInput {
   taughtConcepts: string[];
   previous?: LearningUnit;
   visibleImage?: string;
+  modules?: Module[];
+  slideCount?: number;
+  contextSummary?: string;
+  openQuestions?: { id: string; question: string; sourceIds: string[] }[];
+  conversationId?: string;
+  turnId?: string;
+  groupId?: string;
 }
 export type RunStatus =
   | "queued"
@@ -104,6 +111,7 @@ export type RunStatus =
   | "cancelled"
   | "interrupted";
 export interface RoleRecord {
+  attemptId?: string;
   role: string;
   inputKeys: string[];
   input: unknown;
@@ -129,5 +137,119 @@ export interface TaskRun {
   deck?: DeckOutline;
   novice?: NoviceFeedback;
   review?: ReviewResult;
+  error?: string;
+  budget?: BudgetState;
+  cacheHit?: string;
+}
+
+export interface TokenUsage {
+  input: number | null;
+  output: number | null;
+  cachedInput: number | null;
+  total: number | null;
+}
+export interface Attempt {
+  id: string;
+  turnId: string;
+  groupId: string | null;
+  role: string;
+  model: string;
+  sourceHash: string;
+  modelSettings?: { effort: string; imageMode: string; transport: string };
+  imageCount?: number;
+  skillHash: string;
+  startedAt: string;
+  durationMs: number;
+  status: "reserved" | "succeeded" | "failed" | "cancelled" | "unknown";
+  inputChars: number;
+  outputChars: number;
+  usage?: unknown;
+  tokens: TokenUsage;
+  rawOutput?: string;
+  error?: string;
+}
+export interface BudgetState {
+  limit: number;
+  groupLimit: number;
+  deadline: string;
+  attempts: Attempt[];
+  revisions: string[];
+  billingMode: "chatgpt";
+  amount: null;
+}
+export type AssistantAction =
+  | "paper.read"
+  | "method.explain"
+  | "figure.explain"
+  | "ppt.compose"
+  | "ppt.export"
+  | "material.request";
+export interface AssistantPlan {
+  goal: string;
+  modules: Module[];
+  sourceIds: string[];
+  slideCount: number | null;
+  groups: { id: string; actions: AssistantAction[]; dependsOn: string[] }[];
+  clarification: string | null;
+  estimatedCalls: number;
+}
+export interface AssistantMessage {
+  clientMessageId: string;
+  question: string;
+  mode: Mode;
+  paperId?: string | null;
+  module?: Module;
+  sourceIds?: string[];
+  profileId?: string;
+  visibleImage?: string;
+  exportRunId?: string;
+}
+export interface ConversationState {
+  id: string;
+  version: number;
+  paperId: string | null;
+  sourceVersion: string | null;
+  goal: string;
+  profileId: string;
+  taughtConcepts: { name: string; unitId: string }[];
+  userProgress: { unitId: string; state: string }[];
+  openQuestions: { id: string; question: string; sourceIds: string[] }[];
+  taskGroups: { id: string; status: string; dependsOn: string[] }[];
+  artifacts: { id: string; kind: string; sourceHash: string }[];
+  recentTurnIds: string[];
+  summaries: { turnId: string; text: string }[];
+  lastRunId?: string;
+  pending?: {
+    questionId?: string;
+    question: string;
+    sourceIds: string[];
+    module?: Module;
+  };
+}
+export interface AssistantReply {
+  content: LearningUnit | null;
+  artifacts: { id: string; kind: string; url: string }[];
+  pendingQuestions: { id: string; question: string; sourceIds: string[] }[];
+  nextStep: string;
+}
+export interface AssistantTurn {
+  id: string;
+  conversationId: string;
+  message: AssistantMessage;
+  status:
+    | "queued"
+    | "planning"
+    | "running"
+    | "clarification"
+    | "completed"
+    | "failed"
+    | "cancelled"
+    | "interrupted";
+  createdAt: string;
+  endedAt?: string;
+  plan?: AssistantPlan;
+  runId?: string;
+  budget: BudgetState;
+  reply?: AssistantReply;
   error?: string;
 }

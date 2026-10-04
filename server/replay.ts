@@ -1,17 +1,18 @@
 import { randomUUID, createHash } from "node:crypto";
 import { readFile } from "node:fs/promises";
-import { cases } from "../evals/cases.ts";
+import { cases, assistantCases } from "../evals/cases.ts";
 import { sample } from "../examples/bundle.ts";
-import { TaskManager } from "./orchestrator.ts";
+import { TaskManager, cacheKey } from "./orchestrator.ts";
 import type { Provider } from "./provider.ts";
 import { read, save } from "./storage.ts";
 import { routes, loadSkills } from "./skills.ts";
-import type { TaskRun } from "../shared/types.ts";
+import type { TaskInput, TaskRun } from "../shared/types.ts";
+import { evaluateRun, rubricVersion, type EvalResult } from "./evaluation.ts";
 interface Result {
   caseId: string;
   split: string;
-  baseline: { passed: boolean; findings: string[]; runId?: string };
-  candidate: { passed: boolean; findings: string[]; runId?: string };
+  baseline: EvalResult;
+  candidate: EvalResult;
 }
 export interface RevisionBatch {
   id: string;
@@ -28,6 +29,11 @@ export interface RevisionBatch {
   decision: "pending" | "keep" | "revert";
   note?: string;
   limitations: string[];
+  baselineCalls?: number;
+  candidateCalls?: number;
+  complete?: boolean;
+  caseIds?: string[];
+  deferredCaseIds?: string[];
 }
 const hash = (text: string) => createHash("sha256").update(text).digest("hex");
 export function staticCheck(text: string) {
@@ -49,11 +55,22 @@ export async function replay(
 ) {
   if (!Object.values(routes).flat().includes(input.skillId))
     throw new Error("只能比较一个教学模块");
+  if (input.caseIds?.some((id) => !cases.some((c) => c.id === id)))
+    throw new Error("回放案例不存在；主助手合同案例通过 npm test 执行。");
   const baselineText = await readFile(
     `skills/${input.skillId}/SKILL.md`,
     "utf8",
   );
   const start = Date.now();
+  const requested = cases.filter((c) =>
+    input.caseIds
+      ? input.caseIds.includes(c.id)
+      : input.mode === "fixture" || routes[c.module].includes(input.skillId),
+  );
+  if (!requested.length) throw new Error("没有可回放的案例");
+  if (input.mode === "live" && input.caseIds && requested.length > 4)
+    throw new Error("每批最多四个案例，请分批运行。");
+  const selected = input.mode === "live" ? requested.slice(0, 4) : requested;
   const batch: RevisionBatch = {
     id: randomUUID(),
     skillId: input.skillId,
@@ -65,22 +82,25 @@ export async function replay(
     createdAt: new Date().toISOString(),
     results: [],
     calls: 0,
+    baselineCalls: 0,
+    candidateCalls: 0,
     durationMs: 0,
     decision: "pending",
+    complete: false,
+    caseIds: selected.map((c) => c.id),
+    deferredCaseIds: requested.slice(selected.length).map((c) => c.id),
     limitations:
       input.mode === "fixture"
         ? [
-            "静态规则回放，无模型调用，不代表教学效果改善。",
-            "案例条件供人工检查，未传入模拟新手；局部证据包不含原图。",
+            "静态回放只检查规则完整性，零模型调用；教学内容未评价。",
+            `主助手 ${assistantCases.length} 项合同案例由 npm test 执行。`,
           ]
         : [
-            "同模型三角色反馈不构成独立教学评价。",
-            "留出案例只作评价，不拼接进角色提示或候选样例。",
+            "同模型审阅采用具体语义 rubric，保留位置与来源；不代表真实学习效果。",
+            "留出条件仅在评价侧使用，不传入教学和新手角色。",
+            "基线与候选各最多 32 次调用；候选跳过答案缓存。",
           ],
   };
-  const selected = cases.filter(
-    (c) => !input.caseIds || input.caseIds.includes(c.id),
-  );
   const snapshots = new Map(
     await Promise.all(
       [...new Set(selected.map((c) => c.module))].map(
@@ -88,6 +108,7 @@ export async function replay(
       ),
     ),
   );
+  await save("revisions", batch.id, batch);
   for (const test of selected) {
     if (signal?.aborted) {
       batch.limitations.push("用户取消，剩余案例未运行。");
@@ -102,95 +123,114 @@ export async function replay(
       });
       continue;
     }
-    const execute = async (override?: {
-      id: string;
-      text: string;
-      version: string;
-    }) => {
+    const execute = async (candidate: boolean): Promise<EvalResult> => {
       if (signal?.aborted) return { passed: false, findings: ["回放已取消"] };
-      const manager = new TaskManager(provider);
       const snapshot = structuredClone(snapshots.get(test.module)!);
-      if (override && snapshot.modules.some((m) => m.id === override.id)) {
-        const module = snapshot.modules.find((m) => m.id === override.id)!;
-        module.text = override.text;
-        module.version = override.version;
-        snapshot.versions[override.id] =
-          override.version + ":" + hash(override.text).slice(0, 12);
+      if (candidate) {
+        const module = snapshot.modules.find((m) => m.id === input.skillId);
+        if (module) {
+          module.text = input.text;
+          module.version = "candidate-" + batch.candidateHash.slice(0, 8);
+          snapshot.versions[module.id] =
+            module.version + ":" + hash(module.text).slice(0, 12);
+        }
       }
-      const run = await manager.start(
-        {
-          paperId: sample.id,
-          module: test.module,
-          mode: "live",
-          question: test.question,
-          profileId: test.profileId,
-          sourceIds: test.sourceIds,
-          taughtConcepts: [],
-        },
-        sample,
-        override,
-        snapshot,
-      );
-      const cancel = () => void manager.cancel(run.id);
-      signal?.addEventListener("abort", cancel, { once: true });
-      await new Promise<void>((resolve) => {
-        const timer = setInterval(() => {
-          if (["completed", "failed", "cancelled"].includes(run.status)) {
-            clearInterval(timer);
-            resolve();
-          }
-        }, 200);
-      });
-      signal?.removeEventListener("abort", cancel);
-      batch.calls += run.calls;
-      const findings = [
-        ...(run.error ? [run.error] : []),
-        ...(run.review?.issues
-          .filter((i) => !i.resolved)
-          .map((i) => i.suggestion) || []),
-        ...(run.novice?.breakpoints
-          .filter((b) => b.status === "open")
-          .map((b) => b.question) || []),
-      ];
-      return {
-        passed: run.status === "completed" && findings.length === 0,
-        findings,
-        runId: run.id,
+      const task: TaskInput = {
+        paperId: sample.id,
+        module: test.module,
+        mode: "live",
+        question: test.question,
+        profileId: test.profileId,
+        sourceIds: test.sourceIds,
+        taughtConcepts: [],
       };
+      const baselineKey = hash(
+        cacheKey(task, sample, snapshot.versions, provider.model) +
+          JSON.stringify({
+            rubric: test,
+            schema: rubricVersion,
+            settings: provider.settings ?? {},
+          }),
+      );
+      if (!candidate) {
+        const cacheStart = Date.now();
+        try {
+          const cached = await read<{ result: EvalResult; run: TaskRun }>(
+            "replay-baselines",
+            baselineKey,
+          );
+          if (
+            ["completed", "failed"].includes(cached.run.status) &&
+            !cached.result.findings.some((f) => /未完成|保存失败|取消/.test(f))
+          )
+            return {
+              ...cached.result,
+              reused: true,
+              cacheReadMs: Date.now() - cacheStart,
+            };
+        } catch (error: any) {
+          if (error.code !== "ENOENT") throw error;
+        }
+      }
+      const used = candidate ? batch.candidateCalls! : batch.baselineCalls!;
+      if (used + 7 > 32)
+        return {
+          passed: false,
+          findings: ["本批剩余额度不足以覆盖当前案例，待评估。"],
+        };
+      const manager = new TaskManager(provider);
+      const combined = signal ?? new AbortController().signal;
+      const run = await manager.start(task, sample, undefined, snapshot, {
+        signal: combined,
+      });
+      await manager.wait(run.id);
+      const result = await evaluateRun(
+        test,
+        run,
+        sample.sources.filter((s) => test.sourceIds.includes(s.id)),
+        provider,
+        combined,
+      );
+      const attempts = run.budget?.attempts.length ?? run.calls;
+      if (candidate) batch.candidateCalls! += attempts;
+      else batch.baselineCalls! += attempts;
+      batch.calls = batch.baselineCalls! + batch.candidateCalls!;
+      result.generationCalls = attempts;
+      result.durationMs = run.budget!.attempts.reduce(
+        (n, a) => n + a.durationMs,
+        0,
+      );
+      result.reused = false;
+      if (
+        !candidate &&
+        run.status === "completed" &&
+        result.rubric &&
+        !combined.aborted
+      )
+        await save("replay-baselines", baselineKey, { result, run });
+      return result;
     };
     batch.results.push({
       caseId: test.id,
       split: test.split,
-      baseline: await execute(),
-      candidate: await execute({
-        id: input.skillId,
-        text: input.text,
-        version: "candidate-" + batch.candidateHash.slice(0, 8),
-      }),
+      baseline: await execute(false),
+      candidate: await execute(true),
     });
     await save("revisions", batch.id, batch);
   }
-  if (input.mode === "live") {
-    for (const result of batch.results) {
-      if (result.baseline.runId && result.candidate.runId) {
-        const baseline = await read<TaskRun>("runs", result.baseline.runId),
-          candidate = await read<TaskRun>("runs", result.candidate.runId);
-        if (
-          Object.keys(baseline.skillVersions).some(
-            (id) =>
-              id !== input.skillId &&
-              baseline.skillVersions[id] !== candidate.skillVersions[id],
-          )
-        ) {
-          result.candidate.passed = false;
-          result.candidate.findings.push(
-            "其他模块版本变化，比较无效，须固定版本回放。",
-          );
-        }
-      }
-    }
-  }
   batch.durationMs = Date.now() - start;
+  batch.complete =
+    !signal?.aborted &&
+    batch.results.length === selected.length &&
+    batch.results.every(
+      (r) =>
+        input.mode === "fixture" ||
+        (!!r.candidate.runId &&
+          !!r.baseline.runId &&
+          ![r.baseline, r.candidate].some((v) =>
+            v.findings.some((f) => /待评估|未完成/.test(f)),
+          )),
+    );
   await save("revisions", batch.id, batch);
   return batch;
 }
@@ -202,11 +242,13 @@ export async function decideRevision(
   if (batch.decision !== "pending") throw new Error("此比较已记录决定");
   if (input.decision === "keep") {
     if (
-      batch.results.some((r) => r.baseline.passed && !r.candidate.passed) ||
+      batch.mode !== "live" ||
+      !batch.complete ||
+      !batch.results.length ||
+      batch.results.some((r) => !r.candidate.passed) ||
       !staticCheck(batch.candidateText).passed
     )
-      throw new Error("候选存在退步或来源规则缺失，不能保留");
-    // Keep an explicit local candidate; publication to project skills requires a reviewed Git change.
+      throw new Error("候选存在退步、未完成内容评价或来源规则缺失，不能保留");
     await save("skill-candidates", batch.skillId, {
       id: batch.skillId,
       text: batch.candidateText,

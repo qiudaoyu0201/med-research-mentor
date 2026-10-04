@@ -6,6 +6,7 @@ import { EventEmitter } from "node:events";
 import { z } from "zod";
 export interface Provider {
   model: string;
+  settings?: { effort: string; imageMode: string; transport: string };
   generate<T>(
     instructions: string,
     input: unknown,
@@ -13,6 +14,16 @@ export interface Provider {
     signal: AbortSignal,
     image?: string,
   ): Promise<{ output: T; usage?: unknown }>;
+}
+export class ProviderFailure extends Error {
+  constructor(
+    message: string,
+    public kind: "format" | "transport",
+    public rawOutput?: string,
+    public usage?: unknown,
+  ) {
+    super(message);
+  }
 }
 export class CodexClient {
   private proc: ChildProcessWithoutNullStreams;
@@ -127,6 +138,11 @@ export class CodexClient {
 }
 export class CodexProvider implements Provider {
   model = "gpt-6.1-sol";
+  settings = {
+    effort: "low",
+    imageMode: "original-page",
+    transport: "codex-app-server",
+  };
   async inspect() {
     const client = new CodexClient();
     try {
@@ -159,7 +175,6 @@ export class CodexProvider implements Provider {
     const client = new CodexClient();
     let threadId: string | undefined, turnId: string | undefined;
     const cwd = resolve("data/model-workspace");
-    await mkdir(cwd, { recursive: true });
     const abort = () => {
       if (threadId && turnId)
         void client
@@ -169,6 +184,8 @@ export class CodexProvider implements Provider {
     };
     signal.addEventListener("abort", abort, { once: true });
     try {
+      await mkdir(cwd, { recursive: true });
+      signal.throwIfAborted();
       await client.init();
       signal.throwIfAborted();
       const account = await client.rpc("account/read", { refreshToken: false });
@@ -177,6 +194,7 @@ export class CodexProvider implements Provider {
           "实时模式需要 ChatGPT 登录；不会使用 API Key 或静默切换付费接口。",
         );
       }
+      signal.throwIfAborted();
       const started = await client.rpc("thread/start", {
         model: this.model,
         modelProvider: "openai",
@@ -206,25 +224,33 @@ export class CodexProvider implements Provider {
       return await new Promise((resolveResult, reject) => {
         let text = "",
           usage: unknown;
+        let settled = false;
         const timer = setTimeout(
           () => finish(new Error("本次生成超过 180 秒；已停止，未自动重发。")),
           180_000,
         );
         const finish = (error?: Error) => {
+          if (settled) return;
+          settled = true;
           clearTimeout(timer);
           client.events.off("message", onMessage);
           client.events.off("closed", onClosed);
           signal.removeEventListener("abort", onAbort);
           if (error) {
             client.close();
-            reject(error);
+            reject(
+              new ProviderFailure(error.message, "transport", text, usage),
+            );
           } else {
             try {
               resolveResult({ output: schema.parse(JSON.parse(text)), usage });
             } catch {
               reject(
-                new Error(
+                new ProviderFailure(
                   "模型输出未通过结构检查；本次停止，不自动重复收费请求。",
+                  "format",
+                  text,
+                  usage,
                 ),
               );
             }

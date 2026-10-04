@@ -11,9 +11,13 @@ import type {
 } from "../shared/types.ts";
 import { profiles, exampleUnits, defaultDeck } from "../examples/bundle.ts";
 import { teachingSchema, noviceSchema, reviewSchema } from "./schemas.ts";
-import { loadSkills } from "./skills.ts";
+import { loadSkills, assistantRules } from "./skills.ts";
+import { z } from "zod";
 import type { Provider } from "./provider.ts";
 import { save } from "./storage.ts";
+import { BudgetLedger } from "./budget.ts";
+import { materialPacket, digest } from "./materials.ts";
+import type { ResultCache } from "./cache.ts";
 
 export function visibleInput(
   input: TaskInput,
@@ -21,6 +25,7 @@ export function visibleInput(
   profile: (typeof profiles)[number],
   sources: Source[],
   oldFeedback?: NoviceFeedback,
+  deck?: DeckOutline | null,
 ) {
   return {
     profile,
@@ -34,6 +39,7 @@ export function visibleInput(
         caption: s.caption || (s.page ? "未提供独立图注" : s.text),
       })),
     taughtConcepts: input.taughtConcepts,
+    ...(deck ? { presentation: deck } : {}),
     ...(oldFeedback ? { previousBreakpoints: oldFeedback.breakpoints } : {}),
   };
 }
@@ -72,7 +78,18 @@ export function cacheKey(
   return createHash("sha256")
     .update(
       JSON.stringify({
-        input,
+        input: {
+          ...input,
+          question: input.question.trim().replace(/\s+/g, " "),
+          conversationId: undefined,
+          turnId: undefined,
+          groupId: undefined,
+        },
+        schemaVersion: digest(
+          [teachingSchema, noviceSchema, reviewSchema].map((schema) =>
+            z.toJSONSchema(schema),
+          ),
+        ),
         paperVersion: paper.version,
         sources: paper.sources,
         versions,
@@ -113,6 +130,16 @@ export class TaskManager {
   private controllers = new Map<string, AbortController>();
   active: string | undefined;
   starting = false;
+  private completions = new Map<string, Promise<void>>();
+  private resultKeys = new Map<string, string>();
+  async publishCache(id: string, cache: ResultCache) {
+    const run = this.runs.get(id),
+      key = this.resultKeys.get(id);
+    if (run && key && !run.cacheHit) await cache.put(key, run);
+  }
+  wait(id: string) {
+    return this.completions.get(id) ?? Promise.resolve();
+  }
   constructor(
     private provider: Provider,
     private persist: typeof save = save,
@@ -122,6 +149,12 @@ export class TaskManager {
     paper: PaperBundle,
     override?: { id: string; text: string; version: string },
     snapshot?: Awaited<ReturnType<typeof loadSkills>>,
+    execution?: {
+      ledger?: BudgetLedger;
+      signal?: AbortSignal;
+      id?: string;
+      cache?: ResultCache;
+    },
   ) {
     if (this.active || this.starting)
       throw new Error("已有学习任务运行中，请先取消或等待完成。");
@@ -129,8 +162,12 @@ export class TaskManager {
     try {
       if (input.mode === "example" && input.paperId !== "xu-2018")
         throw new Error("上传论文需要实时模式，示例不会替代新论文的回答。");
-      const profile = profiles.find((p) => p.id === input.profileId)!;
-      const skills = snapshot || (await loadSkills(input.module, override));
+      const profile = profiles.find((p) => p.id === input.profileId);
+      if (!profile) throw new Error("新手画像不存在");
+      const skills =
+        snapshot || (await loadSkills(input.modules ?? input.module, override));
+      if (input.sourceIds.some((id) => !paper.sources.some((s) => s.id === id)))
+        throw new Error("所选来源不存在");
       const selected = paper.sources.filter((s) =>
         input.sourceIds.includes(s.id),
       );
@@ -142,8 +179,9 @@ export class TaskManager {
       };
       if (sources.length === 0)
         throw new Error("请先选择本任务的原文或基础资料。");
+      if (input.mode === "live") materialPacket(sources);
       const run: TaskRun = {
-        id: randomUUID(),
+        id: execution?.id ?? randomUUID(),
         input,
         status: "queued",
         createdAt: new Date().toISOString(),
@@ -157,6 +195,37 @@ export class TaskManager {
         roles: [],
       };
       const controller = new AbortController();
+      const signal = execution?.signal
+        ? AbortSignal.any([controller.signal, execution.signal])
+        : controller.signal;
+      const ledger =
+        execution?.ledger ??
+        new BudgetLedger(run.input.turnId ?? run.id, () =>
+          this.persist("runs", run.id, run),
+        );
+      run.budget = ledger.state;
+      const resultKey = cacheKey(
+        input,
+        { ...paper, sources: selected },
+        {
+          ...skills.versions,
+          ...(execution?.cache
+            ? { assistant: (await assistantRules()).version }
+            : {}),
+          providerSettings: digest(this.provider.settings ?? {}),
+        },
+        this.provider.model,
+      );
+      if (input.mode === "live" && execution?.cache) {
+        const cached = await execution.cache.get(resultKey);
+        if (cached) {
+          run.cacheHit = cached.id;
+          run.result = structuredClone(cached.result);
+          run.deck = structuredClone(cached.deck);
+          run.novice = structuredClone(cached.novice);
+          run.review = structuredClone(cached.review);
+        }
+      }
       this.runs.set(run.id, run);
       this.controllers.set(run.id, controller);
       this.active = run.id;
@@ -168,9 +237,17 @@ export class TaskManager {
         this.active = undefined;
         throw error;
       }
-      void this.execute(run, paper, sources, skills, controller.signal).catch(
-        () => {},
+      this.resultKeys.set(run.id, resultKey);
+      const completion = this.execute(
+        run,
+        paper,
+        sources,
+        skills,
+        signal,
+        ledger,
       );
+      this.completions.set(run.id, completion);
+      void completion.catch(() => {});
       return run;
     } finally {
       this.starting = false;
@@ -194,6 +271,7 @@ export class TaskManager {
     sources: Source[],
     skills: Awaited<ReturnType<typeof loadSkills>>,
     signal: AbortSignal,
+    ledger: BudgetLedger,
   ) {
     const set = async (status: TaskRun["status"]) => {
       signal.throwIfAborted();
@@ -208,34 +286,49 @@ export class TaskManager {
       schema: import("zod").z.ZodType<T>,
     ): Promise<T> => {
       signal.throwIfAborted();
-      if (run.calls >= 6) throw new Error("已达到六次生成上限。");
-      run.calls++;
       const record = {
         role,
         inputKeys: Object.keys(input as object),
         input,
         durationMs: 0,
       } as TaskRun["roles"][number];
-      run.roles.push(record);
-      await this.persist("runs", run.id, run);
       const started = Date.now();
-      const result = await this.provider.generate(
-        instructions,
-        input,
-        schema,
-        signal,
-        run.input.visibleImage,
-      );
-      signal.throwIfAborted();
-      record.durationMs = Date.now() - started;
-      record.output = result.output;
-      record.usage = result.usage;
-      await this.persist("runs", run.id, run);
-      return result.output;
+      try {
+        const result = await ledger.call(
+          this.provider,
+          role,
+          instructions,
+          input,
+          schema,
+          signal,
+          {
+            groupId: run.input.groupId ?? run.id,
+            image: run.input.visibleImage,
+            sourceHash: digest({ sources, image: run.input.visibleImage }),
+            skillHash: digest(skills.versions),
+            onReserved: async (attempt) => {
+              record.attemptId = attempt.id;
+              run.calls++;
+              run.roles.push(record);
+              await this.persist("runs", run.id, run);
+            },
+          },
+        );
+        signal.throwIfAborted();
+        record.output = result.output;
+        record.usage = result.usage;
+        return result.output;
+      } finally {
+        record.durationMs = Date.now() - started;
+        await this.persist("runs", run.id, run);
+      }
     };
     try {
       const profile = profiles.find((p) => p.id === run.input.profileId)!;
-      if (run.input.mode === "example") {
+      if (run.cacheHit) {
+        validateCitations(run.result!, run.review!, sources, run.deck);
+        await set("completed");
+      } else if (run.input.mode === "example") {
         // Fixed, verified content has no fabricated role execution or progress.
         const key =
           run.input.module === "method"
@@ -284,9 +377,13 @@ export class TaskManager {
           sourceScope: sources.every((s) => s.kind === "foundation")
             ? "独立基础课程；未提供论文材料，不把通用方法写成本文具体做法。"
             : paper.scope,
-          sources,
+          sources: materialPacket(sources),
           taughtConcepts: run.input.taughtConcepts,
           previous: run.input.previous || null,
+          modules: run.input.modules ?? [run.input.module],
+          slideCount: run.input.slideCount ?? null,
+          contextSummary: run.input.contextSummary ?? "",
+          openQuestions: run.input.openQuestions ?? [],
         };
         await set("teaching");
         let generated = await call("teaching", teaching, task, teachingSchema);
@@ -295,14 +392,26 @@ export class TaskManager {
         let feedback = await call(
           "novice",
           novice,
-          visibleInput(run.input, generated.unit, profile, sources),
+          visibleInput(
+            run.input,
+            generated.unit,
+            profile,
+            sources,
+            undefined,
+            generated.deck,
+          ),
           noviceSchema,
         );
         await set("checking");
         let review = await call(
           "grounding",
           checking,
-          { sources, draft: generated.unit, deck: generated.deck, feedback },
+          {
+            sources: materialPacket(sources),
+            draft: generated.unit,
+            deck: generated.deck,
+            feedback,
+          },
           reviewSchema,
         );
         validateCitations(
@@ -312,6 +421,7 @@ export class TaskManager {
           generated.deck || undefined,
         );
         if (needsRevision(review, feedback)) {
+          await ledger.revise(run.input.groupId ?? run.id);
           await set("revising");
           generated = await call(
             "revision",
@@ -330,14 +440,27 @@ export class TaskManager {
           feedback = await call(
             "novice-reread",
             novice,
-            visibleInput(run.input, generated.unit, profile, sources, feedback),
+            visibleInput(
+              run.input,
+              generated.unit,
+              profile,
+              sources,
+              feedback,
+              generated.deck,
+            ),
             noviceSchema,
           );
           await set("rechecking");
           review = await call(
             "grounding-final",
             checking,
-            { sources, draft: generated.unit, deck: generated.deck, feedback },
+            {
+              sources: materialPacket(sources),
+              draft: generated.unit,
+              deck: generated.deck,
+              feedback,
+              previousIssues: review.issues,
+            },
             reviewSchema,
           );
         }
@@ -349,6 +472,24 @@ export class TaskManager {
         );
         run.novice = feedback;
         run.review = review;
+        if ((run.input.modules ?? [run.input.module]).includes("ppt")) {
+          if (!generated.deck) throw new Error("汇报任务未返回页面与讲稿。");
+          if (
+            run.input.slideCount &&
+            generated.deck.slides.length !== run.input.slideCount
+          )
+            throw new Error("汇报页数与用户要求不符。");
+          if (
+            (run.input.modules ?? []).includes("figure") &&
+            !generated.deck.slides.some(
+              (s) =>
+                s.imageSource &&
+                sources.some((x) => x.id === s.imageSource && x.figure) &&
+                run.input.visibleImage,
+            )
+          )
+            throw new Error("读图汇报缺少已提供的原图来源。");
+        }
         // If a blocking issue cannot be mapped to a section, withhold the whole draft.
         if (
           review.issues.some(

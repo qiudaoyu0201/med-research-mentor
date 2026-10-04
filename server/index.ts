@@ -8,7 +8,12 @@ import { z } from "zod";
 import { sample, profiles, defaultDeck } from "../examples/bundle.ts";
 import type { PaperBundle, TaskRun } from "../shared/types.ts";
 import { root, save, read, list, remove, safeId } from "./storage.ts";
-import { inputSchema, deckSchema } from "./schemas.ts";
+import {
+  inputSchema,
+  deckSchema,
+  conversationSchema,
+  messageSchema,
+} from "./schemas.ts";
 import { CodexProvider } from "./provider.ts";
 import { TaskManager } from "./orchestrator.ts";
 import { parsePdf } from "./pdf.ts";
@@ -16,6 +21,9 @@ import { localSample, samplePdf } from "./sample.ts";
 import { exportDeck, exportNotes } from "./export.ts";
 import { allSkills } from "./skills.ts";
 import { replay, decideRevision } from "./replay.ts";
+import { AssistantService } from "./assistant.ts";
+import { ConversationStore } from "./conversation.ts";
+import { ResultCache } from "./cache.ts";
 
 const app = express(),
   port = Number(process.env.PORT || 4317),
@@ -30,6 +38,8 @@ for (const run of await list<TaskRun>("runs")) {
   ) {
     run.status = "interrupted";
     run.error = "后台重启中断了任务，未自动重发。";
+    for (const attempt of run.budget?.attempts ?? [])
+      if (attempt.status === "reserved") attempt.status = "unknown";
     await save("runs", run.id, run);
   }
   manager.runs.set(run.id, run);
@@ -63,6 +73,64 @@ const paperById = async (id: string) =>
   id === sample.id
     ? structuredClone(loadedSample)
     : read<PaperBundle>("papers", id);
+const assistant = new AssistantService(
+  provider,
+  manager,
+  new ConversationStore(),
+  paperById,
+  save,
+  new ResultCache(),
+);
+await assistant.restore();
+app.post("/api/conversations", async (req, res) => {
+  const input = conversationSchema.parse(req.body);
+  if (input.paperId) await paperById(input.paperId);
+  res.status(201).json(await assistant.conversations.create(input));
+});
+app.get("/api/conversations/:id", (req, res) => {
+  res.json(assistant.conversations.get(req.params.id));
+});
+app.put("/api/conversations/:id/progress", async (req, res) => {
+  if (assistant.busy) throw new Error("请等待当前请求保存完成后记录反馈。");
+  const body = z
+    .object({
+      version: z.number().int().min(0),
+      unitId: z.string(),
+      state: z.enum(["read", "confused", "understood"]),
+    })
+    .parse(req.body);
+  const state = assistant.conversations.get(req.params.id);
+  const run = manager.runs.get(body.unitId);
+  if (
+    !run ||
+    run.input.conversationId !== state.id ||
+    run.status !== "completed"
+  )
+    throw new Error("学习单元未在本会话交付。");
+  state.userProgress = [
+    ...state.userProgress.filter((p) => p.unitId !== body.unitId),
+    { unitId: body.unitId, state: body.state },
+  ];
+  res.json(await assistant.conversations.put(state, body.version));
+});
+app.post("/api/conversations/:id/messages", async (req, res) => {
+  if (replayController) throw new Error("开发回放运行中，请先取消或等待。");
+  res
+    .status(202)
+    .json(await assistant.submit(req.params.id, messageSchema.parse(req.body)));
+});
+app.get("/api/turns/:id", (req, res) => {
+  const turn = assistant.turns.get(req.params.id);
+  if (!turn) return res.status(404).json({ error: "轮次不存在" });
+  res.json({
+    ...turn,
+    run: turn.runId ? manager.runs.get(turn.runId) : undefined,
+  });
+});
+app.post("/api/turns/:id/cancel", async (req, res) => {
+  await assistant.cancel(req.params.id);
+  res.json({ ok: true });
+});
 app.get("/api/bootstrap", async (_req, res) =>
   res.json({
     sample: loadedSample,
@@ -181,6 +249,7 @@ app.post("/api/papers/:id/figure", async (req, res) => {
     figure: "用户圈选",
     locator: `PDF 第 ${body.page} 页，用户圈选区域及补充图注`,
     text: body.caption,
+    caption: body.caption,
     image: body.image,
     verified: false,
   });
@@ -200,13 +269,7 @@ app.post("/api/tasks", async (req, res) => {
     )
   )
     throw new Error("所选来源不存在");
-  const sources = [
-    ...paper.sources,
-    ...(paper.id !== sample.id
-      ? sample.sources.filter((s) => s.kind === "foundation")
-      : []),
-  ];
-  res.status(201).json(await manager.start(input, { ...paper, sources }));
+  res.status(201).json(await assistant.legacy(input));
 });
 app.get("/api/tasks/:id", (req, res) => {
   const run = manager.runs.get(req.params.id);
@@ -214,7 +277,9 @@ app.get("/api/tasks/:id", (req, res) => {
   res.json(run);
 });
 app.post("/api/tasks/:id/cancel", async (req, res) => {
-  await manager.cancel(req.params.id);
+  const turnId = manager.runs.get(req.params.id)?.input.turnId;
+  if (turnId) await assistant.cancel(turnId);
+  else await manager.cancel(req.params.id);
   res.json({ ok: true });
 });
 app.delete("/api/tasks/:id", async (req, res) => {
@@ -250,6 +315,14 @@ app.put("/api/session", async (req, res) => {
     })
     .parse(req.body);
   await save("sessions", "current", body);
+  if (!assistant.busy && assistant.conversations.states.has("legacy-current")) {
+    const conversation = assistant.conversations.get("legacy-current");
+    conversation.userProgress = body.progress.filter(
+      (p) =>
+        manager.runs.get(p.unitId)?.input.conversationId === conversation.id,
+    );
+    await assistant.conversations.put(conversation, conversation.version);
+  }
   res.json({ ok: true });
 });
 app.get("/api/session", async (_req, res) => {
@@ -310,9 +383,10 @@ app.post("/api/replays", async (req, res) => {
       skillId: z.string(),
       text: z.string().min(20).max(20_000),
       mode: z.enum(["fixture", "live"]),
+      caseIds: z.array(z.string()).max(4).optional(),
     })
     .parse(req.body);
-  if (manager.active || manager.starting || replayController)
+  if (assistant.busy || manager.active || manager.starting || replayController)
     throw new Error("请等待当前任务完成");
   replayController = new AbortController();
   try {
@@ -366,6 +440,7 @@ const server = app.listen(port, "127.0.0.1", () =>
 );
 async function shutdown() {
   replayController?.abort();
+  if (assistant.active) await assistant.cancel(assistant.active);
   if (manager.active) await manager.cancel(manager.active);
   server.close();
   process.exit(0);
