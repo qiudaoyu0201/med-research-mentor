@@ -48,6 +48,10 @@ export async function localSample() {
       source.caption = match
         ? source.text.slice(match.index).split("N AT u RE")[0].trim()
         : "图注未可靠提取，请在阅读器核对原页。";
+      if (match) source.text = source.caption;
+      source.section = "figure";
+    } else {
+      source.section = "overview";
     }
     source.locator = `正文 PDF 第 ${page} 页；自动提取，未逐段校对`;
     source.verified = false;
@@ -55,7 +59,7 @@ export async function localSample() {
   result.sources.push(...parsed.sources);
   const evidence = figureOneEvidence(parsed.sources);
   result.sources.push(...evidence);
-  result.version += "-fig1-v1-" + digest(evidence).slice(0, 12);
+  result.version += "-fig1-v2-" + digest(evidence).slice(0, 12);
   // 原始整页保留图件与图注；用户仍可在阅读器圈选单个面板。
   const task = getDocument({
     data: new Uint8Array(bytes),
@@ -97,7 +101,7 @@ export async function localSample() {
     "material-snapshots",
     "xu-fig1-" + digest({ version: result.version, evidence }).slice(0, 16),
     {
-      parserVersion: "figure1-excerpts-v1",
+      parserVersion: "figure1-excerpts-v2",
       sourceVersion: result.version,
       sources: [result.sources.find((s) => s.id === "xu-fig1"), ...evidence],
     },

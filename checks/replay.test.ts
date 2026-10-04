@@ -5,7 +5,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { spawnSync } from "node:child_process";
 import { cases, assistantCases } from "../evals/cases.ts";
-import { evaluateRun } from "../server/evaluation.ts";
+import { evaluateRun, generationAttempts } from "../server/evaluation.ts";
 import { TaskManager } from "../server/orchestrator.ts";
 import { sample } from "../examples/bundle.ts";
 import type { Provider } from "../server/provider.ts";
@@ -78,7 +78,9 @@ test("rubric evaluates meaning; keyword presence alone cannot pass", async () =>
   assert.ok(result.screening?.every((s) => s.present));
   assert.equal(result.passed, false);
   assert.match(result.findings.join(" "), /语义条件/);
-  assert.equal(run.budget?.attempts.length, 4);
+  assert.equal(generationAttempts(run).length, 4);
+  assert.equal(run.budget?.attempts.length, 3);
+  assert.equal(run.evaluationBudget?.attempts.length, 1);
 });
 test("live replay counts evaluator calls, reuses precise baseline, and rejects unreviewed candidates", async () => {
   const dir = await mkdtemp(join(tmpdir(), "tutor-replay-"));

@@ -15,7 +15,11 @@ import {
   messageSchema,
 } from "./schemas.ts";
 import { CodexProvider } from "./provider.ts";
-import { TaskManager } from "./orchestrator.ts";
+import {
+  TaskManager,
+  materialSources,
+  validateRunSurface,
+} from "./orchestrator.ts";
 import { parsePdf } from "./pdf.ts";
 import { localSample, samplePdf } from "./sample.ts";
 import { exportDeck, exportNotes } from "./export.ts";
@@ -24,13 +28,15 @@ import { replay, decideRevision } from "./replay.ts";
 import { AssistantService } from "./assistant.ts";
 import { ConversationStore } from "./conversation.ts";
 import { ResultCache } from "./cache.ts";
+import { foundationCatalog, withFoundationSources } from "./foundations.ts";
+import { registerFigureEvidence } from "./paper-assets.ts";
 
 const app = express(),
   port = Number(process.env.PORT || 4317),
   provider = new CodexProvider(),
   manager = new TaskManager(provider);
 let replayController: AbortController | undefined;
-const loadedSample = await localSample();
+const loadedSample = withFoundationSources(await localSample());
 await mkdir(join(root, "uploads"), { recursive: true });
 for (const run of await list<TaskRun>("runs")) {
   if (
@@ -207,6 +213,8 @@ app.post("/api/papers/:id/text", async (req, res) => {
         .min(1)
         .max(paper.pageCount || 100),
       title: z.string().max(100),
+      section: z.enum(["results", "methods", "overview"]).optional(),
+      relatedFigures: z.array(z.string().regex(/^\d+$/)).max(4).optional(),
     })
     .parse(req.body);
   const source = {
@@ -217,9 +225,36 @@ app.post("/api/papers/:id/text", async (req, res) => {
     page: body.page,
     locator: `用户补充：PDF 第 ${body.page} 页，未核对`,
     verified: false,
+    section: body.section,
+    relatedFigures: body.relatedFigures,
   };
   paper.sources.push(source);
   paper.version = `manual-${Date.now()}`;
+  await save("papers", paper.id, paper);
+  res.json(paper);
+});
+app.post("/api/papers/:id/evidence", async (req, res) => {
+  safeId(req.params.id);
+  if (req.params.id === sample.id)
+    throw new Error("示例证据只读，请在上传论文中登记。");
+  const range = z.object({
+    page: z.number().int().min(1).max(100),
+    start: z.string().min(1).max(400),
+    end: z.string().min(1).max(400),
+  });
+  const spec = z
+    .object({
+      number: z.string().regex(/^\d{1,3}$/),
+      page: z.number().int().min(1).max(100),
+      results: z.array(range).min(1).max(8),
+      methods: z.array(range).min(1).max(8),
+    })
+    .parse(req.body);
+  const paper = await registerFigureEvidence(
+    await paperById(req.params.id),
+    resolve(root, "uploads", req.params.id + ".pdf"),
+    spec,
+  );
   await save("papers", paper.id, paper);
   res.json(paper);
 });
@@ -265,7 +300,7 @@ app.post("/api/tasks", async (req, res) => {
     input.sourceIds.some(
       (id) =>
         !paper.sources.some((s) => s.id === id) &&
-        !sample.sources.some((s) => s.kind === "foundation" && s.id === id),
+        !foundationCatalog.all().some((s) => s.id === id),
     )
   )
     throw new Error("所选来源不存在");
@@ -351,16 +386,20 @@ app.post("/api/decks", async (req, res) => {
       outline: deckSchema,
     })
     .parse(req.body);
-  const paper = await paperById(body.paperId);
+  let paper = withFoundationSources(await paperById(body.paperId));
   if (body.runId) {
     const run = manager.runs.get(body.runId);
     if (
       !run ||
       run.status !== "completed" ||
       !run.deck ||
-      run.input.paperId !== paper.id
+      !run.result ||
+      run.input.paperId !== paper.id ||
+      run.sourceVersion !== paper.version
     )
       throw new Error("汇报内容尚未完成核对");
+    paper = { ...paper, sources: materialSources(run, paper) };
+    validateRunSurface(run, run.result, body.outline, paper.sources);
   } else if (paper.id !== sample.id)
     throw new Error("上传论文请先生成并核对汇报内容");
   const id = randomUUID();

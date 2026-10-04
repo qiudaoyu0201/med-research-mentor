@@ -280,7 +280,9 @@ export class CodexProvider implements Provider {
                 new Error(
                   /schema|required|additionalProperties/i.test(detail)
                     ? "模型结构约定被拒绝：" + detail.slice(0, 600)
-                    : "Codex 未完成生成；检查登录、额度或模型权限。",
+                    : detail
+                      ? "Codex 未完成生成：" + detail.slice(0, 600)
+                      : "Codex 未完成生成；检查登录、额度或模型权限。",
                 ),
               );
             } else finish();

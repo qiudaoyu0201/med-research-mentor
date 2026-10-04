@@ -1,1 +1,8 @@
-{"id":"medical-journal-club-ppt","title":"汇报大纲","version":"1.0.0","dependencies":["shared"],"origin":"project-original","referenceRecord":"docs/参考来源与复用记录.md"}
+{
+  "id": "medical-journal-club-ppt",
+  "title": "汇报大纲",
+  "version": "1.1.2",
+  "dependencies": ["shared"],
+  "origin": "project-original",
+  "referenceRecord": "docs/参考来源与复用记录.md"
+}

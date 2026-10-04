@@ -7,7 +7,12 @@ import type { Provider } from "./provider.ts";
 import { read, save } from "./storage.ts";
 import { routes, loadSkills } from "./skills.ts";
 import type { TaskInput, TaskRun } from "../shared/types.ts";
-import { evaluateRun, rubricVersion, type EvalResult } from "./evaluation.ts";
+import {
+  evaluateRun,
+  rubricVersion,
+  generationAttempts,
+  type EvalResult,
+} from "./evaluation.ts";
 interface Result {
   caseId: string;
   split: string;
@@ -191,7 +196,7 @@ export async function replay(
         provider,
         combined,
       );
-      const attempts = run.budget?.attempts.length ?? run.calls;
+      const attempts = generationAttempts(run).length;
       if (candidate) batch.candidateCalls! += attempts;
       else batch.baselineCalls! += attempts;
       batch.calls = batch.baselineCalls! + batch.candidateCalls!;

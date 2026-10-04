@@ -21,6 +21,7 @@ export class ResultCache {
       !!run.result &&
       !!run.review &&
       !run.review.issues.some((i) => !i.resolved) &&
+      !run.materialRequests?.some((r) => r.status !== "resolved") &&
       !run.novice?.breakpoints.some((b) => b.status !== "resolved")
     );
   }

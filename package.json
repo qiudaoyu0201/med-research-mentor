@@ -16,7 +16,8 @@
     "assistant:check": "tsx scripts/assistant-check.ts",
     "eval": "tsx scripts/replay.ts",
     "test:browser": "tsx checks/browser.ts",
-    "format": "prettier --write app server shared scripts checks evals examples vite.config.ts tsconfig.json package.json"
+    "format": "prettier --write app server shared scripts checks evals examples vite.config.ts tsconfig.json package.json",
+    "transfer:check": "tsx scripts/transfer-check.ts"
   },
   "dependencies": {
     "@napi-rs/canvas": "^1.0.10",

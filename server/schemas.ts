@@ -1,5 +1,7 @@
 import { z } from "zod";
+import type { Source } from "../shared/types.ts";
 const citations = z.array(z.string()).max(20);
+const selectedSources = z.array(z.string()).max(100);
 export const unitSchema = z.object({
   title: z.string().min(1).max(160),
   question: z.string().max(2000),
@@ -66,13 +68,40 @@ export const teachingSchema = z.object({
   unit: unitSchema,
   deck: deckSchema.nullable(),
 });
+export const groundingContractVersion = "grounded-output-v2";
+export function groundedTeachingSchema(sources: Source[]) {
+  const ids = z.array(z.enum(sources.map((s) => s.id))).max(20);
+  const sections = unitSchema.shape.sections.element.extend({ citations: ids });
+  const slides = slideSchema.extend({
+    citations: ids,
+    imageSource: z
+      .enum(["", ...sources.filter((s) => s.figure).map((s) => s.id)])
+      .optional()
+      .describe("仅写原图来源 ID；无图写空字符串，不能附说明。"),
+  });
+  return teachingSchema.extend({
+    unit: unitSchema.extend({ sections: z.array(sections).min(1).max(10) }),
+    deck: deckSchema
+      .extend({ slides: z.array(slides).min(1).max(16) })
+      .nullable(),
+  });
+}
+export function groundedReviewSchema(sources: Source[]) {
+  const ids = z.array(z.enum(sources.map((s) => s.id))).max(20);
+  return reviewSchema.extend({
+    issues: z
+      .array(reviewSchema.shape.issues.element.extend({ evidence: ids }))
+      .max(20),
+    checkedSources: ids,
+  });
+}
 export const inputSchema = z.object({
   paperId: z.string().min(1),
   module: z.enum(["paper", "method", "figure", "ppt"]),
   mode: z.enum(["example", "live"]),
   question: z.string().min(1).max(2000),
   profileId: z.enum(["beginner", "methods", "reasoning"]),
-  sourceIds: citations,
+  sourceIds: selectedSources,
   taughtConcepts: z.array(z.string().max(150)).max(20),
   previous: unitSchema.optional(),
   conversationId: z
@@ -101,7 +130,7 @@ export const messageSchema = z.object({
   mode: z.enum(["example", "live"]).default("live"),
   paperId: recordId.nullable().optional(),
   module: z.enum(["paper", "method", "figure", "ppt"]).optional(),
-  sourceIds: citations.optional(),
+  sourceIds: selectedSources.optional(),
   profileId: z.enum(["beginner", "methods", "reasoning"]).optional(),
   visibleImage: inputSchema.shape.visibleImage,
   exportRunId: recordId.optional(),
@@ -109,7 +138,7 @@ export const messageSchema = z.object({
 export const planSchema = z.object({
   goal: z.string().min(1).max(2000),
   modules: z.array(z.enum(["paper", "method", "figure", "ppt"])).max(4),
-  sourceIds: citations,
+  sourceIds: selectedSources,
   slideCount: z.number().int().min(1).max(16).nullable(),
   groups: z
     .array(

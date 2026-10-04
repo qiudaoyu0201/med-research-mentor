@@ -10,13 +10,21 @@ import type {
   Source,
 } from "../shared/types.ts";
 import { profiles, exampleUnits, defaultDeck } from "../examples/bundle.ts";
-import { teachingSchema, noviceSchema, reviewSchema } from "./schemas.ts";
+import {
+  teachingSchema,
+  noviceSchema,
+  reviewSchema,
+  groundedTeachingSchema,
+  groundedReviewSchema,
+  groundingContractVersion,
+} from "./schemas.ts";
 import { loadSkills, assistantRules } from "./skills.ts";
 import { z } from "zod";
 import type { Provider } from "./provider.ts";
 import { save } from "./storage.ts";
 import { BudgetLedger } from "./budget.ts";
-import { materialPacket, digest } from "./materials.ts";
+import { materialPacket, digest, selectionVersion } from "./materials.ts";
+import { foundationCatalog } from "./foundations.ts";
 import type { ResultCache } from "./cache.ts";
 
 export function visibleInput(
@@ -68,6 +76,105 @@ export function validateCitations(
     throw new Error("事实或基础知识缺少可定位的引用。");
   if (deck?.slides.some((s) => s.citations.length === 0))
     throw new Error("汇报页缺少来源。");
+  for (const section of unit.sections) {
+    if (
+      section.kind !== "interpretation" &&
+      !section.citations.some(
+        (id) => sources.find((s) => s.id === id)?.kind === section.kind,
+      )
+    )
+      throw new Error("论文事实与通用基础的引用类型不匹配。");
+  }
+  if (
+    sources.some((s) => s.kind === "paper" && s.paperId) &&
+    new Set(sources.filter((s) => s.kind === "paper").map((s) => s.paperId))
+      .size > 1
+  )
+    throw new Error("单论文任务混入了其他论文证据。");
+}
+export function validateTeachingSurface(
+  unit: LearningUnit,
+  deck: DeckOutline | undefined,
+  internalIds: string[],
+  sources: Source[],
+) {
+  const visible = [
+    unit.title,
+    unit.nextQuestion,
+    ...unit.sections.flatMap((s) => [s.title, s.text]),
+    ...unit.terms.flatMap((t) => [t.name, t.explanation]),
+    ...(deck?.slides.flatMap((s) => [s.title, ...s.bullets, s.notes]) ?? []),
+  ].join("\n");
+  for (const id of new Set(internalIds)) {
+    if (
+      id.length < 2 ||
+      sources.some((s) =>
+        [
+          s.id,
+          s.title,
+          s.text,
+          s.caption ?? "",
+          ...(s.foundation?.aliases ?? []),
+        ]
+          .join("\n")
+          .toLowerCase()
+          .includes(id.toLowerCase()),
+      )
+    )
+      continue;
+    const escaped = id.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+    if (
+      new RegExp(`(^|[^A-Za-z0-9_])${escaped}(?=$|[^A-Za-z0-9_])`, "i").test(
+        visible,
+      )
+    )
+      throw new Error("讲解或讲稿包含内部问题编号，未保存为完成结果。");
+  }
+}
+export function validateRunSurface(
+  run: TaskRun,
+  unit: LearningUnit,
+  deck: DeckOutline | undefined,
+  sources: Source[],
+) {
+  const ids = run.roles.flatMap((role) => {
+    const output = role.output as
+      { breakpoints?: { id: string }[]; issues?: { id: string }[] } | undefined;
+    return [...(output?.breakpoints ?? []), ...(output?.issues ?? [])].map(
+      (item) => item.id,
+    );
+  });
+  validateTeachingSurface(
+    unit,
+    deck,
+    [
+      ...ids,
+      ...(run.novice?.breakpoints ?? []).map((b) => b.id),
+      ...(run.review?.issues ?? []).map((i) => i.id),
+      ...(run.materialRequests ?? []).map((r) => r.id),
+    ],
+    sources,
+  );
+}
+export function materialSources(run: TaskRun, paper: PaperBundle) {
+  const snapshot = run.materials?.at(-1);
+  if (!snapshot) return paper.sources; // Backward-compatible historical records.
+  if (run.sourceVersion !== paper.version || run.input.paperId !== paper.id)
+    throw new Error("任务与当前论文来源版本不一致。");
+  return snapshot.sources.map((source) => {
+    const current =
+      source.kind === "foundation"
+        ? (paper.sources.find((s) => s.id === source.id) ??
+          foundationCatalog.all().find((s) => s.id === source.id))
+        : paper.sources.find((s) => s.id === source.id);
+    if (!current) throw new Error("最终资料来源已移除。");
+    const { image, ...text } = current;
+    const expected = { ...source };
+    delete expected.image;
+    if (digest(text) !== digest(expected))
+      throw new Error("最终资料已发生变化，请重新核对后导出。");
+    return { ...source, ...(image ? { image } : {}) };
+  });
 }
 export function cacheKey(
   input: TaskInput,
@@ -92,6 +199,9 @@ export function cacheKey(
         ),
         paperVersion: paper.version,
         sources: paper.sources,
+        selector: selectionVersion,
+        foundations: foundationCatalog.version,
+        groundingContract: groundingContractVersion,
         versions,
         profile: profiles.find((p) => p.id === input.profileId),
         model,
@@ -135,7 +245,8 @@ export class TaskManager {
   async publishCache(id: string, cache: ResultCache) {
     const run = this.runs.get(id),
       key = this.resultKeys.get(id);
-    if (run && key && !run.cacheHit) await cache.put(key, run);
+    if (run && key && !run.cacheHit && (run.materials?.length ?? 1) === 1)
+      await cache.put(key, run);
   }
   wait(id: string) {
     return this.completions.get(id) ?? Promise.resolve();
@@ -193,6 +304,25 @@ export class TaskManager {
         sourceVersion: paper.version,
         events: [],
         roles: [],
+        materials: [
+          {
+            hash: digest({ sources, image: input.visibleImage }),
+            phase: "initial",
+            sources: structuredClone(sources),
+            addedIds: [],
+          },
+        ],
+        materialRequests: (input.missingFoundations ?? []).map((s) => ({
+          id: `material-${s.id}`,
+          concept: s.title,
+          question: `请提供 ${s.title} 的必要基础，当前材料额度未能容纳。`,
+          reason: "基础条目存在，但超过当前资料额度。",
+          kind: "foundation",
+          paperId: paper.id,
+          sourceVersion: paper.version,
+          matchedIds: [s.id],
+          status: "pending",
+        })),
       };
       const controller = new AbortController();
       const signal = execution?.signal
@@ -224,6 +354,7 @@ export class TaskManager {
           run.deck = structuredClone(cached.deck);
           run.novice = structuredClone(cached.novice);
           run.review = structuredClone(cached.review);
+          run.materialRequests = structuredClone(cached.materialRequests ?? []);
         }
       }
       this.runs.set(run.id, run);
@@ -289,7 +420,7 @@ export class TaskManager {
       const record = {
         role,
         inputKeys: Object.keys(input as object),
-        input,
+        input: structuredClone(input),
         durationMs: 0,
       } as TaskRun["roles"][number];
       const started = Date.now();
@@ -386,7 +517,12 @@ export class TaskManager {
           openQuestions: run.input.openQuestions ?? [],
         };
         await set("teaching");
-        let generated = await call("teaching", teaching, task, teachingSchema);
+        let generated = await call(
+          "teaching",
+          teaching,
+          task,
+          groundedTeachingSchema(sources),
+        );
         run.draft = generated.unit;
         await set("novice");
         let feedback = await call(
@@ -412,7 +548,7 @@ export class TaskManager {
             deck: generated.deck,
             feedback,
           },
-          reviewSchema,
+          groundedReviewSchema(sources),
         );
         validateCitations(
           generated.unit,
@@ -420,7 +556,91 @@ export class TaskManager {
           sources,
           generated.deck || undefined,
         );
-        if (needsRevision(review, feedback)) {
+        const requestMap = new Map<
+          string,
+          { id: string; concept: string; question: string }
+        >();
+        for (const request of [
+          ...feedback.breakpoints
+            .filter((b) => b.status !== "resolved")
+            .map((b) => ({
+              id: b.id,
+              concept: b.missingConcept,
+              question: b.question,
+            })),
+          ...review.issues
+            .filter((i) => !i.resolved && i.type === "material")
+            .map((i) => ({
+              id: i.id,
+              concept: i.suggestion,
+              question: i.suggestion,
+            })),
+        ]) {
+          const prior = requestMap.get(request.id);
+          requestMap.set(
+            request.id,
+            prior
+              ? {
+                  ...request,
+                  concept: prior.concept + "\n" + request.concept,
+                  question: prior.question + "\n" + request.question,
+                }
+              : request,
+          );
+        }
+        const requests = [...requestMap.values()];
+        let supplemented = false;
+        for (const request of requests) {
+          const paperSpecific =
+            /缺.*(原图|图注|方法原文|论文.*参数)|未提供.*(原图|图注|方法原文)|需(?:要)?(?:提供|补充).*(归一化与校准|稳定性依据)|(?:图注|所给材料|当前论文|本文).*(?:未明确|缺少|未提供).*(?:分母|基线|筛选|参数)|基线.*(?:哪个时间|何时|测量时间|逐.*配对)/s.test(
+              request.question,
+            );
+          const matches = paperSpecific
+            ? []
+            : foundationCatalog.match(
+                request.concept + "\n" + request.question,
+              );
+          const added = matches.filter(
+            (s) => !sources.some((x) => x.id === s.id),
+          );
+          let provided = matches.length > 0;
+          if (added.length) {
+            try {
+              materialPacket([...sources, ...added]);
+              sources.push(...added);
+              supplemented = true;
+            } catch {
+              provided = false;
+            }
+          }
+          run.materialRequests!.push({
+            ...request,
+            kind: paperSpecific ? "paper" : "foundation",
+            reason: provided
+              ? "已匹配可核验基础，须由修订及复核确认解释是否解决。"
+              : "未匹配到可用资料，或相关资料超过额度。",
+            paperId: paper.id,
+            sourceVersion: paper.version,
+            matchedIds: matches.map((s) => s.id),
+            status: provided ? "provided" : "pending",
+          });
+        }
+        if (supplemented) {
+          run.materials!.push({
+            hash: digest({ sources, image: run.input.visibleImage }),
+            phase: "revision",
+            sources: structuredClone(sources),
+            addedIds: sources
+              .filter((s) => !run.input.sourceIds.includes(s.id))
+              .map((s) => s.id),
+          });
+          task.sources = materialPacket(sources);
+          await this.persist("runs", run.id, run);
+        }
+        if (
+          needsRevision(review, feedback) ||
+          run.materialRequests!.some((r) => r.status === "provided")
+        ) {
           await ledger.revise(run.input.groupId ?? run.id);
           await set("revising");
           generated = await call(
@@ -432,9 +652,10 @@ export class TaskManager {
               deck: generated.deck,
               feedback,
               review,
+              materialRequests: run.materialRequests,
               instruction: "只修订一次。逐项解决具体问题；不新增无来源数据。",
             },
-            teachingSchema,
+            groundedTeachingSchema(sources),
           );
           await set("rereading");
           feedback = await call(
@@ -461,7 +682,7 @@ export class TaskManager {
               feedback,
               previousIssues: review.issues,
             },
-            reviewSchema,
+            groundedReviewSchema(sources),
           );
         }
         validateCitations(
@@ -472,6 +693,22 @@ export class TaskManager {
         );
         run.novice = feedback;
         run.review = review;
+        for (const request of run.materialRequests ?? []) {
+          const bp = feedback.breakpoints.find((b) => b.id === request.id);
+          const issue = review.issues.find((i) => i.id === request.id);
+          if (
+            (bp?.status === "resolved" || issue?.resolved) &&
+            (!bp || bp.status === "resolved") &&
+            (!issue || issue.resolved)
+          )
+            request.status = "resolved";
+        }
+        validateRunSurface(
+          run,
+          generated.unit,
+          generated.deck || undefined,
+          sources,
+        );
         if ((run.input.modules ?? [run.input.module]).includes("ppt")) {
           if (!generated.deck) throw new Error("汇报任务未返回页面与讲稿。");
           if (

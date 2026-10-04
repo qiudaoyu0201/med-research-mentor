@@ -13,11 +13,23 @@ import { sample, profiles } from "../examples/bundle.ts";
 import { save, list } from "./storage.ts";
 import { ConversationStore } from "./conversation.ts";
 import { BudgetLedger } from "./budget.ts";
-import { TaskManager } from "./orchestrator.ts";
+import {
+  TaskManager,
+  materialSources,
+  validateRunSurface,
+} from "./orchestrator.ts";
 import type { Provider } from "./provider.ts";
 import { assistantRules } from "./skills.ts";
 import { planSchema } from "./schemas.ts";
-import { digest, selectEvidence } from "./materials.ts";
+import {
+  digest,
+  selectEvidence,
+  defaultPaperSources,
+  selectionVersion,
+  materialPacket,
+  figureNumber,
+} from "./materials.ts";
+import { foundationCatalog, withFoundationSources } from "./foundations.ts";
 import { exportDeck } from "./export.ts";
 import { ResultCache } from "./cache.ts";
 
@@ -46,11 +58,12 @@ export function rulePlan(
     ? `${state.pending.question}\n用户补充：${message.question}`
     : message.question;
   const report = /PPT|汇报|幻灯|演示文稿/i.test(question);
-  const figure = /Figure\s*\d+|图\s*[一二三四五六七八九十\d]+|读图|图表/i.test(
-    question,
-  );
-  const method = /PCR|Ct\b|流式|方法|原理/i.test(question);
-  const knownMethod = /PCR|Ct\b|流式/i.test(question);
+  const figure =
+    figureNumber(question) !== undefined || /读图|图表/.test(question);
+  const knownMethod = foundationCatalog.match(question).length > 0;
+  const method =
+    /PCR|Ct\b|流式|方法|原理/i.test(question) ||
+    (knownMethod && !/论文|研究问题|实验|带读|影响|引起/.test(question));
   const modules: Module[] = [];
   if (report) {
     if (figure) modules.push("figure");
@@ -104,54 +117,23 @@ export function rulePlan(
     };
   }
   if (!sourceIds?.length) {
-    if (
+    sourceIds =
       modules.every((m) => m === "method") ||
       (modules.includes("method") && !figure)
-    ) {
-      sourceIds = paper.sources
-        .filter(
-          (s) =>
-            s.kind === "foundation" &&
-            (/流式/.test(question) ? /flow/.test(s.id) : /pcr/.test(s.id)),
-        )
-        .map((s) => s.id);
-    } else {
-      const figureNumber = /(?:Figure|图)\s*([\d一二三四五六七八九十]+)/i.exec(
-        question,
-      )?.[1];
-      const number =
-        figureNumber &&
-        (/^\d+$/.test(figureNumber)
-          ? figureNumber
-          : String("一二三四五六七八九十".indexOf(figureNumber) + 1));
-      const target = paper.sources.find(
-        (s) => s.figure && s.image && (!number || s.figure.startsWith(number)),
-      );
-      sourceIds = target
-        ? [
-            target.id,
-            ...paper.sources
-              .filter(
-                (s) =>
-                  s.id !== target.id &&
-                  ((number === "1" &&
-                    ["xu-fig1-results", "xu-fig1-methods"].includes(s.id)) ||
-                    (!paper.sources.some((s) => s.id === "xu-fig1-methods") &&
-                      s.id === "xu-design" &&
-                      number === "1")),
-              )
-              .slice(0, 2)
-              .map((s) => s.id),
-          ]
-        : paper.sources
-            .filter(
-              (s) =>
-                s.kind === "paper" &&
-                (!figure || !number || s.figure?.startsWith(number)),
-            )
-            .slice(0, 4)
-            .map((s) => s.id);
-    }
+        ? foundationCatalog.match(question).map((s) => s.id)
+        : defaultPaperSources(paper, question, modules).map((s) => s.id);
+    if (!sourceIds.length && !clarify && !message.exportRunId)
+      return {
+        goal: question,
+        modules,
+        sourceIds: [],
+        slideCount,
+        groups: [],
+        estimatedCalls: 0,
+        clarification: figure
+          ? "请提供目标图的原图和完整图注，以及对应结果／方法，并确认图号。"
+          : "请提供具体方法名称及相关基础或论文原文。",
+      };
   }
   return {
     goal: question,
@@ -409,22 +391,17 @@ export class AssistantService {
       const message = turn.message;
       const binding =
         message.paperId === undefined ? state.paperId : message.paperId;
-      const original = await this.paperById(binding ?? sample.id);
-      const paper = {
-        ...original,
-        sources: [
-          ...original.sources.map((s) =>
-            s.figure === "用户圈选" && !s.caption
-              ? { ...s, caption: s.text }
-              : s,
-          ),
-          ...sample.sources.filter(
-            (s) =>
-              s.kind === "foundation" &&
-              !original.sources.some((x) => x.id === s.id),
-          ),
-        ],
-      };
+      const original: PaperBundle =
+        binding || message.mode === "example"
+          ? await this.paperById(binding ?? sample.id)
+          : {
+              id: "foundation-only",
+              title: "独立基础课程",
+              version: foundationCatalog.version,
+              scope: "独立基础资料；未绑定论文。",
+              sources: [],
+            };
+      const paper = withFoundationSources(original);
       if (
         message.sourceIds?.some((id) => !paper.sources.some((s) => s.id === id))
       )
@@ -490,7 +467,14 @@ export class AssistantService {
           },
           planSchema,
           signal,
-          { sourceHash: digest(paper.sources), skillHash: rules.version },
+          {
+            sourceHash: digest({
+              sources: paper.sources,
+              selectionVersion,
+              foundations: foundationCatalog.version,
+            }),
+            skillHash: rules.version,
+          },
         );
         plan = result.output;
       }
@@ -518,6 +502,32 @@ export class AssistantService {
           plan.goal,
           plan.modules,
         ).map((s) => s.id);
+      let missingFoundations: { id: string; title: string }[] = [];
+      if (
+        message.mode === "live" &&
+        !plan.clarification &&
+        !message.exportRunId
+      ) {
+        const selected = paper.sources.filter((s) =>
+          plan!.sourceIds.includes(s.id),
+        );
+        const wanted = foundationCatalog.match(
+          [
+            plan.goal,
+            ...selected.map((s) => s.caption ?? s.text),
+            ...state.openQuestions.map((q) => q.question),
+          ].join("\n"),
+        );
+        const missing = wanted.filter(
+          (s) => !selected.some((x) => x.id === s.id),
+        );
+        try {
+          materialPacket([...selected, ...missing]);
+          plan.sourceIds.push(...missing.map((s) => s.id));
+        } catch {
+          missingFoundations = missing.map(({ id, title }) => ({ id, title }));
+        }
+      }
       ledger.state.limit = ledger.state.attempts.length ? 7 : 6;
       signal.throwIfAborted();
       // Natural read-figure requests require the original image and a complete caption.
@@ -609,6 +619,7 @@ export class AssistantService {
               question: plan.goal,
               profileId: state.profileId,
               sourceIds: plan.sourceIds,
+              ...(missingFoundations.length ? { missingFoundations } : {}),
               taughtConcepts: state.taughtConcepts
                 .slice(-20)
                 .map((c) => c.name),
@@ -660,12 +671,15 @@ export class AssistantService {
           )
         ) {
           const id = randomUUID();
+          const finalPaper = { ...paper, sources: materialSources(run, paper) };
+          if (!run.result) throw new Error("讲解尚未完成核对。");
+          validateRunSurface(run, run.result, run.deck, finalPaper.sources);
           await this.exporter(
             run.deck,
             binding
-              ? paper
+              ? finalPaper
               : {
-                  ...paper,
+                  ...finalPaper,
                   title: run.result?.title ?? plan.goal,
                   scope: "独立方法课程",
                 },
@@ -676,7 +690,7 @@ export class AssistantService {
           state.artifacts.push({
             id,
             kind: "pptx",
-            sourceHash: digest(paper.sources),
+            sourceHash: run.materials?.at(-1)?.hash ?? digest(paper.sources),
           });
         }
         state.lastRunId = run.id;
@@ -698,6 +712,13 @@ export class AssistantService {
             .map((q) => [q.id, q]),
         );
         for (const item of [
+          ...(run.materialRequests
+            ?.filter((r) => r.status !== "resolved")
+            .map((r) => ({
+              id: r.id,
+              question: r.question,
+              sourceIds: r.matchedIds,
+            })) ?? []),
           ...(run.review?.issues
             .filter((i) => !i.resolved)
             .map((i) => ({

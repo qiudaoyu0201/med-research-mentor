@@ -519,10 +519,10 @@ test("exact cache reuses checked output, preserves audit ID and invalidates for 
     sample,
     cache,
   );
-  const firstState = await h.conversations.create();
+  const firstState = await h.conversations.create({ paperId: sample.id });
   const first = await h.assistant.submit(firstState.id, method);
   await h.assistant.wait(first.id);
-  const secondState = await h.conversations.create();
+  const secondState = await h.conversations.create({ paperId: sample.id });
   const second = await h.assistant.submit(secondState.id, method);
   await h.assistant.wait(second.id);
   assert.equal(second.status, "completed");
@@ -546,7 +546,7 @@ test("exact cache reuses checked output, preserves audit ID and invalidates for 
   const changed = structuredClone(sample);
   changed.sources.find((s) => s.id === "qpcr-basics")!.text += "新增来源内容";
   const other = harness([lesson, novice, review], changed, cache);
-  const state = await other.conversations.create();
+  const state = await other.conversations.create({ paperId: changed.id });
   const invalidated = await other.assistant.submit(state.id, method);
   await other.assistant.wait(invalidated.id);
   assert.equal(invalidated.budget.attempts.length, 3);

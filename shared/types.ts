@@ -13,6 +13,47 @@ export interface Source {
   caption?: string;
   verified: boolean;
   image?: string;
+  paperId?: string;
+  paperVersion?: string;
+  section?: "figure" | "results" | "methods" | "overview";
+  relatedFigures?: string[];
+  foundation?: FoundationMetadata;
+}
+export interface FoundationMetadata {
+  version: string;
+  concepts: string[];
+  aliases: string[];
+  prerequisites: string[];
+  scope: string;
+  limitations: string;
+  status: "candidate" | "available" | "disabled";
+  references: {
+    id: string;
+    title: string;
+    url: string;
+    locator: string;
+    doi?: string;
+    pmid?: string;
+  }[];
+  claims: { text: string; referenceIds: string[] }[];
+  verification: { date: string; readScope: string; supportedClaims: string[] };
+}
+export interface MaterialRequest {
+  id: string;
+  concept: string;
+  question: string;
+  reason: string;
+  kind: "foundation" | "paper" | "figure";
+  paperId: string;
+  sourceVersion: string;
+  matchedIds: string[];
+  status: "provided" | "pending" | "resolved";
+}
+export interface MaterialSnapshot {
+  hash: string;
+  phase: "initial" | "revision";
+  sources: Source[];
+  addedIds: string[];
 }
 export interface PaperBundle {
   id: string;
@@ -97,6 +138,7 @@ export interface TaskInput {
   conversationId?: string;
   turnId?: string;
   groupId?: string;
+  missingFoundations?: { id: string; title: string }[];
 }
 export type RunStatus =
   | "queued"
@@ -140,6 +182,9 @@ export interface TaskRun {
   error?: string;
   budget?: BudgetState;
   cacheHit?: string;
+  materials?: MaterialSnapshot[];
+  materialRequests?: MaterialRequest[];
+  evaluationBudget?: BudgetState;
 }
 
 export interface TokenUsage {
