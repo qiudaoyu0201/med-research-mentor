@@ -1,3 +1,7 @@
+---
+name: medical-journal-club-ppt
+description: 将已确认论文内容整理成汇报页面与讲稿，支持指定页修改。
+---
 # 汇报大纲
 
 版本：1.1.2

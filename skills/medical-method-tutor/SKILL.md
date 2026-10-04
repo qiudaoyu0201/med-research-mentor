@@ -1,3 +1,7 @@
+---
+name: medical-method-tutor
+description: 讲解科研方法的测量对象、原理、对照与推理范围，用于基础概念或方法追问。
+---
 # 方法讲解
 
 版本：1.0.0

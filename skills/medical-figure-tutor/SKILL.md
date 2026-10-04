@@ -1,3 +1,7 @@
+---
+name: medical-figure-tutor
+description: 结合论文原图、图注与方法解释图表观察和结论，用于读图任务。
+---
 # 图表解读
 
 版本：1.1.1

@@ -17,7 +17,8 @@
     "eval": "tsx scripts/replay.ts",
     "test:browser": "tsx checks/browser.ts",
     "format": "prettier --write app server shared scripts checks evals examples vite.config.ts tsconfig.json package.json",
-    "transfer:check": "tsx scripts/transfer-check.ts"
+    "transfer:check": "tsx scripts/transfer-check.ts",
+    "learner:check": "tsx scripts/learner-check.ts"
   },
   "dependencies": {
     "@napi-rs/canvas": "^1.0.10",
@@ -27,6 +28,7 @@
     "pptxgenjs": "^4.0.1",
     "react": "^19.1.1",
     "react-dom": "^19.1.1",
+    "yaml": "^2.9.1",
     "zod": "^4.1.11"
   },
   "devDependencies": {

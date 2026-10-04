@@ -1,3 +1,7 @@
+---
+name: medical-novice-simulator
+description: 模拟指定背景的听众试读讲解和讲稿，发现必要理解断点；不用于判定学习掌握。
+---
 # 模拟新手
 
 版本：1.2.0

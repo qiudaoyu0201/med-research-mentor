@@ -1,3 +1,7 @@
+---
+name: medical-paper-guide
+description: 带读科学论文，解释研究问题、方法、观察与结论的推理关系。
+---
 # 论文带读
 
 版本：1.0.0

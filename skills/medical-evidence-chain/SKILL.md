@@ -1,3 +1,7 @@
+---
+name: medical-evidence-chain
+description: 梳理实验观察、对照、推断与证据边界，用于检查论文的推理链。
+---
 # 证据链
 
 版本：1.0.0

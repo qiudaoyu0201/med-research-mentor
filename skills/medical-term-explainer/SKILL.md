@@ -1,3 +1,7 @@
+---
+name: medical-term-explainer
+description: 解释当前教学中的科研术语，提供相关定义和通俗类比。
+---
 # 术语解释
 
 版本：1.0.0

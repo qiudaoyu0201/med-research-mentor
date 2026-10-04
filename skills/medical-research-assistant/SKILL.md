@@ -1,3 +1,7 @@
+---
+name: medical-research-assistant
+description: 承接科研学习目标，选择相关讲解、核对与汇报工作流，整合结果并继续追问。
+---
 # 科研学习主助手
 
 版本：1.0.0

@@ -1,3 +1,7 @@
+---
+name: medical-grounding-check
+description: 核对候选讲解或汇报中的具体事实、引用和推理，返回可定位的问题。
+---
 # 来源核对
 
 版本：1.2.0
