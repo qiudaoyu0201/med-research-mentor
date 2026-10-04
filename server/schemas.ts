@@ -143,6 +143,12 @@ export const messageSchema = z.object({
     .optional(),
   depth: z.enum(["brief", "standard", "deep"]).optional(),
   readabilityCheck: z.boolean().optional(),
+  deckEdit: z
+    .object({
+      versionId: recordId,
+      slideIndex: z.number().int().min(0).max(15),
+    })
+    .optional(),
 });
 export const planSchema = z.object({
   goal: z.string().min(1).max(2000),

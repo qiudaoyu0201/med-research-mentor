@@ -167,6 +167,7 @@ export function useConversation(
   }
   return {
     state,
+    ensure,
     setState,
     choices,
     turns,

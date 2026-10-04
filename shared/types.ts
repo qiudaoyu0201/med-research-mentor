@@ -114,6 +114,40 @@ export interface Slide {
 export interface DeckOutline {
   slides: Slide[];
 }
+export interface DeckVersion {
+  id: string;
+  conversationId: string;
+  paperId: string;
+  sourceVersion: string;
+  sourceIds: string[];
+  sourceHash: string;
+  createdAt: string;
+  parentId?: string;
+  restoredFrom?: string;
+  runId?: string;
+  slideIndex?: number;
+  request?: string;
+  origin: "example" | "live";
+  status:
+    | "queued"
+    | "revising"
+    | "checking"
+    | "completed"
+    | "failed"
+    | "cancelled"
+    | "interrupted";
+  outline: DeckOutline;
+  review: ReviewResult;
+  budget?: BudgetState;
+  roles: {
+    role: string;
+    input: unknown;
+    output?: unknown;
+    error?: string;
+    instructions: string;
+  }[];
+  error?: string;
+}
 export interface Profile {
   id: string;
   version: string;
@@ -255,6 +289,7 @@ export interface AssistantMessage {
   focus?: { runId: string; sectionIndex: number; excerpt: string };
   depth?: "brief" | "standard" | "deep";
   readabilityCheck?: boolean;
+  deckEdit?: { versionId: string; slideIndex: number };
 }
 export interface ConversationState {
   id: string;
@@ -271,6 +306,7 @@ export interface ConversationState {
   recentTurnIds: string[];
   summaries: { turnId: string; text: string }[];
   lastRunId?: string;
+  latestDeckVersionId?: string;
   pending?: {
     questionId?: string;
     question: string;
@@ -283,6 +319,7 @@ export interface AssistantReply {
   artifacts: { id: string; kind: string; url: string }[];
   pendingQuestions: { id: string; question: string; sourceIds: string[] }[];
   nextStep: string;
+  deckVersionId?: string;
 }
 export interface AssistantTurn {
   id: string;

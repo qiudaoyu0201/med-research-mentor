@@ -1185,6 +1185,21 @@ footer {
 .check-option input {
   width: auto;
 }
+.deck-version-panel {
+  min-width: 0;
+  max-width: 100%;
+  overflow-wrap: anywhere;
+}
+.deck-version-panel select,
+.deck-version-panel textarea {
+  box-sizing: border-box;
+  width: 100%;
+  max-width: 100%;
+}
+.deck-version-panel article {
+  border-top: 1px solid #d8ddd8;
+  padding: 10px 0;
+}
 .crop-preview textarea {
   margin-top: 10px;
   font-size: 12px;

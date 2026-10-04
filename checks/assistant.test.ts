@@ -24,6 +24,8 @@ import type {
   TaskRun,
 } from "../shared/types.ts";
 import { save } from "../server/storage.ts";
+import { DeckVersions } from "../server/deck-versions.ts";
+import { exportDeck } from "../server/export.ts";
 
 const novice = { understood: ["原理"], breakpoints: [] };
 const review = { issues: [], checkedSources: ["qpcr-basics"], limitations: [] };
@@ -43,6 +45,7 @@ function harness(
   outputs: unknown[],
   paper: PaperBundle = sample,
   cache?: ResultCache,
+  enableDeckVersions = false,
 ) {
   const records = new Map<string, unknown>();
   const persist: typeof save = async (g, id, value) => {
@@ -51,6 +54,14 @@ function harness(
   const provider = fixture(outputs);
   const manager = new TaskManager(provider, persist);
   const conversations = new ConversationStore(persist);
+  const decks = enableDeckVersions
+    ? new DeckVersions(
+        provider,
+        async () => structuredClone(paper),
+        persist,
+        async () => "fixture.pptx",
+      )
+    : undefined;
   const assistant = new AssistantService(
     provider,
     manager,
@@ -58,8 +69,10 @@ function harness(
     async () => structuredClone(paper),
     persist,
     cache,
+    exportDeck,
+    decks,
   );
-  return { assistant, manager, conversations, records, provider };
+  return { assistant, manager, conversations, records, provider, decks };
 }
 const method: AssistantMessage = {
   clientMessageId: "first",
@@ -67,6 +80,34 @@ const method: AssistantMessage = {
   mode: "live",
 };
 const lesson = { unit: exampleUnits.qpcr, deck: null };
+test("natural single-page request continues the current report within the same conversation ledger", async () => {
+  const h = harness(
+    [
+      { ...defaultDeck.slides[1], title: "通俗的研究问题" },
+      { issues: [], checkedSources: ["xu-question"], limitations: [] },
+    ],
+    sample,
+    undefined,
+    true,
+  );
+  let state = await h.conversations.create({ paperId: sample.id });
+  const parent = await h.decks!.seed(state.id, sample.id);
+  state.sourceVersion = parent.sourceVersion;
+  state.latestDeckVersionId = parent.id;
+  state = await h.conversations.put(state, state.version);
+  const turn = await h.assistant.submit(state.id, {
+    ...method,
+    question: "修改第二页，把问题讲通俗一些。",
+  });
+  await h.assistant.wait(turn.id);
+  assert.equal(turn.status, "completed", turn.error);
+  assert.equal(turn.budget.attempts.length, 2);
+  assert.equal(turn.reply?.artifacts.length, 1);
+  const version = h.decks!.get(turn.reply!.deckVersionId!);
+  assert.equal(version.parentId, parent.id);
+  assert.equal(h.conversations.get(state.id).latestDeckVersionId, version.id);
+  assert.deepEqual(version.outline.slides[4], parent.outline.slides[4]);
+});
 
 const backgroundLesson = {
   title: "对照是什么",

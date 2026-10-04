@@ -32,6 +32,7 @@ import {
 import { foundationCatalog, withFoundationSources } from "./foundations.ts";
 import { exportDeck } from "./export.ts";
 import { ResultCache } from "./cache.ts";
+import type { DeckVersions } from "./deck-versions.ts";
 
 const terminal = new Set([
   "completed",
@@ -216,6 +217,7 @@ export class AssistantService {
     private persist: typeof save = save,
     private cache?: ResultCache,
     private exporter: typeof exportDeck = exportDeck,
+    private decks?: DeckVersions,
   ) {}
   get busy() {
     return this.accepting || !!this.active;
@@ -282,7 +284,12 @@ export class AssistantService {
         throw new Error("客户端消息 ID 已用于不同内容。");
       return duplicate;
     }
-    if (this.busy || this.manager.active || this.manager.starting)
+    if (
+      this.busy ||
+      this.manager.active ||
+      this.manager.starting ||
+      this.decks?.busy
+    )
       throw new Error("已有学习请求运行中，请先取消或等待完成。");
     this.accepting = true;
     try {
@@ -417,6 +424,7 @@ export class AssistantService {
         state.openQuestions = [];
         state.taskGroups = [];
         state.lastRunId = undefined;
+        state.latestDeckVersionId = undefined;
         state.pending = undefined;
       }
       state.paperId = binding;
@@ -424,6 +432,93 @@ export class AssistantService {
       state.profileId = message.profileId ?? state.profileId;
       if (!profiles.some((p) => p.id === state.profileId))
         throw new Error("新手画像不存在");
+      const pageRequest =
+        /(?:修改|改写|重写|润色)[^\n]{0,15}?第?([一二两三四五六七八九]|\d{1,2})\s*页/.exec(
+          message.question,
+        );
+      const naturalPage = pageRequest
+        ? (/^\d+$/.test(pageRequest[1])
+            ? Number(pageRequest[1])
+            : pageRequest[1] === "两"
+              ? 2
+              : "一二三四五六七八九".indexOf(pageRequest[1]) + 1) - 1
+        : undefined;
+      const edit =
+        message.deckEdit ??
+        (naturalPage !== undefined && state.latestDeckVersionId
+          ? { versionId: state.latestDeckVersionId, slideIndex: naturalPage }
+          : undefined);
+      if (naturalPage !== undefined && !edit) {
+        const question = {
+          id: turn.id,
+          question:
+            "请先提供要修改的汇报，或选择已有汇报版本，再指定这一页的修改要求。",
+          sourceIds: [],
+        };
+        state.openQuestions.push(question);
+        turn.reply = {
+          content: null,
+          artifacts: [],
+          pendingQuestions: [question],
+          nextStep: question.question,
+        };
+        turn.status = "clarification";
+        await this.conversations.put(state, state.version);
+        return;
+      }
+      if (edit) {
+        if (!this.decks) throw new Error("汇报版本服务不可用。");
+        const parent = this.decks.get(edit.versionId, state.id);
+        if (
+          parent.paperId !== paper.id ||
+          parent.sourceVersion !== paper.version
+        )
+          throw new Error("修改目标不属于当前论文版本。");
+        turn.status = "running";
+        await this.persist("turns", turn.id, turn);
+        const started = await this.decks.start(
+          parent.id,
+          state.id,
+          { slideIndex: edit.slideIndex, question: message.question },
+          { ledger, signal },
+        );
+        const version = await this.decks.wait(started.id);
+        signal.throwIfAborted();
+        if (version.status !== "completed")
+          throw new Error(version.error ?? "修改尚未完成核对");
+        const artifact = await this.decks.export(version.id, state.id);
+        signal.throwIfAborted();
+        state.latestDeckVersionId = version.id;
+        state.artifacts.push({
+          id: artifact.id,
+          kind: "pptx",
+          sourceHash: version.sourceHash,
+        });
+        state.summaries = [
+          ...state.summaries,
+          {
+            turnId: turn.id,
+            text: `修改第 ${edit.slideIndex + 1} 页：${version.outline.slides[edit.slideIndex].title}`,
+          },
+        ].slice(-2);
+        state.goal = message.question;
+        turn.reply = {
+          content: null,
+          artifacts: [{ ...artifact, kind: "pptx" }],
+          pendingQuestions: version.review.issues
+            .filter((i) => !i.resolved)
+            .map((i) => ({
+              id: i.id,
+              question: i.suggestion,
+              sourceIds: i.evidence,
+            })),
+          nextStep: "指定页已保存新版本；可查看差异、恢复旧版或继续修改。",
+          deckVersionId: version.id,
+        };
+        turn.status = "completed";
+        await this.conversations.put(state, state.version);
+        return;
+      }
       const last = state.lastRunId
         ? this.manager.runs.get(state.lastRunId)
         : undefined;
@@ -734,6 +829,12 @@ export class AssistantService {
           if (run.status !== "completed")
             throw new Error(run.error ?? "教学任务未完成");
         }
+        let deckVersionId: string | undefined;
+        if (run.deck && this.decks) {
+          const version = await this.decks.seed(state.id, paper.id, run);
+          deckVersionId = version.id;
+          state.latestDeckVersionId = version.id;
+        }
         if (
           run.deck &&
           !run.review?.issues.some(
@@ -834,6 +935,7 @@ export class AssistantService {
           },
         ].slice(-2);
         turn.reply = {
+          ...(deckVersionId ? { deckVersionId } : {}),
           content: run.result ?? null,
           artifacts,
           pendingQuestions: state.openQuestions,

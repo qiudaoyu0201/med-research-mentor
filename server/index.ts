@@ -30,6 +30,8 @@ import { ConversationStore } from "./conversation.ts";
 import { ResultCache } from "./cache.ts";
 import { foundationCatalog, withFoundationSources } from "./foundations.ts";
 import { registerFigureEvidence } from "./paper-assets.ts";
+import { DeckVersions } from "./deck-versions.ts";
+import { digest } from "./materials.ts";
 
 const app = express(),
   port = Number(process.env.PORT || 4317),
@@ -76,9 +78,19 @@ const upload = multer({
   limits: { fileSize: 30 * 1024 * 1024, files: 1 },
 });
 const paperById = async (id: string) =>
-  id === sample.id
-    ? structuredClone(loadedSample)
-    : read<PaperBundle>("papers", id);
+  id === "foundation-only"
+    ? {
+        id,
+        title: "独立基础课程",
+        version: foundationCatalog.version,
+        scope: "独立基础资料；未绑定论文。",
+        sources: [],
+      }
+    : id === sample.id
+      ? structuredClone(loadedSample)
+      : read<PaperBundle>("papers", id);
+const deckVersions = new DeckVersions(provider, paperById);
+await deckVersions.restoreDisk();
 const assistant = new AssistantService(
   provider,
   manager,
@@ -86,6 +98,8 @@ const assistant = new AssistantService(
   paperById,
   save,
   new ResultCache(),
+  exportDeck,
+  deckVersions,
 );
 await assistant.restore();
 app.post("/api/conversations", async (req, res) => {
@@ -419,16 +433,126 @@ app.post("/api/decks", async (req, res) => {
     )
       throw new Error("汇报内容尚未完成核对");
     paper = { ...paper, sources: materialSources(run, paper) };
+    if (digest(body.outline) !== digest(run.deck))
+      throw new Error("编辑后的页面请先保存新版本并核对，再导出。");
     validateRunSurface(run, run.result, body.outline, paper.sources);
   } else if (paper.id !== sample.id)
     throw new Error("上传论文请先生成并核对汇报内容");
+  else if (digest(body.outline) !== digest(defaultDeck))
+    throw new Error("编辑后的示例请先保存新版本并核对。");
   const id = randomUUID();
   await exportDeck(body.outline, paper, id);
   res.json({
     url: `/api/decks/${id}`,
     id,
-    note: "编辑后的大纲由你检查；来源 ID 已校验。",
+    note: "按保存版本导出；固定示例不代表全文核验。",
   });
+});
+app.get("/api/deck-versions", (req, res) => {
+  const conversationId = safeId(String(req.query.conversationId));
+  assistant.conversations.get(conversationId);
+  res.json(
+    [...deckVersions.versions.values()].filter(
+      (v) =>
+        v.conversationId === conversationId &&
+        (!req.query.paperId || v.paperId === req.query.paperId),
+    ),
+  );
+});
+app.post("/api/deck-versions", async (req, res) => {
+  if (assistant.busy || deckVersions.busy)
+    throw new Error("请等待当前请求完成。");
+  const body = z
+    .object({
+      conversationId: z.string(),
+      paperId: z.string(),
+      runId: z.string().optional(),
+    })
+    .parse(req.body);
+  const state = assistant.conversations.get(body.conversationId);
+  const run = body.runId ? manager.runs.get(body.runId) : undefined;
+  if (body.runId && !run) throw new Error("汇报记录不存在。");
+  const version = await deckVersions.seed(
+    body.conversationId,
+    body.paperId,
+    run,
+  );
+  state.paperId = body.paperId;
+  state.sourceVersion = version.sourceVersion;
+  state.latestDeckVersionId = version.id;
+  await assistant.conversations.put(state, state.version);
+  res.status(201).json(version);
+});
+app.get("/api/deck-versions/:id", (req, res) =>
+  res.json(deckVersions.get(req.params.id)),
+);
+app.post("/api/deck-versions/:id/edit", async (req, res) => {
+  if (assistant.busy || manager.active || replayController)
+    throw new Error("请等待当前请求完成。");
+  const body = z
+    .object({
+      conversationId: z.string(),
+      slideIndex: z.number().int().min(0).max(15),
+      question: z.string().min(1).max(2000),
+      slide: deckSchema.shape.slides.element.optional(),
+    })
+    .parse(req.body);
+  assistant.conversations.get(body.conversationId);
+  res
+    .status(202)
+    .json(await deckVersions.start(req.params.id, body.conversationId, body));
+});
+app.post("/api/deck-versions/:id/cancel", async (req, res) => {
+  await deckVersions.cancel(req.params.id);
+  res.json({ ok: true });
+});
+app.post("/api/deck-versions/:id/restore", async (req, res) => {
+  if (assistant.busy) throw new Error("请等待当前请求完成。");
+  const body = z
+    .object({ conversationId: z.string(), targetId: z.string() })
+    .parse(req.body);
+  const version = await deckVersions.restoreVersion(
+    req.params.id,
+    body.targetId,
+    body.conversationId,
+  );
+  const state = assistant.conversations.get(body.conversationId);
+  state.latestDeckVersionId = version.id;
+  await assistant.conversations.put(state, state.version);
+  res.json(version);
+});
+app.post("/api/deck-versions/:id/export", async (req, res) => {
+  if (assistant.busy || deckVersions.busy)
+    throw new Error("请等待当前请求完成。");
+  const body = z.object({ conversationId: z.string() }).parse(req.body);
+  const state = assistant.conversations.get(body.conversationId);
+  const artifact = await deckVersions.export(
+    req.params.id,
+    body.conversationId,
+  );
+  state.latestDeckVersionId = req.params.id;
+  state.artifacts.push({
+    id: artifact.id,
+    kind: "pptx",
+    sourceHash: deckVersions.get(req.params.id).sourceHash,
+  });
+  await assistant.conversations.put(state, state.version);
+  res.json(artifact);
+});
+app.post("/api/deck-versions/:id/select", async (req, res) => {
+  if (assistant.busy || deckVersions.busy)
+    throw new Error("请等待当前请求完成。");
+  const body = z.object({ conversationId: z.string() }).parse(req.body);
+  const version = deckVersions.get(req.params.id, body.conversationId);
+  const state = assistant.conversations.get(body.conversationId);
+  if (
+    version.status !== "completed" ||
+    version.paperId !== state.paperId ||
+    version.sourceVersion !== state.sourceVersion
+  )
+    throw new Error("不能承接未完成或其他论文的版本。");
+  state.latestDeckVersionId = version.id;
+  res.json(await assistant.conversations.put(state, state.version));
 });
 app.get("/api/decks/:id", (req, res) =>
   res.download(
@@ -445,7 +569,13 @@ app.post("/api/replays", async (req, res) => {
       caseIds: z.array(z.string()).max(4).optional(),
     })
     .parse(req.body);
-  if (assistant.busy || manager.active || manager.starting || replayController)
+  if (
+    assistant.busy ||
+    manager.active ||
+    manager.starting ||
+    replayController ||
+    deckVersions.busy
+  )
     throw new Error("请等待当前任务完成");
   replayController = new AbortController();
   try {
@@ -501,6 +631,7 @@ async function shutdown() {
   replayController?.abort();
   if (assistant.active) await assistant.cancel(assistant.active);
   if (manager.active) await manager.cancel(manager.active);
+  if (deckVersions.active) await deckVersions.cancel(deckVersions.active);
   server.close();
   process.exit(0);
 }

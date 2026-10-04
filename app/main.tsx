@@ -14,6 +14,7 @@ import type {
 } from "../shared/types.ts";
 import "./style.css";
 import { useConversation, ConversationPanel } from "./conversation.tsx";
+import { DeckVersionPanel } from "./deck-versions.tsx";
 GlobalWorkerOptions.workerSrc = workerUrl;
 const moduleNames: Record<Module, string> = {
   paper: "论文带读",
@@ -212,6 +213,7 @@ function App() {
     [saveState, setSaveState] = useState("已保存"),
     [outline, setOutline] = useState<DeckOutline>({ slides: [] }),
     [deckUrl, setDeckUrl] = useState(""),
+    [deckVersionId, setDeckVersionId] = useState<string>(),
     [manualText, setManualText] = useState(""),
     [ratio, setRatio] = useState(47);
   const [skills, setSkills] = useState<any[]>([]),
@@ -244,6 +246,9 @@ function App() {
           : []),
       ]
     : [];
+  useEffect(() => {
+    setDeckVersionId(undefined);
+  }, [paperId]);
   const isRunning =
     !!current &&
     !["completed", "failed", "cancelled", "interrupted"].includes(
@@ -449,6 +454,17 @@ function App() {
     setBusy(true);
     setError("");
     try {
+      if (deckVersionId && chat.state) {
+        const version = await api("/api/deck-versions/" + deckVersionId);
+        if (JSON.stringify(version.outline) !== JSON.stringify(outline))
+          throw new Error("编辑器还有未保存的更改，请先逐页保存并核对。");
+        const artifact = await api(
+          `/api/deck-versions/${deckVersionId}/export`,
+          json({ conversationId: chat.state.id }),
+        );
+        setDeckUrl(artifact.url);
+        return;
+      }
       const result = await api(
         "/api/decks",
         json({
@@ -988,6 +1004,30 @@ function App() {
                 </button>
               </section>
               <aside className="panel export-panel">
+                <DeckVersionPanel
+                  conversation={chat.state}
+                  ensure={chat.ensure}
+                  paperId={paperId}
+                  runId={current?.deck ? current.id : undefined}
+                  outline={outline}
+                  onState={chat.setState}
+                  onExport={setDeckUrl}
+                  onVersion={(version, keepDraft) => {
+                    setDeckVersionId(version.id);
+                    setDeckUrl("");
+                    setOutline((prev) =>
+                      keepDraft && version.slideIndex !== undefined
+                        ? {
+                            slides: prev.slides.map((s, i) =>
+                              i === version.slideIndex
+                                ? version.outline.slides[i]
+                                : s,
+                            ),
+                          }
+                        : version.outline,
+                    );
+                  }}
+                />
                 <div className="eyebrow">汇报输出</div>
                 <h2>讲清每一页</h2>
                 <p>导出可编辑 PPT，附每页讲稿。</p>
