@@ -5,6 +5,8 @@ import { useEffect, useRef, useState } from "react";
 import type { PaperBundle, Source } from "../shared/types.ts";
 import type { ResearchNote } from "../shared/workspace.ts";
 import type { ResearchSelection } from "./research-discussion.tsx";
+import { SelectionActions } from "./research-menu.tsx";
+import { ResearchImage } from "./research-image.tsx";
 
 function NoteEditor({
   note,
@@ -19,8 +21,21 @@ function NoteEditor({
   onCitation: (id: string) => void;
   busy: boolean;
 }) {
-  const [title, setTitle] = useState(note.title),
-    [text, setText] = useState(note.text);
+  const key = `research-note-draft:${note.id}`;
+  const readDraft = () => {
+    try {
+      return JSON.parse(localStorage.getItem(key) ?? "null") ?? note;
+    } catch {
+      return note;
+    }
+  };
+  const [title, setTitle] = useState<string>(readDraft().title),
+    [text, setText] = useState<string>(readDraft().text);
+  useEffect(() => {
+    try {
+      localStorage.setItem(key, JSON.stringify({ title, text }));
+    } catch {}
+  }, [key, title, text]);
   const changed = title !== note.title || text !== note.text;
   return (
     <article className="rw-note">
@@ -96,6 +111,11 @@ export function ResearchReading({
   onFocus,
   onSaveNote,
   onReturn,
+  pinned,
+  onPin,
+  wide,
+  onWide,
+  onBack,
 }: {
   paper?: PaperBundle;
   name: string;
@@ -112,6 +132,11 @@ export function ResearchReading({
   onFocus: (selection: ResearchSelection, question: string) => void;
   onSaveNote: (note: ResearchNote, title: string, text: string) => void;
   onReturn: (id: string) => void;
+  pinned: boolean;
+  onPin: () => void;
+  wide: boolean;
+  onWide: () => void;
+  onBack: () => void;
 }) {
   const body = useRef<HTMLDivElement>(null);
   const [manual, setManual] = useState(() => {
@@ -124,9 +149,28 @@ export function ResearchReading({
     [manualPage, setManualPage] = useState(1),
     [savingText, setSavingText] = useState(false),
     [textError, setTextError] = useState("");
-  const [pdfMode, setPdfMode] = useState(false);
   const [selected, setSelected] = useState<{ id: string; text: string }>();
-  const sources = paper?.sources.filter((s) => s.kind === "paper") ?? [];
+  useEffect(() => {
+    const clear = () => {
+      const selection = window.getSelection();
+      if (
+        !selection?.toString() ||
+        !selection.anchorNode ||
+        !body.current?.contains(selection.anchorNode)
+      )
+        setSelected(undefined);
+    };
+    document.addEventListener("selectionchange", clear);
+    return () => document.removeEventListener("selectionchange", clear);
+  }, []);
+  function chooseExcerpt(element: HTMLElement, source: Source) {
+    const text = selectedText(element, source.text);
+    setSelected(text ? { id: source.id, text } : undefined);
+  }
+  const sources =
+    paper?.sources.filter(
+      (s) => s.kind === "paper" && (!paper.pdfUrl || s.id === sourceId),
+    ) ?? [];
   if (extraSource && !sources.some((s) => s.id === extraSource.id))
     sources.unshift(extraSource);
   useEffect(() => {
@@ -134,8 +178,20 @@ export function ResearchReading({
     const card = [
       ...(body.current?.querySelectorAll<HTMLElement>("[data-source]") ?? []),
     ].find((e) => e.dataset.source === sourceId);
-    card?.scrollIntoView({ block: "start" });
+    if (!paper?.pdfUrl) card?.scrollIntoView({ block: "start" });
+    else if (body.current && locatorRevision) body.current.scrollTop = 0;
   }, [sourceId, paper?.id, panel, locatorRevision]);
+  useEffect(() => {
+    try {
+      if (body.current)
+        body.current.scrollTop =
+          Number(
+            localStorage.getItem(
+              `research-reader-scroll:${paper?.id}:${panel}`,
+            ),
+          ) || 0;
+    } catch {}
+  }, [paper?.id, panel]);
   function ask(source: Source, text: string) {
     if (!paper || !paper.sources.some((s) => s.id === source.id)) return;
     onFocus(
@@ -180,6 +236,12 @@ export function ResearchReading({
     <aside className="rp-viewer rw-reader" aria-label="资料与笔记面板">
       <header className="rp-viewer-header">
         <strong>{name}</strong>
+        <button aria-pressed={pinned} onClick={onPin}>
+          {pinned ? "取消固定" : "固定对照"}
+        </button>
+        <button onClick={wide ? onBack : onWide}>
+          {wide ? "返回资料" : "展开阅读"}
+        </button>
         <button aria-label="返回讨论" onClick={onClose}>
           × 返回讨论
         </button>
@@ -208,7 +270,18 @@ export function ResearchReading({
           </button>
         ))}
       </div>
-      <div className="rp-viewer-body" ref={body}>
+      <div
+        className="rp-viewer-body"
+        ref={body}
+        onScroll={(e) => {
+          try {
+            localStorage.setItem(
+              `research-reader-scroll:${paper?.id}:${panel}`,
+              String(e.currentTarget.scrollTop),
+            );
+          } catch {}
+        }}
+      >
         {panel === "sources" ? (
           <>
             {paper && (
@@ -223,8 +296,9 @@ export function ResearchReading({
               <details
                 className="rw-manual-text"
                 open={
-                  paper.parseStatus === "needs-text" ||
-                  paper.parseStatus === "failed"
+                  !paper.pdfUrl &&
+                  (paper.parseStatus === "needs-text" ||
+                    paper.parseStatus === "failed")
                 }
               >
                 <summary>补充原文</summary>
@@ -286,33 +360,10 @@ export function ResearchReading({
                 {textError && <p role="alert">{textError}</p>}
               </details>
             )}
-            {paper?.pdfUrl && (
-              <a
-                className="rw-pdf-link"
-                href={`${paper.pdfUrl}#page=${sources.find((s) => s.id === sourceId)?.page ?? 1}`}
-                target="_blank"
-                rel="noreferrer"
-              >
-                打开原始 PDF ↗
-              </a>
-            )}
-            {!sources.length && (
+            {!sources.length && !paper?.pdfUrl && (
               <p>当前没有可用原文。可以先讨论研究想法，再补充论文。</p>
             )}
             {paper?.pdfUrl && (
-              <div className="rw-reading-modes">
-                <button
-                  aria-pressed={!pdfMode}
-                  onClick={() => setPdfMode(false)}
-                >
-                  提取原文
-                </button>
-                <button aria-pressed={pdfMode} onClick={() => setPdfMode(true)}>
-                  PDF 页面
-                </button>
-              </div>
-            )}
-            {pdfMode && paper?.pdfUrl ? (
               <ResearchPdf
                 key={paper.id}
                 paper={paper}
@@ -321,75 +372,123 @@ export function ResearchReading({
                 onSource={onSource}
                 onFocus={onFocus}
               />
-            ) : (
-              sources.map((source) => (
-                <article
-                  key={source.id}
-                  data-source={source.id}
-                  className={`rp-source-card ${sourceId === source.id ? "rp-source-active" : ""}`}
+            )}
+            {paper && !paper.pdfUrl && (
+              <p role="status">仅有摘录，缺少原始 PDF。可从导航导入原文件。</p>
+            )}
+            {sources.map((source) => (
+              <article
+                key={source.id}
+                data-source={source.id}
+                className={`rp-source-card ${sourceId === source.id ? "rp-source-active" : ""}`}
+              >
+                <h3>{source.title}</h3>
+                <small>{source.locator}</small>
+                {source.image && (!paper?.pdfUrl || source.attachmentId) && (
+                  <>
+                    <ResearchImage
+                      url={source.displayImage ?? source.image}
+                      title={source.title}
+                      caption={source.text}
+                      originalMissing={
+                        !source.displayImage &&
+                        Boolean(
+                          source.attachmentId ||
+                          source.imagePurpose === "attachment",
+                        )
+                      }
+                    />
+                    <button
+                      disabled={busy}
+                      onClick={() => {
+                        onSource(source.id);
+                        onFocus(
+                          {
+                            label: source.figure || source.title,
+                            figureSourceId: source.id,
+                          },
+                          "带我看这张图：比较了什么，结果是什么，有哪些解释边界？",
+                        );
+                      }}
+                    >
+                      带我看这张图
+                    </button>
+                  </>
+                )}
+                <p
+                  className="rw-selectable"
+                  onMouseUp={(e) => {
+                    const text = selectedText(e.currentTarget, source.text);
+                    setSelected(text ? { id: source.id, text } : undefined);
+                  }}
+                  onKeyUp={(e) => {
+                    const text = selectedText(e.currentTarget, source.text);
+                    setSelected(text ? { id: source.id, text } : undefined);
+                  }}
+                  onTouchEnd={(e) => {
+                    const element = e.currentTarget;
+                    setTimeout(() => {
+                      const text = selectedText(element, source.text);
+                      setSelected(text ? { id: source.id, text } : undefined);
+                    }, 100);
+                  }}
                 >
-                  <h3>{source.title}</h3>
-                  <small>{source.locator}</small>
-                  {source.image && (
-                    <>
-                      <img
-                        className="rw-figure"
-                        src={source.image}
-                        alt={`${source.title} 原图`}
-                      />
-                      <button
-                        disabled={busy}
-                        onClick={() => {
-                          onSource(source.id);
-                          onFocus(
-                            {
-                              label: source.figure || source.title,
-                              figureSourceId: source.id,
-                            },
-                            "带我看这张图：比较了什么，结果是什么，有哪些解释边界？",
-                          );
+                  {source.text.includes("\uFFFD")
+                    ? "文本提取异常，请查看原始 PDF。"
+                    : source.text.length > 2000 && paper?.pdfUrl
+                      ? "当前摘录较长，请对照上方原始 PDF；完整图注可在下方展开。"
+                      : source.text ||
+                        "此页未提取到正文，请查看 PDF 或补充文字。"}
+                </p>
+                {source.text.length > 2000 &&
+                  !source.text.includes("\uFFFD") && (
+                    <details>
+                      <summary>完整图注／来源摘录</summary>
+                      <p
+                        className="rw-selectable"
+                        onMouseUp={(e) =>
+                          chooseExcerpt(e.currentTarget, source)
+                        }
+                        onKeyUp={(e) => chooseExcerpt(e.currentTarget, source)}
+                        onTouchEnd={(e) => {
+                          const element = e.currentTarget;
+                          setTimeout(() => chooseExcerpt(element, source), 100);
                         }}
                       >
-                        带我看这张图
-                      </button>
-                    </>
+                        {source.text}
+                      </p>
+                    </details>
                   )}
-                  <p
-                    className="rw-selectable"
-                    onMouseUp={(e) => {
-                      const text = selectedText(e.currentTarget, source.text);
-                      setSelected(text ? { id: source.id, text } : undefined);
-                    }}
-                    onKeyUp={(e) => {
-                      const text = selectedText(e.currentTarget, source.text);
-                      setSelected(text ? { id: source.id, text } : undefined);
-                    }}
-                    onTouchEnd={(e) => {
-                      const element = e.currentTarget;
-                      setTimeout(() => {
-                        const text = selectedText(element, source.text);
-                        setSelected(text ? { id: source.id, text } : undefined);
-                      }, 100);
-                    }}
-                  >
-                    {source.text || "此页未提取到正文，请查看 PDF 或补充文字。"}
-                  </p>
-                  {source.kind === "paper" &&
-                    paper?.sources.some((s) => s.id === source.id) &&
-                    source.text.trim() && (
-                      <div className="rw-actions">
-                        {selected?.id === source.id && (
-                          <button
-                            className="rp-primary"
-                            disabled={busy}
-                            onClick={() => {
-                              onSource(source.id);
-                              ask(source, selected.text);
-                            }}
-                          >
-                            引用提问
-                          </button>
-                        )}
+                {source.kind === "paper" &&
+                  paper?.sources.some((s) => s.id === source.id) &&
+                  source.text.trim() && (
+                    <div className="rw-actions">
+                      {selected?.id === source.id && (
+                        <SelectionActions
+                          text={selected.text}
+                          explain={() => {
+                            onSource(source.id);
+                            ask(source, selected.text);
+                          }}
+                          cite={() =>
+                            onFocus(
+                              {
+                                label: selected.text,
+                                sourceAnchor: {
+                                  paperId: paper!.id,
+                                  sourceVersion: paper!.version,
+                                  sourceId: source.id,
+                                  excerpt: selected.text,
+                                  page: source.page,
+                                },
+                              },
+                              "",
+                            )
+                          }
+                          source={() => onSource(source.id)}
+                        />
+                      )}
+                      {!paper?.pdfUrl && (
                         <button
                           disabled={busy}
                           onClick={() => {
@@ -399,16 +498,16 @@ export function ResearchReading({
                         >
                           对这段原文提问
                         </button>
-                      </div>
-                    )}
-                  {source.url && (
-                    <a href={source.url} target="_blank" rel="noreferrer">
-                      打开来源 ↗
-                    </a>
+                      )}
+                    </div>
                   )}
-                </article>
-              ))
-            )}
+                {source.url && (
+                  <a href={source.url} target="_blank" rel="noreferrer">
+                    打开来源 ↗
+                  </a>
+                )}
+              </article>
+            ))}
           </>
         ) : (
           <>

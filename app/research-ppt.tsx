@@ -10,6 +10,8 @@ import type { ResearchNote, ResearchTurn } from "../shared/workspace.ts";
 import { researchApi } from "./research-api.ts";
 import { finished, statusLabel } from "./research-discussion.tsx";
 import { Splitter, type defaultLayout } from "./research-layout.tsx";
+import { ObjectMenu } from "./research-menu.tsx";
+import { ResearchImage } from "./research-image.tsx";
 
 const done = (v: DeckVersion) =>
   ["completed", "failed", "cancelled", "interrupted"].includes(v.status);
@@ -36,9 +38,19 @@ export function ResearchPpt({
   layout: typeof defaultLayout;
   resize: (key: keyof typeof defaultLayout, value: number) => void;
 }) {
+  const viewKey = `research-ppt-view:${paper?.id}:${conversation?.id}`;
+  const readView = () => {
+    try {
+      return JSON.parse(localStorage.getItem(viewKey) ?? "{}");
+    } catch {
+      return {};
+    }
+  };
   const [versions, setVersions] = useState<DeckVersion[]>([]),
-    [selected, setSelected] = useState<string>();
-  const [page, setPage] = useState(0),
+    [selected, setSelected] = useState<string | undefined>(readView().selected);
+  const [page, setPage] = useState<number>(
+      Math.max(0, Number(readView().page) || 0),
+    ),
     [draft, setDraft] = useState<Slide>(),
     [request, setRequest] = useState("");
   const [question, setQuestion] = useState(
@@ -50,6 +62,12 @@ export function ResearchPpt({
     [exportUrl, setExportUrl] = useState(""),
     [name, setName] = useState("");
   const [useNotes, setUseNotes] = useState(true);
+  const [editing, setEditing] = useState(false);
+  useEffect(() => {
+    try {
+      localStorage.setItem(viewKey, JSON.stringify({ selected, page }));
+    } catch {}
+  }, [viewKey, selected, page]);
   const alive = useRef(true),
     previousStatus = useRef(new Map<string, string>());
   const draftKey = (version: string, index: number) =>
@@ -134,7 +152,13 @@ export function ResearchPpt({
   }, [conversation?.id, paper?.id]);
   useEffect(() => {
     setExportUrl("");
-    setRequest("");
+    try {
+      setRequest(
+        localStorage.getItem(`research-ppt-request:${selected}:${page}`) ?? "",
+      );
+    } catch {
+      setRequest("");
+    }
     if (!current) {
       setDraft(undefined);
       return;
@@ -154,7 +178,7 @@ export function ResearchPpt({
       current.displayName ??
         `汇报 · ${new Date(current.createdAt).toLocaleString("zh-CN")}`,
     );
-  }, [selected, page]);
+  }, [selected, page, current?.id]);
   async function action(task: () => Promise<void>) {
     if (busy) return;
     setBusy(true);
@@ -316,28 +340,24 @@ export function ResearchPpt({
               {error}
             </p>
           )}
-          <div className="rw-ppt-body">
-            <aside
-              className="rw-ppt-list"
-              style={{ width: layout.pptList }}
-              aria-label="汇报记录"
-            >
-              <h2>汇报记录</h2>
-              {!versions.length && <p>生成后在这里预览、逐页修改和导出。</p>}
-              {[...versions].reverse().map((v) => (
-                <button
-                  key={v.id}
-                  aria-pressed={selected === v.id}
-                  onClick={() => {
-                    setPage(0);
-                    setSelected(v.id);
-                  }}
-                >
-                  {v.displayName ??
-                    new Date(v.createdAt).toLocaleString("zh-CN")}
-                  <small>
+          {!!versions.length && (
+            <label className="rw-version-picker">
+              保存版本
+              <select
+                aria-label="保存版本"
+                value={selected ?? ""}
+                onChange={(e) => {
+                  setPage(0);
+                  setSelected(e.target.value);
+                }}
+              >
+                {[...versions].reverse().map((v) => (
+                  <option key={v.id} value={v.id}>
+                    {v.displayName ??
+                      new Date(v.createdAt).toLocaleString("zh-CN")}{" "}
+                    ·{" "}
                     {v.status === "completed"
-                      ? `${v.outline.slides.length} 页 · 已核对`
+                      ? "已保存并核对"
                       : v.status === "failed"
                         ? "修改失败"
                         : v.status === "cancelled"
@@ -345,19 +365,55 @@ export function ResearchPpt({
                           : v.status === "interrupted"
                             ? "已中断"
                             : "处理中"}
-                  </small>
-                </button>
-              ))}
+                  </option>
+                ))}
+              </select>
+            </label>
+          )}
+          <div className={`rw-ppt-body ${editing ? "rw-ppt-editing" : ""}`}>
+            <aside
+              className="rw-ppt-list"
+              style={{ width: layout.pptList }}
+              aria-label="汇报记录"
+            >
+              <h2>幻灯片</h2>
+              {!versions.length && <p>生成后在这里预览、逐页修改和导出。</p>}
               {current && (
                 <div className="rw-slide-list">
                   {current.outline.slides.map((s, i) => (
-                    <button
-                      aria-pressed={page === i}
+                    <ObjectMenu
                       key={i}
-                      onClick={() => setPage(i)}
+                      objectKey={`${current.id}:${i}`}
+                      label={`第 ${i + 1} 页操作`}
+                      actions={[
+                        {
+                          label: "编辑这一页",
+                          run: () => {
+                            setPage(i);
+                            setEditing(true);
+                          },
+                        },
+                        {
+                          label: "提出修改要求",
+                          run: () => {
+                            setPage(i);
+                            setEditing(true);
+                          },
+                        },
+                        {
+                          label: "查看本页来源",
+                          run: () => onCitation(s.citations[0]),
+                        },
+                      ]}
                     >
-                      第 {i + 1} 页 · {s.title}
-                    </button>
+                      <button
+                        aria-pressed={page === i}
+                        key={i}
+                        onClick={() => setPage(i)}
+                      >
+                        第 {i + 1} 页 · {s.title}
+                      </button>
+                    </ObjectMenu>
                   ))}
                 </div>
               )}
@@ -373,35 +429,39 @@ export function ResearchPpt({
             <div className="rw-ppt-preview">
               {current && draft && (
                 <>
-                  <div className="rw-ppt-name">
-                    <input
-                      aria-label="汇报名称"
-                      maxLength={120}
-                      value={name}
-                      onChange={(e) => setName(e.target.value)}
-                    />
-                    <button
-                      disabled={busy || !name.trim()}
-                      onClick={() =>
-                        void action(async () => {
-                          const value = await researchApi<DeckVersion>(
-                            `/api/deck-versions/${current.id}/name`,
-                            {
-                              conversationId: current.conversationId,
-                              displayName: name,
-                            },
-                            "PATCH",
-                          );
-                          if (alive.current)
-                            setVersions((old) =>
-                              old.map((v) => (v.id === value.id ? value : v)),
+                  <details>
+                    <summary>{name} · 汇报名称</summary>
+                    <div className="rw-ppt-name">
+                      <input
+                        aria-label="汇报名称"
+                        maxLength={120}
+                        value={name}
+                        onChange={(e) => setName(e.target.value)}
+                      />
+                      <button
+                        disabled={busy || !name.trim()}
+                        onClick={() =>
+                          void action(async () => {
+                            const value = await researchApi<DeckVersion>(
+                              `/api/deck-versions/${current.id}/name`,
+                              {
+                                conversationId: current.conversationId,
+                                displayName: name,
+                              },
+                              "PATCH",
                             );
-                        })
-                      }
-                    >
-                      保存名称
-                    </button>
-                  </div>
+                            if (alive.current)
+                              setVersions((old) =>
+                                old.map((v) => (v.id === value.id ? value : v)),
+                              );
+                          })
+                        }
+                      >
+                        保存名称
+                      </button>
+                    </div>
+                  </details>
+                  <button onClick={() => setEditing(true)}>编辑这一页</button>
                   <article
                     className="rw-slide"
                     aria-label={`第 ${page + 1} 页预览`}
@@ -421,12 +481,60 @@ export function ResearchPpt({
                         ?.image && (
                         <img
                           src={
-                            paper.sources.find(
-                              (s) => s.id === draft.imageSource,
-                            )!.image
+                            current.displayAssets?.[draft.imageSource]
+                              ? `/api/display-assets/${current.displayAssets[draft.imageSource]}`
+                              : paper.sources.find(
+                                  (s) => s.id === draft.imageSource,
+                                )!.image
                           }
                           alt="来源图件"
                         />
+                      )}
+                    {draft.imageSource &&
+                      (() => {
+                        const source = paper.sources.find(
+                          (s) => s.id === draft.imageSource,
+                        );
+                        const asset =
+                          current.displayAssets?.[draft.imageSource];
+                        return source?.image ? (
+                          <ResearchImage
+                            url={
+                              asset
+                                ? `/api/display-assets/${asset}`
+                                : source.image
+                            }
+                            title={source.title}
+                            caption={source.text}
+                            originalMissing={
+                              !asset ||
+                              current.displayAssetQuality?.[
+                                draft.imageSource
+                              ] === "legacy"
+                            }
+                            onPage={
+                              source.page && paper.pdfUrl
+                                ? () => onCitation(source.id)
+                                : undefined
+                            }
+                          />
+                        ) : null;
+                      })()}
+                    {draft.imageSource &&
+                      current.displayAssetQuality?.[draft.imageSource] ===
+                        "page" && (
+                        <p className="hint">
+                          图件来自原论文整页，细节可打开大图或原页查看。汇报需要突出单图时，可添加清晰单图后另存版本。
+                        </p>
+                      )}
+                    {draft.imageSource &&
+                      (!current.displayAssets?.[draft.imageSource] ||
+                        current.displayAssetQuality?.[draft.imageSource] ===
+                          "legacy") && (
+                        <p>
+                          此保存版本沿用旧图件，原件缺失时请补充清晰图片；有原始
+                          PDF 时，保存新版本可重新生成显示图。
+                        </p>
                       )}
                   </article>
                   <div className="rw-evidence">
@@ -436,7 +544,7 @@ export function ResearchPpt({
                       </button>
                     ))}
                   </div>
-                  <details open>
+                  <details>
                     <summary>讲稿</summary>
                     <p className="rw-ppt-notes">{draft.notes}</p>
                   </details>
@@ -517,101 +625,121 @@ export function ResearchPpt({
                 </>
               )}
             </div>
-            <Splitter
-              label="调整汇报编辑区宽度"
-              value={layout.pptEditor}
-              min={260}
-              max={480}
-              reverse
-              onChange={(v) => resize("pptEditor", v)}
-              className="rw-ppt-editor-split"
-            />
-            <aside
-              className="rw-ppt-editor"
-              style={{ width: layout.pptEditor }}
-              aria-label="指定页编辑"
-            >
-              {current && draft && (
-                <>
-                  <h2>编辑第 {page + 1} 页</h2>
-                  <label>
-                    标题
-                    <input
-                      aria-label="幻灯片标题"
-                      maxLength={65}
-                      value={draft.title}
-                      onChange={(e) =>
-                        changeDraft({ ...draft, title: e.target.value })
-                      }
-                    />
-                  </label>
-                  <label>
-                    要点 · 每行一条
-                    <textarea
-                      aria-label="幻灯片要点"
-                      value={draft.bullets.join("\n")}
-                      onChange={(e) =>
-                        changeDraft({
-                          ...draft,
-                          bullets: e.target.value.split("\n"),
-                        })
-                      }
-                    />
-                  </label>
-                  <label>
-                    讲稿
-                    <textarea
-                      aria-label="幻灯片讲稿"
-                      maxLength={2000}
-                      value={draft.notes}
-                      onChange={(e) =>
-                        changeDraft({ ...draft, notes: e.target.value })
-                      }
-                    />
-                  </label>
-                  {changed && (
+            {editing && (
+              <Splitter
+                label="调整汇报编辑区宽度"
+                value={layout.pptEditor}
+                min={260}
+                max={480}
+                reverse
+                onChange={(v) => resize("pptEditor", v)}
+                className="rw-ppt-editor-split"
+              />
+            )}
+            {editing && (
+              <aside
+                className="rw-ppt-editor"
+                style={{ width: layout.pptEditor }}
+                aria-label="指定页编辑"
+              >
+                {current && draft && (
+                  <>
+                    <h2>编辑第 {page + 1} 页</h2>
+                    <button onClick={() => setEditing(false)}>返回预览</button>
+                    <p role="status">
+                      {changed
+                        ? "未保存编辑；关闭编辑后草稿继续保留。"
+                        : "当前页与保存版本一致。"}
+                    </p>
+                    <label>
+                      标题
+                      <input
+                        aria-label="幻灯片标题"
+                        maxLength={65}
+                        value={draft.title}
+                        onChange={(e) =>
+                          changeDraft({ ...draft, title: e.target.value })
+                        }
+                      />
+                    </label>
+                    <label>
+                      要点 · 每行一条
+                      <textarea
+                        aria-label="幻灯片要点"
+                        value={draft.bullets.join("\n")}
+                        onChange={(e) =>
+                          changeDraft({
+                            ...draft,
+                            bullets: e.target.value.split("\n"),
+                          })
+                        }
+                      />
+                    </label>
+                    <label>
+                      讲稿
+                      <textarea
+                        aria-label="幻灯片讲稿"
+                        maxLength={2000}
+                        value={draft.notes}
+                        onChange={(e) =>
+                          changeDraft({ ...draft, notes: e.target.value })
+                        }
+                      />
+                    </label>
+                    {changed && (
+                      <button
+                        onClick={() => {
+                          localStorage.removeItem(draftKey(current.id, page));
+                          setDraft(
+                            structuredClone(current.outline.slides[page]),
+                          );
+                        }}
+                      >
+                        放弃这页未保存编辑
+                      </button>
+                    )}
                     <button
-                      onClick={() => {
-                        localStorage.removeItem(draftKey(current.id, page));
-                        setDraft(structuredClone(current.outline.slides[page]));
-                      }}
+                      disabled={
+                        busy ||
+                        active.length > 0 ||
+                        !changed ||
+                        !draft.title.trim() ||
+                        !draft.notes.trim() ||
+                        draft.bullets.length > 5 ||
+                        draft.bullets.some((s) => !s.trim() || s.length > 140)
+                      }
+                      onClick={() => void edit(true)}
                     >
-                      放弃这页未保存编辑
+                      保存指定页并核对
                     </button>
-                  )}
-                  <button
-                    disabled={
-                      busy ||
-                      active.length > 0 ||
-                      !changed ||
-                      !draft.title.trim() ||
-                      !draft.notes.trim() ||
-                      draft.bullets.length > 5 ||
-                      draft.bullets.some((s) => !s.trim() || s.length > 140)
-                    }
-                    onClick={() => void edit(true)}
-                  >
-                    保存指定页并核对
-                  </button>
-                  <label>
-                    修改要求
-                    <textarea
-                      aria-label="单页修改要求"
-                      maxLength={2000}
-                      placeholder="例如：机制讲得更清楚，保留来源"
-                      value={request}
-                      onChange={(e) => setRequest(e.target.value)}
-                    />
-                  </label>
-                  <button
-                    disabled={busy || active.length > 0 || !request.trim()}
-                    onClick={() => void edit(false)}
-                  >
-                    按要求修改这一页
-                  </button>
-                </>
-              )}
-            </aside>
+                    <label>
+                      修改要求
+                      <textarea
+                        aria-label="单页修改要求"
+                        maxLength={2000}
+                        placeholder="例如：机制讲得更清楚，保留来源"
+                        value={request}
+                        onChange={(e) => {
+                          setRequest(e.target.value);
+                          try {
+                            localStorage.setItem(
+                              `research-ppt-request:${selected}:${page}`,
+                              e.target.value,
+                            );
+                          } catch {}
+                        }}
+                      />
+                    </label>
+                    <button
+                      disabled={busy || active.length > 0 || !request.trim()}
+                      onClick={() => void edit(false)}
+                    >
+                      按要求修改这一页
+                    </button>
+                  </>
+                )}
+              </aside>
+            )}
           </div>
         </>
       )}

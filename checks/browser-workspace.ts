@@ -1,3 +1,8 @@
+import {
+  answerAction,
+  currentAction,
+  selectPdf,
+} from "./browser-research-helpers.ts";
 import assert from "node:assert/strict";
 import { mkdir, writeFile } from "node:fs/promises";
 import { chromium } from "playwright";
@@ -36,7 +41,10 @@ try {
     path: "runs/workspace/screenshots/home.png",
     fullPage: true,
   });
-  await page.getByRole("button", { name: "导入材料", exact: true }).click();
+  await page
+    .getByRole("button", { name: "＋ 导入论文", exact: true })
+    .first()
+    .click();
   await page
     .locator('input[type=file][accept=".pdf,application/pdf"]')
     .setInputFiles({
@@ -129,21 +137,10 @@ try {
       .projectId,
     null,
   );
-  await page.getByRole("button", { name: "资料与笔记", exact: true }).click();
-  await page
-    .locator(".rp-source-card .rw-selectable")
-    .first()
-    .evaluate((element) => {
-      const range = document.createRange();
-      range.setStart(element.firstChild!, 0);
-      range.setEnd(element.firstChild!, 70);
-      const selection = window.getSelection()!;
-      selection.removeAllRanges();
-      selection.addRange(range);
-      element.dispatchEvent(new MouseEvent("mouseup", { bubbles: true }));
-    });
+  await page.getByRole("button", { name: "资料", exact: true }).click();
+  await selectPdf(page, 0, 70);
   assert.equal(await page.getByLabel("向科研助手提问").inputValue(), "");
-  await page.getByRole("button", { name: "引用提问", exact: true }).click();
+  await page.getByRole("button", { name: "解释", exact: true }).click();
   await page.locator(".rw-reference-target").waitFor();
   assert.match(
     await page.getByLabel("向科研助手提问").inputValue(),
@@ -198,14 +195,14 @@ try {
   );
   await page.getByRole("button", { name: "返回讨论", exact: true }).click();
   await page.getByRole("button", { name: "发送 ↑", exact: true }).click();
-  await page.getByRole("button", { name: "停止", exact: true }).waitFor();
+  await page.getByRole("button", { name: "停止回答", exact: true }).waitFor();
   assert.equal(payload.paperId, imported.id);
   assert.equal(payload.sourceAnchor.sourceVersion, imported.version);
   assert.ok(imported.sources[0].text.includes(payload.sourceAnchor.excerpt));
   assert.equal(payload.sourceAnchor.excerpt.length, 70);
   assert.equal(payload.focus, undefined);
   assert.equal(payload.module, undefined);
-  await page.getByRole("button", { name: "停止", exact: true }).click();
+  await page.getByRole("button", { name: "停止回答", exact: true }).click();
   await page.getByText("已停止", { exact: true }).waitFor();
   await page.unroute("**/api/conversations/*/messages");
   await page.unroute("**/api/conversations/*/turns");
@@ -233,9 +230,7 @@ try {
   await page
     .getByRole("heading", { name: "从这篇论文的一个问题开始" })
     .waitFor();
-  await page
-    .getByRole("button", { name: "论文名称与归组", exact: true })
-    .click();
+  await currentAction(page, "论文名称与归组");
   await page
     .getByRole("dialog")
     .getByLabel("名称", { exact: true })
@@ -263,9 +258,11 @@ try {
   );
   assert.equal(grouped.title, "grouped-exercise.pdf");
   await page.getByLabel("向科研助手提问").fill("先保留这篇论文的草稿");
-  await page.getByRole("button", { name: "资料与笔记", exact: true }).click();
+  await page.getByRole("button", { name: "资料", exact: true }).click();
+  await selectPdf(page);
   await page
-    .getByRole("button", { name: "对这段原文提问", exact: true })
+    .getByRole("toolbar", { name: "所选文字操作" })
+    .getByRole("button", { name: "解释", exact: true })
     .click();
   await page.getByLabel("向科研助手提问").fill("先保留这篇论文的草稿");
   await page.getByRole("button", { name: "返回讨论", exact: true }).click();
@@ -277,7 +274,8 @@ try {
     .getByRole("button", { name: "engineering-exercise.pdf", exact: true })
     .click();
   await page
-    .getByRole("heading", { name: "engineering-exercise.pdf", exact: true })
+    .locator(".rw-breadcrumb strong")
+    .filter({ hasText: "engineering-exercise.pdf" })
     .waitFor();
   assert.equal(await page.locator(".rw-reference").count(), 0);
   await page
@@ -288,7 +286,8 @@ try {
     .getByRole("button", { name: "我的对照实验论文", exact: true })
     .click();
   await page
-    .getByRole("heading", { name: "我的对照实验论文", exact: true })
+    .locator(".rw-breadcrumb strong")
+    .filter({ hasText: "我的对照实验论文" })
     .waitFor();
   assert.equal(
     await page.getByLabel("向科研助手提问").inputValue(),
@@ -330,10 +329,8 @@ try {
   });
   assert.ok(position.ok());
   await page.reload();
-  await page
-    .getByRole("button", { name: "保存回答为笔记", exact: true })
-    .waitFor();
-  await page.getByRole("button", { name: "重命名讨论", exact: true }).click();
+  await page.locator(`[data-turn-id="${turn.id}"]`).waitFor();
+  await currentAction(page, "重命名讨论", "讨论记录");
   await page
     .getByRole("dialog")
     .getByLabel("名称", { exact: true })
@@ -343,9 +340,7 @@ try {
     .getByRole("button", { name: "保存", exact: true })
     .click();
   await page.getByRole("dialog").waitFor({ state: "hidden" });
-  await page
-    .getByRole("button", { name: "保存回答为笔记", exact: true })
-    .click();
+  await answerAction(page, turn.id, "保存回答为笔记");
   await page.getByRole("heading", { name: "我的笔记", exact: true }).waitFor();
   const text = page.getByRole("textbox", { name: /^笔记正文/ });
   await text.fill("我的理解：对照帮助区分不同解释。");
@@ -361,10 +356,16 @@ try {
     1,
   );
   assert.ok(repeated.anchors.length);
+  await page.getByRole("button", { name: "固定对照", exact: true }).click();
   await page.reload();
-  await page
-    .getByRole("heading", { name: "研究问题与对照", exact: true })
-    .waitFor();
+  assert.equal(
+    (
+      await (
+        await page.request.get(base + `/api/conversations/${conversation.id}`)
+      ).json()
+    ).title,
+    "研究问题与对照",
+  );
   await page.getByRole("heading", { name: "我的笔记", exact: true }).waitFor();
   assert.equal(
     await page.getByRole("textbox", { name: /^笔记正文/ }).inputValue(),
@@ -396,10 +397,11 @@ try {
     });
   }
   await page.getByRole("button", { name: "返回讨论", exact: true }).click();
-  await page.getByRole("button", { name: "资料与笔记", exact: true }).click();
+  await page.getByRole("button", { name: "资料", exact: true }).click();
+  await selectPdf(page);
   await page
-    .getByRole("button", { name: "对这段原文提问", exact: true })
-    .first()
+    .getByRole("toolbar", { name: "所选文字操作" })
+    .getByRole("button", { name: "解释", exact: true })
     .click();
   await page.getByRole("button", { name: "返回讨论", exact: true }).click();
   await page.getByText("正在问：", { exact: false }).waitFor();

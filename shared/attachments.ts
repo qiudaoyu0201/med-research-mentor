@@ -7,6 +7,12 @@ export interface ResearchAttachment {
   name: string;
   hash: string;
   image?: string;
+  originalUrl?: string;
+  originalWidth?: number;
+  originalHeight?: number;
+  modelWidth?: number;
+  modelHeight?: number;
+  originalMime?: "image/png" | "image/jpeg";
   status:
     | "ready"
     | "unchecked"
@@ -34,6 +40,14 @@ export function attachmentSource(a: ResearchAttachment): Source | undefined {
         title: a.name,
         kind: "interpretation",
         image: a.image,
+        ...(a.originalUrl
+          ? {
+              displayImage: a.originalUrl,
+              imagePurpose: "attachment" as const,
+              imageWidth: a.originalWidth,
+              imageHeight: a.originalHeight,
+            }
+          : {}),
         attachmentId: a.id,
         text: a.description,
         locator: `用户上传图片：${a.name}；未绑定论文页码`,

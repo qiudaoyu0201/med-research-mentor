@@ -105,7 +105,9 @@ function harness() {
       return { output: schema.parse(output) };
     },
   };
-  const attachments = new Attachments(provider, persist),
+  const attachments = new Attachments(provider, persist, (id, bytes) =>
+      persist("attachment-originals", id, { base64: bytes.toString("base64") }),
+    ),
     conversations = new ConversationStore(persist),
     manager = new TaskManager(provider, persist);
   const assistant = new AssistantService(
@@ -147,6 +149,17 @@ test("image admission rejects forged formats and oversized dimensions before dec
   );
   assert.equal(good.status, "unchecked");
   assert.ok(good.image?.startsWith("data:image/jpeg"));
+  assert.equal(good.originalWidth, 50);
+  assert.equal(good.originalHeight, 30);
+  assert.equal(good.originalMime, "image/png");
+  assert.equal(
+    good.originalUrl,
+    "/api/conversations/chat/attachments/a/original",
+  );
+  assert.equal(
+    (h.disk.get("attachment-originals/a") as any).base64,
+    image().toString("base64"),
+  );
   assert.deepEqual(imageDimensions(image()), { width: 50, height: 30 });
   assert.deepEqual(
     await h.attachments.upload("a", "chat", paper.id, "diagram.png", image()),
@@ -179,6 +192,39 @@ test("image admission rejects forged formats and oversized dimensions before dec
     "failed",
   );
   assert.equal(h.inputs.length, 0);
+});
+test("high-resolution uploads keep original bytes while only model input is reduced", async () => {
+  const h = harness(),
+    bytes = createCanvas(3200, 1200).toBuffer("image/png");
+  const value = await h.attachments.upload(
+    "large-readable",
+    "chat",
+    paper.id,
+    "figure.png",
+    bytes,
+  );
+  assert.equal(value.status, "unchecked");
+  assert.equal(value.originalWidth, 3200);
+  assert.equal(value.modelWidth, 1800);
+  assert.equal(value.modelHeight, 675);
+  assert.deepEqual(
+    Buffer.from(
+      (h.disk.get("attachment-originals/large-readable") as any).base64,
+      "base64",
+    ),
+    bytes,
+  );
+  const checked = await h.attachments.check(
+    value.id,
+    "chat",
+    "解释比较",
+    paper,
+    new BudgetLedger("turn", async () => {}),
+    new AbortController().signal,
+  );
+  assert.equal(attachmentSource(checked)!.displayImage, value.originalUrl);
+  assert.equal(attachmentSource(checked)!.image, value.image);
+  assert.equal(h.inputs.length, 1);
 });
 test("purpose checks reuse admitted source versions without inventing paper metadata and retry only the selected image", async () => {
   const h = harness();

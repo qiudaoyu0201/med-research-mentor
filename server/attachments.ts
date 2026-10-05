@@ -9,7 +9,7 @@ import {
 } from "../shared/attachments.ts";
 import type { Provider } from "./provider.ts";
 import { BudgetLedger } from "./budget.ts";
-import { save, list } from "./storage.ts";
+import { save, list, safeId } from "./storage.ts";
 import { digest } from "./materials.ts";
 import { TaskScheduler } from "./scheduler.ts";
 
@@ -62,6 +62,14 @@ export class Attachments {
   constructor(
     private provider: Provider,
     private persist: typeof save = save,
+    private persistOriginal: (
+      id: string,
+      bytes: Buffer,
+    ) => Promise<void> = async (id, bytes) => {
+      await save("attachment-originals", safeId(id), {
+        base64: bytes.toString("base64"),
+      });
+    },
   ) {}
   async restore(loader: typeof list = list) {
     for (const a of await loader<ResearchAttachment>("attachments")) {
@@ -159,6 +167,13 @@ export class Attachments {
           a.image = canvas.toDataURL("image/jpeg", 0.88);
           if (a.image.length > 3_000_000)
             throw new Error("图片内容过大，请裁剪目标区域后上传。");
+          await this.persistOriginal(id, bytes);
+          a.originalUrl = `/api/conversations/${conversationId}/attachments/${id}/original`;
+          a.originalMime = bytes[0] === 137 ? "image/png" : "image/jpeg";
+          a.originalWidth = img.width;
+          a.originalHeight = img.height;
+          a.modelWidth = canvas.width;
+          a.modelHeight = canvas.height;
         });
       } catch (error) {
         a.status = "failed";

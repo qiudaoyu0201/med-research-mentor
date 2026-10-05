@@ -3,6 +3,8 @@ import {
   attachmentLimits,
   type ResearchAttachment,
 } from "../shared/attachments.ts";
+import { ResearchImage } from "./research-image.tsx";
+import { ObjectMenu } from "./research-menu.tsx";
 
 export interface PendingAttachment {
   id: string;
@@ -124,14 +126,25 @@ export function useAttachmentDraft(
   };
 }
 function Preview({ item }: { item: PendingAttachment }) {
-  const [url, setUrl] = useState(item.record?.image);
+  const [url, setUrl] = useState(
+    item.record?.originalUrl ?? item.record?.image,
+  );
   useEffect(() => {
     if (!item.file || /\.pdf$/i.test(item.file.name)) return;
     const next = URL.createObjectURL(item.file);
     setUrl(next);
     return () => URL.revokeObjectURL(next);
   }, [item.file]);
-  return url ? <img src={url} alt="待发送图片" /> : <span>PDF</span>;
+  return url ? (
+    <ResearchImage
+      url={url}
+      title={item.file?.name ?? item.record?.name ?? "待发送图片"}
+      originalMissing={!item.file && !item.record?.originalUrl}
+      thumbnail
+    />
+  ) : (
+    <span>PDF</span>
+  );
 }
 export function PendingAttachments({
   files,
@@ -143,7 +156,14 @@ export function PendingAttachments({
   return (
     <div className="rw-attachments" aria-label="待发送附件">
       {files.map((item) => (
-        <div key={item.id}>
+        <ObjectMenu
+          key={item.id}
+          objectKey={item.id}
+          label={`附件操作 ${item.file?.name ?? item.record?.name}`}
+          actions={[
+            { label: "移除尚未发送的附件", run: () => remove(item.id) },
+          ]}
+        >
           <Preview item={item} />
           <span>{item.file?.name ?? item.record?.name}</span>
           <button
@@ -153,7 +173,10 @@ export function PendingAttachments({
           >
             ×
           </button>
-        </div>
+          {/\.pdf$/i.test(item.file?.name ?? "") && (
+            <small>发送后进入这篇论文的聊天</small>
+          )}
+        </ObjectMenu>
       ))}
     </div>
   );
@@ -180,19 +203,54 @@ export function MessageAttachments({
   return (
     <div className="rw-message-attachments">
       {values.map((a) => (
-        <div key={a.id}>
+        <ObjectMenu
+          key={a.id}
+          objectKey={a.id}
+          label={`附件操作 ${a.name}`}
+          actions={[
+            {
+              label: "查看附件状态",
+              run: () =>
+                document.getElementById(`attachment-state-${a.id}`)?.focus(),
+            },
+            ...(a.status !== "ready" && a.image
+              ? [
+                  {
+                    label: "补充用途",
+                    run: () =>
+                      document
+                        .getElementById(`attachment-purpose-${a.id}`)
+                        ?.focus(),
+                  },
+                  {
+                    label: "重试这项附件",
+                    disabled: disabled || Boolean(a.reason?.includes("上限")),
+                    run: () => onRetry(a.id, purposes[a.id]),
+                  },
+                ]
+              : []),
+          ]}
+        >
           {a.image && (
             <details>
               <summary>{a.name}</summary>
-              <img src={a.image} alt={a.name} />
+              <ResearchImage
+                url={a.originalUrl ?? a.image}
+                title={a.name}
+                caption={a.description}
+                originalMissing={!a.originalUrl}
+              />
             </details>
           )}
           {!a.image && <strong>{a.name}</strong>}
-          <span>{labels[a.status]}</span>
+          <span id={`attachment-state-${a.id}`} tabIndex={-1}>
+            {labels[a.status]}
+          </span>
           {a.reason && <p>{a.reason}</p>}
           {a.status !== "ready" && a.image && (
             <>
               <input
+                id={`attachment-purpose-${a.id}`}
                 aria-label={`图片用途 ${a.name}`}
                 placeholder="补一句图片用途"
                 maxLength={1000}
@@ -209,7 +267,7 @@ export function MessageAttachments({
               </button>
             </>
           )}
-        </div>
+        </ObjectMenu>
       ))}
     </div>
   );

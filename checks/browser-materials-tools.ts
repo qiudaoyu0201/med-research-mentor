@@ -1,3 +1,4 @@
+import { answerAction, selectPdf } from "./browser-research-helpers.ts";
 import assert from "node:assert/strict";
 import { mkdir, writeFile } from "node:fs/promises";
 import { createCanvas } from "@napi-rs/canvas";
@@ -145,8 +146,8 @@ try {
     "file previews/removal survive reload; paste defers upload until Send; per-image purpose retry keeps the same message",
   );
 
-  await page.getByRole("button", { name: "资料与笔记", exact: true }).click();
-  await page.getByRole("button", { name: "PDF 页面", exact: true }).click();
+  await page.getByRole("button", { name: "资料", exact: true }).click();
+
   const pdfText = page.locator(".rw-pdf-page .textLayer span").first();
   await pdfText.waitFor();
   const pdfExcerpt = await pdfText.evaluate((element) => {
@@ -160,9 +161,7 @@ try {
     element.dispatchEvent(new MouseEvent("mouseup", { bubbles: true }));
     return selection.toString();
   });
-  await page
-    .getByRole("button", { name: "引用 PDF 所选文字", exact: true })
-    .click();
+  await page.getByRole("button", { name: "解释", exact: true }).click();
   assert.equal(
     await page.locator(".rw-reference-target").textContent(),
     `正在问：${pdfExcerpt}`,
@@ -170,11 +169,11 @@ try {
   await page.getByRole("button", { name: "发送 ↑", exact: true }).click();
   assert.equal(payload.sourceAnchor.excerpt, pdfExcerpt);
   assert.equal(payload.sourceAnchor.textView, "pdf");
-  await page.getByRole("button", { name: "提取原文", exact: true }).click();
+
   report.assertions.push(
     "inline PDF renders a selectable text layer and submits the actual selected substring with a validated paper/page anchor",
   );
-  const selectable = page.locator(".rp-source-card .rw-selectable").first();
+  const selectable = page.locator(".rw-pdf-page .textLayer span").first();
   const selected = await selectable.evaluate((element) => {
     const text = element.textContent!,
       range = document.createRange();
@@ -186,7 +185,7 @@ try {
     element.dispatchEvent(new MouseEvent("mouseup", { bubbles: true }));
     return text.slice(5, 90);
   });
-  await page.getByRole("button", { name: "引用提问", exact: true }).click();
+  await page.getByRole("button", { name: "解释", exact: true }).click();
   assert.equal(
     await page.locator(".rw-reference-target").textContent(),
     `正在问：${selected}`,
@@ -203,19 +202,18 @@ try {
     "partial/cross-sentence source selections display and submit the exact substring; quotation returns to the source",
   );
 
-  await page
-    .locator('input[type=file][accept=".pdf,.png,.jpg,.jpeg"]')
-    .setInputFiles({
-      name: `composer-${unique}.pdf`,
-      mimeType: "application/pdf",
-      buffer: pdfFixture(
-        "Different paper explores an experimental comparison. The experiment records strength and control group outcomes.",
-      ),
-    });
+  await page.locator('input[type=file][accept=".pdf"]').setInputFiles({
+    name: `composer-${unique}.pdf`,
+    mimeType: "application/pdf",
+    buffer: pdfFixture(
+      "Different paper explores an experimental comparison. The experiment records strength and control group outcomes.",
+    ),
+  });
   await page.getByLabel("向科研助手提问").fill("解释新论文的实验设计");
   await page.getByRole("button", { name: "发送 ↑", exact: true }).click();
   await page
-    .getByRole("heading", { name: `composer-${unique}.pdf`, exact: true })
+    .locator(".rw-breadcrumb strong")
+    .filter({ hasText: `composer-${unique}.pdf` })
     .waitFor();
   assert.notEqual(payload.paperId, imported.id);
   assert.equal(payload.question, "解释新论文的实验设计");
@@ -238,11 +236,19 @@ try {
   await page.reload();
   await page.getByRole("button", { name: "PPT 汇报", exact: true }).click();
   await page.getByLabel("第 1 页预览").waitFor();
+  await page
+    .locator(".rw-ppt-name")
+    .locator("..")
+    .getByText("汇报名称", { exact: false })
+    .click();
   await page.getByLabel("汇报名称").fill(`研究汇报-${unique}`);
   await page.getByRole("button", { name: "保存名称", exact: true }).click();
   await page
-    .getByRole("button", { name: new RegExp(`研究汇报-${unique}`) })
-    .waitFor();
+    .getByLabel("保存版本", { exact: true })
+    .locator("option:checked")
+    .filter({ hasText: `研究汇报-${unique}` })
+    .waitFor({ state: "attached" });
+  await page.getByRole("button", { name: "编辑这一页", exact: true }).click();
   await page.getByLabel("幻灯片标题").fill("本地修改预览");
   assert.ok(await page.getByText("本地修改预览", { exact: true }).isVisible());
   assert.ok(
@@ -271,6 +277,7 @@ try {
   await page.reload();
   await page.getByRole("button", { name: "PPT 汇报", exact: true }).click();
   await page.getByLabel("第 1 页预览").waitFor();
+  await page.getByRole("button", { name: "编辑这一页", exact: true }).click();
   assert.equal(
     await page.getByLabel("幻灯片标题").inputValue(),
     "本地修改预览",
@@ -332,19 +339,9 @@ try {
   }
   await page.unroute("**/api/conversations/*/turns");
   await page.reload();
-  await page
-    .locator(`[data-turn-id="${example.id}"]`)
-    .getByRole("button", { name: "收藏解释", exact: true })
-    .click();
+  await answerAction(page, example.id, "收藏解释");
   await page.getByText("解释已收藏。", { exact: true }).waitFor();
-  await page
-    .locator(`[data-turn-id="${example.id}"]`)
-    .getByText("我的理解反馈", { exact: true })
-    .click();
-  await page
-    .locator(`[data-turn-id="${example.id}"]`)
-    .getByRole("button", { name: "仍不理解", exact: true })
-    .click();
+  await answerAction(page, example.id, "仍不理解", "我的理解反馈");
   await page.getByText("你的理解反馈已保存。", { exact: true }).waitFor();
   const recorded = await (
     await page.request.get(base + `/api/conversations/${sampleChat.id}`)
@@ -365,14 +362,16 @@ try {
   const navSplit = page.getByRole("separator", { name: "调整导航宽度" });
   await navSplit.focus();
   await page.keyboard.press("ArrowRight");
-  assert.equal(await navSplit.getAttribute("aria-valuenow"), "280");
+  assert.equal(await navSplit.getAttribute("aria-valuenow"), "236");
   await post("/api/workspace/position", {
     conversationId: sampleChat.id,
     paperId: "xu-2018",
     panel: "sources",
   });
   await page.reload();
-  assert.equal(await navSplit.getAttribute("aria-valuenow"), "280");
+  assert.equal(await navSplit.getAttribute("aria-valuenow"), "236");
+  await page.getByRole("button", { name: "资料", exact: true }).click();
+  await page.getByRole("button", { name: "固定对照", exact: true }).click();
   await page.getByLabel("资料与笔记面板", { exact: true }).waitFor();
   const readSplit = page.getByRole("separator", { name: "调整聊天与阅读宽度" });
   const box = (await readSplit.boundingBox())!;
@@ -380,11 +379,11 @@ try {
   await page.mouse.down();
   await page.mouse.move(box.x - 55, box.y + 80);
   await page.mouse.up();
-  assert.ok(Number(await readSplit.getAttribute("aria-valuenow")) > 45);
+  assert.ok(Number(await readSplit.getAttribute("aria-valuenow")) > 360);
   await page.getByRole("button", { name: "设置", exact: true }).click();
   await page.getByRole("button", { name: "恢复默认布局" }).click();
   await page.getByRole("button", { name: "关闭设置" }).click();
-  assert.equal(await navSplit.getAttribute("aria-valuenow"), "260");
+  assert.equal(await navSplit.getAttribute("aria-valuenow"), "216");
   report.assertions.push(
     "native settings and personal records persist through backend; splitter keyboard/drag changes persist across reload and Reset restores defaults",
   );
@@ -405,6 +404,8 @@ try {
     panel: "sources",
   });
   await page.reload();
+  await page.getByRole("button", { name: "资料", exact: true }).click();
+  await page.getByText("补充原文", { exact: true }).click();
   await page
     .getByLabel("补充原文正文")
     .fill(
@@ -470,6 +471,13 @@ try {
     "research/PPT views have no horizontal overflow at 1440/1024/768/390; zero browser exceptions",
   );
   report.status = "passed";
+} catch (error) {
+  report.status = "failed";
+  await mkdir("runs/second-round/screenshots", { recursive: true });
+  await page.screenshot({
+    path: "runs/second-round/screenshots/materials-failure.png",
+  });
+  throw error;
 } finally {
   await writeFile(
     "runs/second-round/browser-materials-tools.json",

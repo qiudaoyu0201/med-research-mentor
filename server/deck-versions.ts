@@ -7,7 +7,8 @@ import type {
   TaskRun,
 } from "../shared/types.ts";
 import { defaultDeck, sample } from "../examples/bundle.ts";
-import { save, list } from "./storage.ts";
+import { save, list, read } from "./storage.ts";
+import { saveDisplayAsset, type DisplayAsset } from "./display-assets.ts";
 import { deckSchema, slideSchema, groundedReviewSchema } from "./schemas.ts";
 import { z } from "zod";
 import { materialSources, validateTeachingSurface } from "./orchestrator.ts";
@@ -82,6 +83,21 @@ export class DeckVersions {
     await this.persist("deck-versions", version.id, version);
     this.versions.set(version.id, structuredClone(version));
   }
+  private async bindDisplayAssets(version: DeckVersion, paper: PaperBundle) {
+    version.displayAssets = { ...version.displayAssets };
+    version.displayAssetQuality = { ...version.displayAssetQuality };
+    for (const id of new Set(
+      version.outline.slides.flatMap((s) => s.imageSource ?? []),
+    )) {
+      const source = paper.sources.find((s) => s.id === id);
+      if (source?.image && !version.displayAssets[id])
+        version.displayAssets[id] = await saveDisplayAsset(paper, source);
+      if (version.displayAssets[id])
+        version.displayAssetQuality[id] = (
+          await read<DisplayAsset>("display-assets", version.displayAssets[id])
+        ).purpose;
+    }
+  }
   async seed(conversationId: string, paperId: string, run?: TaskRun) {
     const paper = withFoundationSources(await this.paperById(paperId));
     if (
@@ -133,6 +149,7 @@ export class DeckVersions {
       ),
       roles: [],
     };
+    await this.bindDisplayAssets(version, paper);
     await this.store(version);
     return version;
   }
@@ -415,6 +432,7 @@ export class DeckVersions {
           digest(version.outline.slides[i]) !== digest(parent.outline.slides[i])
         )
           throw new Error("修改越过指定页。");
+      await this.bindDisplayAssets(version, paper);
       version.status = "completed";
     } catch (error) {
       version.status = signal.aborted ? "cancelled" : "failed";
@@ -436,7 +454,7 @@ export class DeckVersions {
     if (this.busy) throw new Error("请先停止或等待修改完成。");
     const current = this.get(currentId, conversationId),
       target = this.get(targetId, conversationId);
-    await this.sources(target);
+    const paper = await this.sources(target);
     if (
       target.status !== "completed" ||
       current.paperId !== target.paperId ||
@@ -455,6 +473,7 @@ export class DeckVersions {
       slideIndex: undefined,
       request: "恢复旧版本",
     };
+    await this.bindDisplayAssets(version, paper);
     await this.store(version);
     return version;
   }
@@ -467,8 +486,15 @@ export class DeckVersions {
       )
     )
       throw new Error("此版本尚未完成核对，不能导出。");
-    const paper = await this.sources(version),
+    const paper = structuredClone(await this.sources(version)),
       artifactId = randomUUID();
+    for (const source of paper.sources) {
+      const assetId = version.displayAssets?.[source.id];
+      if (assetId)
+        source.image = (
+          await read<DisplayAsset>("display-assets", assetId)
+        ).image;
+    }
     await this.exporter(version.outline, paper, artifactId);
     return { id: artifactId, url: `/api/decks/${artifactId}`, versionId: id };
   }

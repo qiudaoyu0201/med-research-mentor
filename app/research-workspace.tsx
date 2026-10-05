@@ -33,6 +33,14 @@ import type { ResearchAttachment } from "../shared/attachments.ts";
 import { ResearchReading } from "./research-reading.tsx";
 import "./reading-prototype.css";
 import "./research-workspace.css";
+import { ObjectMenu } from "./research-menu.tsx";
+import {
+  readPreference,
+  useResearchTheme,
+  useResearchFont,
+} from "./research-theme.ts";
+import { ResearchIcon } from "./research-icons.tsx";
+import "./research-appearance.css";
 
 type Management = {
   kind: "create" | "project" | "paper" | "discussion";
@@ -53,6 +61,68 @@ function titleOf(c: ConversationState) {
 
 export function ResearchWorkspace() {
   const { layout, update: resize, reset: resetLayout } = useResearchLayout();
+  const { theme, setTheme } = useResearchTheme();
+  const { font, setFont } = useResearchFont();
+  const [collapsed, setCollapsed] = useState(
+    () =>
+      readPreference(
+        "research-navigation-collapsed",
+        ["true", "false"],
+        "false",
+      ) === "true",
+  );
+  const [pinned, setPinned] = useState(
+    () =>
+      readPreference("research-reader-pinned", ["true", "false"], "false") ===
+      "true",
+  );
+  const [autoGuide, setAutoGuide] = useState(
+    () =>
+      readPreference("research-auto-guide", ["true", "false"], "false") ===
+      "true",
+  );
+  const [wide, setWide] = useState(false),
+    [composerExpanded, setComposerExpanded] = useState(false),
+    [contentWidth, setContentWidth] = useState(0);
+  const returnPosition = useRef<
+    { top: number; target?: HTMLElement } | undefined
+  >(undefined);
+  const canCompare = contentWidth - layout.reading - 7 >= 720;
+  useEffect(() => {
+    const target = document.querySelector(".rw-main");
+    if (!target) return;
+    const observer = new ResizeObserver(([entry]) =>
+      setContentWidth(entry.contentRect.width),
+    );
+    observer.observe(target);
+    return () => observer.disconnect();
+  }, []);
+  useEffect(() => {
+    try {
+      localStorage.setItem("research-navigation-collapsed", String(collapsed));
+      localStorage.setItem("research-reader-pinned", String(pinned));
+      localStorage.setItem("research-auto-guide", String(autoGuide));
+    } catch {}
+  }, [collapsed, pinned, autoGuide]);
+  function rememberAnswer() {
+    if (returnPosition.current) return;
+    const messages = document.querySelector<HTMLElement>(".rw-messages");
+    returnPosition.current = {
+      top: messages?.scrollTop ?? 0,
+      target: document.activeElement as HTMLElement,
+    };
+  }
+  function closeReading() {
+    setWide(false);
+    setPanel(null);
+    requestAnimationFrame(() => {
+      const messages = document.querySelector<HTMLElement>(".rw-messages");
+      if (messages && returnPosition.current)
+        messages.scrollTop = returnPosition.current.top;
+      returnPosition.current?.target?.focus({ preventScroll: true });
+      returnPosition.current = undefined;
+    });
+  }
   const [mode, setMode] = useState<"research" | "ppt">("research"),
     [settings, setSettings] = useState(false),
     [records, setRecords] = useState(false);
@@ -66,6 +136,14 @@ export function ResearchWorkspace() {
   const [conversation, setConversation] = useState<ConversationState>();
   const [turns, setTurns] = useState<ResearchTurn[]>([]);
   const [paper, setPaper] = useState<PaperBundle>();
+  useEffect(() => {
+    window.dispatchEvent(new Event("research-dismiss-menus"));
+    setWide(false);
+    returnPosition.current = undefined;
+  }, [paper?.id, mode]);
+  useEffect(() => {
+    window.dispatchEvent(new Event("research-dismiss-menus"));
+  }, [settings, records]);
   const [projectId, setProjectId] = useState<string | null>(null);
   const [start, setStart] = useState<ReadingStart>();
   const [panel, setPanel] = useState<"sources" | "notes" | null>(null);
@@ -109,6 +187,10 @@ export function ResearchWorkspace() {
   const active = turns.find((t) => !finished(t));
   const busy = loading || working || uploading;
   const historical = !!paper && !!conversation && !conversation.mainChat;
+  const staleSelection =
+    !!selection?.sourceAnchor &&
+    (selection.sourceAnchor.paperId !== paper?.id ||
+      selection.sourceAnchor.sourceVersion !== paper?.version);
   const importRetry = useRef<{ file: File; id: string } | undefined>(undefined);
   const recent = [...conversations]
     .filter((c) => c.recentTurnIds.length)
@@ -159,7 +241,7 @@ export function ResearchWorkspace() {
       setTurns(history);
       setPaper(bound);
       setProjectId(owner);
-      setPanel(position?.panel ?? null);
+      setPanel(pinned ? (position?.panel ?? null) : null);
       setSourceId(position?.sourceId);
       setExtraSource(undefined);
       try {
@@ -178,7 +260,11 @@ export function ResearchWorkspace() {
         );
         if (token === revision.current) {
           setStart(nextStart);
-          if (nextStart.autoGenerate && !state.recentTurnIds.length) {
+          if (
+            autoGuide &&
+            nextStart.autoGenerate &&
+            !state.recentTurnIds.length
+          ) {
             void researchApi<ReadingStart>(`/api/papers/${bound.id}/start`, {
               automatic: true,
             })
@@ -366,13 +452,19 @@ export function ResearchWorkspace() {
   useEffect(() => {
     const escape = (e: KeyboardEvent) => {
       if (e.key === "Escape") {
-        setPanel(null);
+        if (
+          e.defaultPrevented ||
+          (e.target as HTMLElement).closest("dialog,[role=menu]")
+        )
+          return;
+        if (wide) setWide(false);
+        else closeReading();
         setMobile(false);
       }
     };
     window.addEventListener("keydown", escape);
     return () => window.removeEventListener("keydown", escape);
-  }, []);
+  }, [wide]);
   useEffect(() => {
     if (management) dialog.current?.showModal();
   }, [!!management]);
@@ -480,9 +572,11 @@ export function ResearchWorkspace() {
         JSON.stringify(next),
       );
     } catch {}
-    suggest(text);
+    if (text) suggest(text);
+    else composer.current?.focus();
   }
   function citation(id: string, source?: Source) {
+    rememberAnswer();
     setSourceRevision((value) => value + 1);
     setSourceId(id);
     setExtraSource(source);
@@ -694,11 +788,11 @@ export function ResearchWorkspace() {
       style={
         {
           "--rw-navigation": `${layout.navigation}px`,
-          "--rw-reading": `${layout.reading}%`,
+          "--rw-reading": `${layout.reading}px`,
           "--rw-composer": `${layout.composer}px`,
         } as import("react").CSSProperties
       }
-      className="rp rw"
+      className={`rp rw ${collapsed ? "rw-nav-collapsed" : ""} ${panel && (!canCompare || wide) ? "rw-reading-single" : ""} ${wide ? "rw-reading-wide" : ""} ${composerExpanded ? "rw-composer-expanded" : ""}`}
       onDragEnter={(e) => {
         if (e.dataTransfer.types.includes("Files")) {
           e.preventDefault();
@@ -759,6 +853,15 @@ export function ResearchWorkspace() {
             archived: p.archived,
           });
         }}
+        onEditPaper={(p) =>
+          setManagement({
+            kind: "paper",
+            id: p.id,
+            name: paperName(p, index),
+            projectId:
+              index.papers.find((m) => m.paperId === p.id)?.projectId ?? null,
+          })
+        }
         onResume={(id) => void openConversation(id)}
         mobile={mobile}
         close={() => setMobile(false)}
@@ -768,7 +871,7 @@ export function ResearchWorkspace() {
         label="调整导航宽度"
         value={layout.navigation}
         min={200}
-        max={340}
+        max={280}
         onChange={(v) => resize("navigation", v)}
       />
       <main className="rw-main">
@@ -776,20 +879,120 @@ export function ResearchWorkspace() {
           <button
             className="rp-mobile-menu"
             aria-label="打开导航"
-            onClick={() => setMobile(true)}
+            onClick={() => {
+              if (innerWidth > 1000) setCollapsed((old) => !old);
+              else setMobile((old) => !old);
+            }}
           >
-            ☰
+            <ResearchIcon name="sidebar" />
           </button>
           <div className="rw-breadcrumb">
             <span>{mode === "research" ? "论文研究" : "PPT 汇报"}</span>
-            <strong>{currentName}</strong>
+            <strong title={paper?.title ?? currentName}>{currentName}</strong>
           </div>
-          <button disabled={busy} onClick={() => fileInput.current?.click()}>
-            导入材料
+          <button
+            aria-expanded={!!panel}
+            disabled={loading}
+            onClick={() => {
+              if (panel) closeReading();
+              else {
+                rememberAnswer();
+                setPanel("sources");
+              }
+            }}
+          >
+            资料
           </button>
-          <button onClick={() => setPanel(panel ? null : "sources")}>
-            资料与笔记
-          </button>
+          <ObjectMenu
+            objectKey={paper?.id ?? conversation?.id ?? "idea"}
+            label="当前论文更多操作"
+            actions={[
+              ...(paper
+                ? [
+                    {
+                      label: "论文名称与归组",
+                      run: () =>
+                        setManagement({
+                          kind: "paper",
+                          id: paper.id,
+                          name: currentName,
+                          projectId,
+                        }),
+                    },
+                  ]
+                : [
+                    {
+                      label: "导入论文",
+                      run: () => fileInput.current?.click(),
+                    },
+                  ]),
+              {
+                label: "讨论记录",
+                children: [
+                  ...(conversation
+                    ? [
+                        {
+                          label: "重命名讨论",
+                          run: () =>
+                            setManagement({
+                              kind: "discussion",
+                              id: conversation.id,
+                              name: titleOf(conversation),
+                            }),
+                        },
+                      ]
+                    : []),
+                  ...conversations
+                    .filter(
+                      (c) =>
+                        c.paperId === (paper?.id ?? null) &&
+                        (paper || (c.projectId ?? null) === projectId),
+                    )
+                    .map((c) => ({
+                      label: titleOf(c),
+                      run: () => void openConversation(c.id),
+                    })),
+                  ...(!paper
+                    ? [{ label: "开始新讨论", run: () => blank(projectId) }]
+                    : []),
+                ],
+              },
+              {
+                label: "我的笔记",
+                run: () => {
+                  rememberAnswer();
+                  setPanel("notes");
+                },
+              },
+              { label: "PPT 汇报", run: () => setMode("ppt") },
+              {
+                label: "更多问题",
+                children: [
+                  "这篇论文提出了什么研究问题？",
+                  "这篇论文的核心实验怎样设计？",
+                  "这篇论文的结果有哪些证据？",
+                  "这篇论文有哪些局限，对后续研究有什么启发？",
+                ].map((q) => ({ label: q, run: () => suggest(q) })),
+              },
+              ...(archived.length
+                ? [
+                    {
+                      label: "已归档课题",
+                      children: archived.map((p) => ({
+                        label: p.name,
+                        run: () =>
+                          setManagement({
+                            kind: "project",
+                            id: p.id,
+                            name: p.name,
+                            archived: true,
+                          }),
+                      })),
+                    },
+                  ]
+                : []),
+            ]}
+          />
         </header>
         {mode === "ppt" ? (
           <ResearchPpt
@@ -811,132 +1014,13 @@ export function ResearchWorkspace() {
         ) : (
           <div className="rw-content">
             <section className="rw-chat">
-              <header className="rp-chat-header rw-chat-header">
-                <div>
-                  <small>
-                    {paper
-                      ? paper.parseStatus === "ready" || !paper.parseStatus
-                        ? "论文资料可用"
-                        : "需要补充正文"
-                      : "无需先创建课题"}
-                    {uploading ? " · 正在上传并解析" : ""}
-                  </small>
-                  <h1>
-                    {conversation &&
-                    (conversation.recentTurnIds.length ||
-                      conversation.titleEdited)
-                      ? titleOf(conversation)
-                      : currentName}
-                  </h1>
-                </div>
-                <details className="rw-discussion-menu">
-                  <summary>讨论记录</summary>
-                  {!paper && (
-                    <button
-                      disabled={busy}
-                      onClick={() => {
-                        blank(projectId, paper);
-                      }}
-                    >
-                      开始新讨论
-                    </button>
-                  )}
-                  {conversations
-                    .filter(
-                      (c) =>
-                        c.paperId === (paper?.id ?? null) &&
-                        (paper || (c.projectId ?? null) === projectId),
-                    )
-                    .sort((a, b) =>
-                      (b.updatedAt || "").localeCompare(a.updatedAt || ""),
-                    )
-                    .map((c) => (
-                      <button
-                        key={c.id}
-                        onClick={() => void openConversation(c.id)}
-                      >
-                        {titleOf(c)}
-                      </button>
-                    ))}
-                </details>
-              </header>
-              <div className="rw-toolbar">
-                {paper && (
-                  <button
-                    disabled={busy}
-                    onClick={() =>
-                      setManagement({
-                        kind: "paper",
-                        id: paper.id,
-                        name: currentName,
-                        projectId,
-                      })
-                    }
-                  >
-                    论文名称与归组
-                  </button>
-                )}
-                {conversation && (
-                  <button
-                    disabled={busy}
-                    onClick={() =>
-                      setManagement({
-                        kind: "discussion",
-                        id: conversation.id,
-                        name: titleOf(conversation),
-                      })
-                    }
-                  >
-                    重命名讨论
-                  </button>
-                )}
-                {paper && (
-                  <details className="rw-route">
-                    <summary>阅读路线</summary>
-                    {[
-                      "这篇论文提出了什么研究问题？",
-                      "这篇论文的核心实验怎样设计？",
-                      "这篇论文的结果有哪些证据？",
-                      "这篇论文有哪些局限，对后续研究有什么启发？",
-                    ].map((q) => (
-                      <button
-                        key={q}
-                        disabled={busy}
-                        onClick={() => suggest(q)}
-                      >
-                        {q}
-                      </button>
-                    ))}
-                  </details>
-                )}
-                {!!archived.length && (
-                  <details className="rw-route">
-                    <summary>已归档课题</summary>
-                    {archived.map((p) => (
-                      <button
-                        key={p.id}
-                        disabled={busy}
-                        onClick={() =>
-                          setManagement({
-                            kind: "project",
-                            id: p.id,
-                            name: p.name,
-                            archived: true,
-                          })
-                        }
-                      >
-                        {p.name}
-                      </button>
-                    ))}
-                  </details>
-                )}
-              </div>
               {loading && (
                 <p className="rw-loading" role="status">
                   正在恢复资料与讨论…
                 </p>
               )}
               <ResearchDiscussion
+                conversationId={conversation?.id}
                 turns={turns}
                 paper={paper}
                 start={start}
@@ -1043,6 +1127,7 @@ export function ResearchWorkspace() {
                       turnId: turn.id,
                     });
                     await refresh();
+                    rememberAnswer();
                     setPanel("notes");
                     setNotice("回答已保存，原讨论与依据已保留。");
                   })
@@ -1054,16 +1139,6 @@ export function ResearchWorkspace() {
                     : undefined
                 }
                 onResume={() => recent && void openConversation(recent.id)}
-              />
-              <Splitter
-                className="rw-composer-split"
-                label="调整输入区高度"
-                value={layout.composer}
-                min={175}
-                max={360}
-                horizontal
-                reverse
-                onChange={(v) => resize("composer", v)}
               />
               <div className="rp-composer-area rw-composer-area">
                 {error && (
@@ -1088,71 +1163,24 @@ export function ResearchWorkspace() {
                     </button>
                   </div>
                 )}
-                {active && (
-                  <div className="rw-running" role="status">
-                    <span>
-                      {statusLabel[active.run?.status ?? active.status] ??
-                        "处理中"}
-                    </span>
+                {latestReply?.reply?.nextStep && (
+                  <details className="rw-next-step">
+                    <summary>接下来可以…</summary>
                     <button
-                      disabled={working}
-                      onClick={() =>
-                        void action(async () => {
-                          await researchApi(
-                            `/api/turns/${active.id}/cancel`,
-                            {},
-                          );
-                          setNotice("已请求停止，正在保存记录。");
-                        })
-                      }
+                      type="button"
+                      onClick={() => suggest(latestReply.reply!.nextStep)}
                     >
-                      停止
+                      {latestReply.reply.nextStep}
                     </button>
-                  </div>
-                )}
-                {latestReply && (
-                  <div className="rp-suggestions">
-                    <button
-                      disabled={busy}
-                      onClick={() => {
-                        suggest("再简单一点，继续解释上一轮完整问题。");
-                      }}
-                    >
-                      讲得更通俗
-                    </button>
-                    {!!latestReply.reply?.content?.sections.some(
-                      (s) => s.citations.length,
-                    ) && (
-                      <button
-                        onClick={() => {
-                          const id =
-                            latestReply.reply!.content!.sections.flatMap(
-                              (s) => s.citations,
-                            )[0];
-                          citation(
-                            id,
-                            latestReply.run?.materials
-                              ?.at(-1)
-                              ?.sources.find((s) => s.id === id),
-                          );
-                        }}
-                      >
-                        查看依据
-                      </button>
-                    )}
-                    {latestReply.reply?.nextStep && (
-                      <button
-                        disabled={busy}
-                        title={latestReply.reply.nextStep}
-                        onClick={() => suggest(latestReply.reply!.nextStep)}
-                      >
-                        继续探索
-                      </button>
-                    )}
-                  </div>
+                  </details>
                 )}
                 {selection && (
                   <div className="rw-reference">
+                    {staleSelection && (
+                      <span role="alert">
+                        来源版本已变化，请移除后重新选择引用。
+                      </span>
+                    )}
                     <button
                       type="button"
                       className="rw-reference-target"
@@ -1232,7 +1260,15 @@ export function ResearchWorkspace() {
                     placeholder="哪里没读懂？可以用自己的话问。"
                     value={question}
                     maxLength={2000}
-                    onChange={(e) => draft(e.target.value)}
+                    onChange={(e) => {
+                      draft(e.target.value);
+                      e.currentTarget.style.height = "auto";
+                      e.currentTarget.style.height =
+                        Math.min(
+                          e.currentTarget.scrollHeight,
+                          composerExpanded ? 320 : 112,
+                        ) + "px";
+                    }}
                     onKeyDown={(e) => {
                       if (
                         e.key === "Enter" &&
@@ -1246,29 +1282,42 @@ export function ResearchWorkspace() {
                   />
                   <div>
                     <div className="rw-file-buttons">
+                      <ObjectMenu
+                        objectKey={draftKey}
+                        label="添加附件"
+                        actions={[
+                          {
+                            label: "添加 PDF",
+                            run: () => attachmentInput.current?.click(),
+                          },
+                          {
+                            label: "添加图片",
+                            run: () => imageInput.current?.click(),
+                          },
+                        ]}
+                      />
                       <button
                         type="button"
-                        onClick={() => attachmentInput.current?.click()}
+                        aria-expanded={composerExpanded}
+                        onClick={() => setComposerExpanded((old) => !old)}
                       >
-                        添加文件
-                      </button>
-                      <button
-                        type="button"
-                        onClick={() => imageInput.current?.click()}
-                      >
-                        添加图片
+                        {composerExpanded ? "收起输入" : "展开输入"}
                       </button>
                     </div>
                     <button
                       type="submit"
-                      className="rp-primary"
+                      className="rp-primary rw-send"
+                      aria-label={
+                        working ? "正在提交" : active ? "加入队列 ↑" : "发送 ↑"
+                      }
                       disabled={
                         busy ||
+                        staleSelection ||
                         historical ||
                         (!question.trim() && !pendingAttachments.files.length)
                       }
                     >
-                      {working ? "正在提交" : active ? "加入队列 ↑" : "发送 ↑"}
+                      <ResearchIcon name={working ? "more" : "arrow"} />
                     </button>
                   </div>
                 </form>
@@ -1277,17 +1326,15 @@ export function ResearchWorkspace() {
                 </p>
               </div>
             </section>
-            {panel && (
+            {panel && canCompare && !wide && (
               <Splitter
                 className="rw-reading-split"
                 label="调整聊天与阅读宽度"
                 value={layout.reading}
-                min={30}
-                max={60}
+                min={320}
+                max={Math.max(320, Math.min(420, contentWidth - 727))}
                 reverse
-                scale={
-                  100 / Math.max(600, window.innerWidth - layout.navigation)
-                }
+                scale={1}
                 onChange={(v) => resize("reading", v)}
               />
             )}
@@ -1321,7 +1368,16 @@ export function ResearchWorkspace() {
                 notes={notes}
                 busy={busy}
                 onPanel={setPanel}
-                onClose={() => setPanel(null)}
+                onClose={closeReading}
+                pinned={pinned}
+                onPin={() => {
+                  setPinned((old) => !old);
+                  if (!canCompare)
+                    setNotice("当前空间不足以并排，可收起导航后固定对照。");
+                }}
+                wide={wide}
+                onWide={() => setWide(true)}
+                onBack={() => setWide(false)}
                 onSource={(id) => citation(id)}
                 onFocus={focus}
                 onSaveNote={(note: ResearchNote, title, text) =>
@@ -1355,7 +1411,7 @@ export function ResearchWorkspace() {
       <input
         ref={attachmentInput}
         type="file"
-        accept=".pdf,.png,.jpg,.jpeg"
+        accept=".pdf"
         multiple
         hidden
         onChange={(e) => {
@@ -1390,7 +1446,20 @@ export function ResearchWorkspace() {
           ensure={ensure}
           onState={applyConversation}
           close={() => setSettings(false)}
-          reset={resetLayout}
+          reset={() => {
+            resetLayout();
+            setCollapsed(false);
+            setPinned(false);
+            setComposerExpanded(false);
+            setWide(false);
+            setPanel(null);
+          }}
+          theme={theme}
+          onTheme={setTheme}
+          font={font}
+          onFont={setFont}
+          autoGuide={autoGuide}
+          onAutoGuide={setAutoGuide}
         />
       )}
       {records && (
@@ -1469,6 +1538,14 @@ export function ResearchWorkspace() {
                 }
               />
             </label>
+            {management.kind === "paper" && (
+              <details open>
+                <summary>论文信息</summary>
+                <p>{papers.find((p) => p.id === management.id)?.title}</p>
+                <p>{papers.find((p) => p.id === management.id)?.doi}</p>
+                <p>{papers.find((p) => p.id === management.id)?.scope}</p>
+              </details>
+            )}
             {management.kind === "paper" && (
               <label>
                 所属课题

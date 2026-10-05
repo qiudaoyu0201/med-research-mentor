@@ -135,6 +135,16 @@ const projects = new Projects();
 await projects.restore();
 const entityId = z.string().regex(/^[a-zA-Z0-9_-]{1,100}$/);
 const nameInput = z.string().trim().min(1).max(120);
+app.get("/api/display-assets/:id", async (req, res) => {
+  const asset = await read<{ image: string }>(
+    "display-assets",
+    entityId.parse(req.params.id),
+  );
+  res
+    .type(asset.image.startsWith("data:image/png") ? "image/png" : "image/jpeg")
+    .setHeader("Cache-Control", "private, max-age=31536000, immutable");
+  res.send(Buffer.from(asset.image.split(",")[1], "base64"));
+});
 const imageUpload = multer({
   storage: multer.memoryStorage(),
   limits: { fileSize: attachmentLimits.imageBytes, files: 1 },
@@ -174,6 +184,26 @@ app.post("/api/turns/:id/attachments/:attachmentId/retry", async (req, res) => {
       ),
     );
 });
+app.get(
+  "/api/conversations/:id/attachments/:attachmentId/original",
+  async (req, res) => {
+    const state = assistant.conversations.get(entityId.parse(req.params.id));
+    const record = attachments.get(
+      entityId.parse(req.params.attachmentId),
+      state.id,
+    );
+    if (!record.originalUrl || !record.originalMime)
+      return res.status(404).json({ error: "原件缺失，请补充清晰图片。" });
+    const original = await read<{ base64: string }>(
+      "attachment-originals",
+      record.id,
+    );
+    res
+      .type(record.originalMime)
+      .setHeader("Cache-Control", "private, max-age=31536000, immutable");
+    res.send(Buffer.from(original.base64, "base64"));
+  },
+);
 app.get("/api/workspace", async (_req, res) => {
   const papers = await Promise.all(
     [loadedSample, ...(await list<PaperBundle>("papers"))].map((p) =>
@@ -239,6 +269,8 @@ app.get("/api/papers/:id/start", async (req, res) => {
 app.post("/api/papers/:id/start", async (req, res) => {
   const body = z.object({ automatic: z.boolean().optional() }).parse(req.body);
   const paper = await paperById(req.params.id);
+  if (body.automatic && process.env.TUTOR_READING_GUIDES === "manual")
+    return res.json(readingGuides.get(paper));
   if (body.automatic && assistant.scheduler.has(taskKey(paper.id, "guide")))
     return res.json(readingGuides.get(paper));
   res.status(202).json(await readingGuides.start(paper));

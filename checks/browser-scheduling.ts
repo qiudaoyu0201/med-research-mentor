@@ -1,3 +1,4 @@
+import { selectPdf } from "./browser-research-helpers.ts";
 import assert from "node:assert/strict";
 import { randomUUID } from "node:crypto";
 import { mkdir, writeFile } from "node:fs/promises";
@@ -112,7 +113,8 @@ try {
       .getByRole("button", { name: papers[index].title, exact: true })
       .click();
     await page
-      .getByRole("heading", { name: papers[index].title, exact: true })
+      .locator(".rw-breadcrumb strong")
+      .filter({ hasText: papers[index].title })
       .waitFor();
     await page
       .getByText("正在恢复资料与讨论…", { exact: true })
@@ -152,9 +154,11 @@ try {
     await page.getByLabel("向科研助手提问").inputValue(),
     "A 下一条草稿",
   );
-  await page.getByRole("button", { name: "资料与笔记", exact: true }).click();
+  await page.getByRole("button", { name: "资料", exact: true }).click();
+  await selectPdf(page);
   await page
-    .getByRole("button", { name: "对这段原文提问", exact: true })
+    .getByRole("toolbar", { name: "所选文字操作" })
+    .getByRole("button", { name: "解释", exact: true })
     .click();
   await page.getByLabel("向科研助手提问").fill("A 带引用的草稿");
   await page.getByRole("button", { name: "返回讨论", exact: true }).click();

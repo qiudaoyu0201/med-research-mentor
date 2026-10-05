@@ -15,6 +15,10 @@ export interface Source {
   caption?: string;
   verified: boolean;
   image?: string;
+  displayImage?: string;
+  imagePurpose?: "page" | "figure" | "attachment";
+  imageWidth?: number;
+  imageHeight?: number;
   attachmentId?: string;
   paperId?: string;
   paperVersion?: string;
@@ -118,6 +122,8 @@ export interface DeckOutline {
   slides: Slide[];
 }
 export interface DeckVersion {
+  displayAssets?: Record<string, string>;
+  displayAssetQuality?: Record<string, "page" | "original" | "legacy">;
   displayName?: string;
   id: string;
   conversationId: string;

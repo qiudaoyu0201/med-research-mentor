@@ -1,15 +1,15 @@
 import { useEffect, useRef, useState } from "react";
 export const defaultLayout = {
-  navigation: 260,
-  reading: 45,
-  composer: 210,
+  navigation: 216,
+  reading: 360,
+  composer: 140,
   pptList: 230,
   pptEditor: 340,
 };
 const bounds = {
-  navigation: [200, 340],
-  reading: [30, 60],
-  composer: [175, 360],
+  navigation: [200, 280],
+  reading: [320, 420],
+  composer: [110, 300],
   pptList: [180, 380],
   pptEditor: [260, 480],
 } as const;
@@ -17,8 +17,15 @@ export function useResearchLayout() {
   const [layout, setLayout] = useState(() => {
     try {
       const stored = JSON.parse(
-        localStorage.getItem("research-layout") ?? "{}",
+        localStorage.getItem("research-layout-v2") ?? "{}",
       );
+      if (!localStorage.getItem("research-layout-v2")) {
+        const previous = JSON.parse(
+          localStorage.getItem("research-layout") ?? "{}",
+        );
+        if (Number.isFinite(previous.navigation))
+          stored.navigation = previous.navigation;
+      }
       return Object.fromEntries(
         Object.entries(defaultLayout).map(([key, value]) => [
           key,
@@ -38,14 +45,16 @@ export function useResearchLayout() {
     setLayout((old) => {
       const next = { ...old, [key]: value };
       try {
-        localStorage.setItem("research-layout", JSON.stringify(next));
+        localStorage.setItem("research-layout-v2", JSON.stringify(next));
       } catch {}
       return next;
     });
   }
   function reset() {
     try {
-      localStorage.removeItem("research-layout");
+      localStorage.setItem("research-layout-v2", JSON.stringify(defaultLayout));
+      localStorage.removeItem("research-navigation-collapsed");
+      localStorage.removeItem("research-reader-pinned");
     } catch {}
     setLayout(defaultLayout);
   }

@@ -1,6 +1,8 @@
 import type { ConversationState, PaperBundle } from "../shared/types.ts";
 import type { WorkspaceIndex } from "../shared/workspace.ts";
 import { paperName } from "../shared/workspace.ts";
+import { ObjectMenu } from "./research-menu.tsx";
+import { ResearchIcon } from "./research-icons.tsx";
 
 export function ResearchNavigation({
   index,
@@ -21,6 +23,7 @@ export function ResearchNavigation({
   onImport,
   onCreateProject,
   onEditProject,
+  onEditPaper,
   onResume,
   mobile,
   close,
@@ -43,6 +46,7 @@ export function ResearchNavigation({
   onImport: () => void;
   onCreateProject: () => void;
   onEditProject: (id: string) => void;
+  onEditPaper: (paper: PaperBundle) => void;
   onResume: (id: string) => void;
   mobile: boolean;
   close: () => void;
@@ -92,19 +96,21 @@ export function ResearchNavigation({
             disabled={busy}
             onClick={onHome}
           >
+            <ResearchIcon name="book" />
             论文研究
           </button>
-          <button
-            aria-current={mode === "ppt" ? "page" : undefined}
-            onClick={onPpt}
-          >
-            PPT 汇报
-          </button>
         </nav>
-        <button className="rp-new-task" disabled={busy} onClick={onImport}>
-          ＋ 导入论文
+        <button
+          className="rp-new-task"
+          aria-label="＋ 导入论文"
+          disabled={busy}
+          onClick={onImport}
+        >
+          <ResearchIcon name="plus" />
+          <span>＋ 导入论文</span>
         </button>
         <label className="rp-search">
+          <ResearchIcon name="search" />
           <input
             aria-label="搜索论文"
             placeholder="搜索我的论文"
@@ -142,38 +148,55 @@ export function ResearchNavigation({
                 open={!!search || projectId === (group.id || null)}
               >
                 <summary>
-                  <span>{group.name}</span>
-                  <small>{items.length}</small>
-                </summary>
-                <div className="rw-project-actions">
-                  <button
-                    disabled={busy}
-                    onClick={() => onProject(group.id || null)}
+                  <ObjectMenu
+                    objectKey={group.id}
+                    label={`课题操作 ${group.name}`}
+                    actions={[
+                      {
+                        label: "讨论方向",
+                        run: () => onProject(group.id || null),
+                      },
+                      ...(group.id
+                        ? [
+                            {
+                              label: "重命名／归档课题",
+                              run: () => onEditProject(group.id),
+                            },
+                          ]
+                        : []),
+                    ]}
                   >
-                    讨论方向
-                  </button>
-                  {group.id && (
-                    <button
-                      aria-label={`管理课题 ${group.name}`}
-                      disabled={busy}
-                      onClick={() => onEditProject(group.id)}
-                    >
-                      管理
-                    </button>
-                  )}
-                </div>
+                    <span>{group.name}</span>
+                    <small>{items.length}</small>
+                  </ObjectMenu>
+                </summary>
                 <div className="rp-task-list">
                   {items.map((paper) => (
-                    <button
+                    <ObjectMenu
                       key={paper.id}
-                      className={`rp-task ${paperId === paper.id ? "rp-task-active" : ""}`}
-                      disabled={busy}
-                      onClick={() => onPaper(paper)}
-                      title={paperName(paper, index)}
+                      objectKey={paper.id}
+                      label={`论文操作 ${paperName(paper, index)}`}
+                      actions={[
+                        {
+                          label: "重命名／移动到课题",
+                          run: () => onEditPaper(paper),
+                        },
+                        {
+                          label: "查看论文信息",
+                          run: () => onEditPaper(paper),
+                        },
+                      ]}
                     >
-                      <span>{paperName(paper, index)}</span>
-                      {paper.id === "xu-2018" && <small>示例材料</small>}
-                    </button>
+                      <button
+                        className={`rp-task ${paperId === paper.id ? "rp-task-active" : ""}`}
+                        disabled={busy}
+                        onClick={() => onPaper(paper)}
+                        title={paperName(paper, index)}
+                      >
+                        <span>{paperName(paper, index)}</span>
+                        {paper.id === "xu-2018" && <small>示例材料</small>}
+                      </button>
+                    </ObjectMenu>
                   ))}
                 </div>
                 {!items.length && (
@@ -184,32 +207,44 @@ export function ResearchNavigation({
               </details>
             );
           })}
-          <div className="rp-section-label rw-recents">最近讨论</div>
-          {recent.map((c) => (
-            <button
-              key={c.id}
-              className="rp-task"
-              disabled={busy}
-              onClick={() => onResume(c.id)}
-            >
-              <span>
-                {c.title || c.goal || "科研讨论"}
-                <small className="rw-recent-paper">
-                  {papers.find((p) => p.id === c.paperId)
-                    ? paperName(
-                        papers.find((p) => p.id === c.paperId)!,
-                        index,
-                      )
-                    : "研究想法"}
-                </small>
-              </span>
-            </button>
-          ))}
+          <details className="rw-recents">
+            <summary>最近讨论</summary>
+            {recent.map((c) => (
+              <button
+                key={c.id}
+                className="rp-task"
+                disabled={busy}
+                onClick={() => onResume(c.id)}
+              >
+                <span>
+                  {c.title || c.goal || "科研讨论"}
+                  <small className="rw-recent-paper">
+                    {papers.find((p) => p.id === c.paperId)
+                      ? paperName(
+                          papers.find((p) => p.id === c.paperId)!,
+                          index,
+                        )
+                      : "研究想法"}
+                  </small>
+                </span>
+              </button>
+            ))}
+          </details>
         </div>
         <footer className="rw-sidebar-footer">
           <small>PDF · 上限 30 MiB / 100 页</small>
-          <button onClick={onSettings}>设置</button>
-          <button onClick={onRecords}>个人记录</button>
+          <button onClick={onSettings}>
+            <ResearchIcon name="gear" />
+            设置
+          </button>
+          <button onClick={onRecords}>
+            <ResearchIcon name="person" />
+            个人记录
+          </button>
+          <button onClick={onPpt}>
+            <ResearchIcon name="slides" />
+            PPT 汇报
+          </button>
         </footer>
       </aside>
     </>
