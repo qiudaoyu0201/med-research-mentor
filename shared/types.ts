@@ -287,6 +287,8 @@ export interface AssistantMessage {
   visibleImage?: string;
   exportRunId?: string;
   focus?: { runId: string; sectionIndex: number; excerpt: string };
+  sourceAnchor?: import("./workspace.ts").SourceAnchor;
+  figureSourceId?: string;
   depth?: "brief" | "standard" | "deep";
   readabilityCheck?: boolean;
   deckEdit?: { versionId: string; slideIndex: number };
@@ -294,6 +296,11 @@ export interface AssistantMessage {
 export interface ConversationState {
   id: string;
   version: number;
+  title?: string;
+  titleEdited?: boolean;
+  projectId?: string | null;
+  createdAt?: string;
+  updatedAt?: string;
   paperId: string | null;
   sourceVersion: string | null;
   goal: string;

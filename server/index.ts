@@ -33,6 +33,8 @@ import { registerFigureEvidence } from "./paper-assets.ts";
 import { DeckVersions } from "./deck-versions.ts";
 import { digest } from "./materials.ts";
 import { LearningRecords } from "./learning-records.ts";
+import { Projects } from "./projects.ts";
+import { readingStart } from "../shared/workspace.ts";
 
 const app = express(),
   port = Number(process.env.PORT || 4317),
@@ -77,6 +79,13 @@ const upload = multer({
     filename: (_req, _file, cb) => cb(null, randomUUID() + ".pdf"),
   }),
   limits: { fileSize: 30 * 1024 * 1024, files: 1 },
+  fileFilter: (_req, file, callback) => {
+    if (!/\.pdf$/i.test(file.originalname))
+      return callback(
+        new Error("当前支持 PDF 导入；图片准入将在下一阶段开放。"),
+      );
+    callback(null, true);
+  },
 });
 const paperById = async (id: string) =>
   id === "foundation-only"
@@ -103,6 +112,117 @@ const assistant = new AssistantService(
   deckVersions,
 );
 await assistant.restore();
+const projects = new Projects();
+await projects.restore();
+const entityId = z.string().regex(/^[a-zA-Z0-9_-]{1,100}$/);
+const nameInput = z.string().trim().min(1).max(120);
+app.get("/api/workspace", async (_req, res) => {
+  const papers = [loadedSample, ...(await list<PaperBundle>("papers"))];
+  const index = projects.snapshot();
+  index.positions = index.positions.map((p) =>
+    projects.validatePosition(
+      p,
+      papers.find((paper) => paper.id === p.paperId),
+    ),
+  );
+  res.json({
+    index,
+    papers,
+    conversations: [...assistant.conversations.states.values()],
+  });
+});
+app.post("/api/projects", async (req, res) => {
+  const body = z
+    .object({ name: nameInput, goal: z.string().max(2000).optional() })
+    .parse(req.body);
+  res.status(201).json(await projects.create(body.name, body.goal));
+});
+app.patch("/api/projects/:id", async (req, res) => {
+  const body = z
+    .object({
+      name: nameInput.optional(),
+      goal: z.string().max(2000).optional(),
+      archived: z.boolean().optional(),
+    })
+    .parse(req.body);
+  res.json(await projects.edit(safeId(req.params.id), body));
+});
+app.patch("/api/papers/:id/metadata", async (req, res) => {
+  await paperById(req.params.id);
+  const body = z
+    .object({
+      projectId: entityId.nullable().optional(),
+      displayName: nameInput.optional(),
+    })
+    .parse(req.body);
+  res.json(await projects.paper(req.params.id, body));
+});
+app.get("/api/papers/:id/start", async (req, res) =>
+  res.json(readingStart(await paperById(req.params.id))),
+);
+app.patch("/api/conversations/:id/title", async (req, res) => {
+  recordsIdle();
+  const body = z
+    .object({ title: nameInput, version: z.number().int().min(0) })
+    .parse(req.body);
+  const state = assistant.conversations.get(req.params.id);
+  state.title = body.title;
+  state.titleEdited = true;
+  res.json(await assistant.conversations.put(state, body.version));
+});
+app.put("/api/workspace/position", async (req, res) => {
+  const body = z
+    .object({
+      conversationId: entityId,
+      paperId: entityId.nullable(),
+      sourceVersion: z.string().max(200).optional(),
+      sourceId: entityId.optional(),
+      panel: z.enum(["sources", "notes"]).nullable(),
+    })
+    .parse(req.body);
+  const state = assistant.conversations.get(body.conversationId);
+  res.json(
+    await projects.position(
+      state,
+      state.paperId ? await paperById(state.paperId) : undefined,
+      body,
+    ),
+  );
+});
+app.put("/api/workspace/context", async (req, res) => {
+  const body = z
+    .object({ paperId: entityId.nullable(), projectId: entityId.nullable() })
+    .parse(req.body);
+  if (body.paperId) await paperById(body.paperId);
+  res.json(await projects.context(body.paperId, body.projectId));
+});
+app.post("/api/workspace/notes", async (req, res) => {
+  const body = z
+    .object({ conversationId: entityId, turnId: entityId })
+    .parse(req.body);
+  const state = assistant.conversations.get(body.conversationId);
+  const turn = assistant.turns.get(body.turnId);
+  if (!turn) throw new Error("回答不存在。");
+  res
+    .status(201)
+    .json(
+      await projects.saveAnswer(
+        state,
+        { ...turn, run: turn.runId ? manager.runs.get(turn.runId) : undefined },
+        state.paperId ? await paperById(state.paperId) : undefined,
+      ),
+    );
+});
+app.patch("/api/workspace/notes/:id", async (req, res) => {
+  const body = z
+    .object({
+      title: nameInput,
+      text: z.string().trim().min(1).max(50_000),
+      updatedAt: z.string().min(1),
+    })
+    .parse(req.body);
+  res.json(await projects.editNote(safeId(req.params.id), body));
+});
 const learningRecords = new LearningRecords(assistant.conversations, (id) =>
   manager.runs.get(id),
 );
@@ -172,6 +292,7 @@ app.delete("/api/conversations/:id/records/:recordId", async (req, res) => {
 app.post("/api/conversations", async (req, res) => {
   const input = conversationSchema.parse(req.body);
   if (input.paperId) await paperById(input.paperId);
+  if (input.projectId) projects.project(input.projectId);
   res.status(201).json(await assistant.conversations.create(input));
 });
 app.get("/api/conversations", (_req, res) => {
@@ -266,6 +387,14 @@ app.get("/api/model", async (_req, res) => {
 });
 app.post("/api/papers", upload.single("pdf"), async (req, res) => {
   if (!req.file) throw new Error("请选择 PDF");
+  try {
+    const signature = await readFile(req.file.path);
+    if (signature.subarray(0, 1024).indexOf("%PDF-") < 0)
+      throw new Error("文件内容不是 PDF，请提供真正的 PDF 文件。");
+  } catch (error) {
+    await rm(req.file.path, { force: true });
+    throw error;
+  }
   const id = randomUUID();
   let paper: PaperBundle;
   try {

@@ -121,6 +121,7 @@ export const inputSchema = z.object({
 const recordId = z.string().regex(/^[a-zA-Z0-9_-]{1,100}$/);
 export const conversationSchema = z.object({
   paperId: recordId.nullable().optional(),
+  projectId: recordId.nullable().optional(),
   goal: z.string().max(2000).optional(),
   profileId: z.enum(["beginner", "methods", "reasoning"]).optional(),
 });
@@ -141,6 +142,16 @@ export const messageSchema = z.object({
       excerpt: z.string().min(1).max(2000),
     })
     .optional(),
+  sourceAnchor: z
+    .object({
+      paperId: recordId,
+      sourceVersion: z.string().min(1).max(200),
+      sourceId: recordId,
+      excerpt: z.string().min(1).max(2000),
+      page: z.number().int().min(1).max(100).optional(),
+    })
+    .optional(),
+  figureSourceId: recordId.optional(),
   depth: z.enum(["brief", "standard", "deep"]).optional(),
   readabilityCheck: z.boolean().optional(),
   deckEdit: z

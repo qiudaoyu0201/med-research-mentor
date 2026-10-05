@@ -33,6 +33,7 @@ import { foundationCatalog, withFoundationSources } from "./foundations.ts";
 import { exportDeck } from "./export.ts";
 import { ResultCache } from "./cache.ts";
 import type { DeckVersions } from "./deck-versions.ts";
+import { validateAnchor } from "../shared/workspace.ts";
 
 const terminal = new Set([
   "completed",
@@ -294,6 +295,8 @@ export class AssistantService {
     this.accepting = true;
     try {
       const state = this.conversations.get(conversationId);
+      if (!state.titleEdited && !state.recentTurnIds.length)
+        state.title = message.question.replace(/\s+/g, " ").slice(0, 45);
       const id = randomUUID();
       const ledger = new BudgetLedger(id, async () =>
         this.persist("turns", id, turn),
@@ -411,6 +414,12 @@ export class AssistantService {
               sources: [],
             };
       const paper = withFoundationSources(original);
+      if (
+        [message.focus, message.sourceAnchor, message.figureSourceId].filter(
+          Boolean,
+        ).length > 1
+      )
+        throw new Error("每次追问请选择一个明确的对象。");
       if (
         message.sourceIds?.some((id) => !paper.sources.some((s) => s.id === id))
       )
@@ -530,6 +539,24 @@ export class AssistantService {
       let focusedText: string | undefined;
       let focusedSources: string[] | undefined;
       let focusedPaper = false;
+      let visibleImage = message.visibleImage;
+      if (message.sourceAnchor) {
+        const source = validateAnchor(message.sourceAnchor, original);
+        focusedText = message.sourceAnchor.excerpt;
+        focusedSources = [source.id];
+        focusedPaper = true;
+      }
+      if (message.figureSourceId) {
+        const source = original.sources.find(
+          (s) => s.id === message.figureSourceId,
+        );
+        if (!source?.figure || !source.image || source.kind !== "paper")
+          throw new Error("图件未在当前论文中登记，请重新选择。");
+        focusedText = source.caption || source.text;
+        focusedSources = [source.id];
+        focusedPaper = true;
+        visibleImage = source.image;
+      }
       if (message.focus) {
         const focusedRun = this.manager.runs.get(message.focus.runId);
         const section =
@@ -570,19 +597,24 @@ export class AssistantService {
         !(message.sourceIds ?? []).some((id) =>
           paper.sources.some((s) => s.id === id && s.kind === "paper"),
         );
-      const routed = message.focus
-        ? {
-            ...message,
-            module: focusedPaper ? ("paper" as const) : ("method" as const),
-            sourceIds: focusedSources,
-          }
-        : referential && last
+      const routed =
+        message.focus || message.sourceAnchor || message.figureSourceId
           ? {
               ...message,
-              module: last.input.module,
-              sourceIds: last.input.sourceIds,
+              module: message.figureSourceId
+                ? ("figure" as const)
+                : focusedPaper
+                  ? ("paper" as const)
+                  : ("method" as const),
+              sourceIds: focusedSources,
             }
-          : message;
+          : referential && last
+            ? {
+                ...message,
+                module: last.input.module,
+                sourceIds: last.input.sourceIds,
+              }
+            : message;
       let plan: AssistantPlan | undefined = direct
         ? {
             goal: message.question,
@@ -700,7 +732,7 @@ export class AssistantService {
           (s) =>
             plan!.sourceIds.includes(s.id) &&
             s.figure &&
-            (s.image || message.visibleImage),
+            (s.image || visibleImage),
         );
         if (
           !figure ||
@@ -812,9 +844,7 @@ export class AssistantService {
               conversationId: state.id,
               turnId: turn.id,
               groupId,
-              ...(message.visibleImage
-                ? { visibleImage: message.visibleImage }
-                : {}),
+              ...(visibleImage ? { visibleImage } : {}),
             },
             paper,
             undefined,

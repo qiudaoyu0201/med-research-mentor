@@ -10,12 +10,22 @@ export class ConversationStore {
       this.states.set(state.id, state);
   }
   async create(
-    input: { paperId?: string | null; profileId?: string; goal?: string } = {},
+    input: {
+      paperId?: string | null;
+      projectId?: string | null;
+      profileId?: string;
+      goal?: string;
+    } = {},
     id: string = randomUUID(),
   ) {
     const state: ConversationState = {
       id,
       version: 0,
+      projectId: input.projectId ?? null,
+      title: "新讨论",
+      titleEdited: false,
+      createdAt: new Date().toISOString(),
+      updatedAt: new Date().toISOString(),
       paperId: input.paperId ?? null,
       sourceVersion: null,
       goal: input.goal ?? "",
@@ -43,7 +53,11 @@ export class ConversationStore {
       throw new Error("会话正在保存，请重新读取后重试。");
     if (this.states.get(state.id)?.version !== expectedVersion)
       throw new Error("会话版本发生变化，请重新读取。");
-    const next = { ...structuredClone(state), version: expectedVersion + 1 };
+    const next = {
+      ...structuredClone(state),
+      version: expectedVersion + 1,
+      updatedAt: new Date().toISOString(),
+    };
     this.writing.add(state.id);
     try {
       await this.persist("conversations", next.id, next);

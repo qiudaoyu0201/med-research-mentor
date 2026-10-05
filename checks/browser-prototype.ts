@@ -14,7 +14,7 @@ page.on("request", (request) => {
 });
 await mkdir("runs/prototype", { recursive: true });
 try {
-  await page.goto(baseUrl);
+  await page.goto(baseUrl + "/prototype");
   await page
     .getByRole("heading", { name: "读懂研究问题", exact: true })
     .waitFor();
