@@ -1,3 +1,5 @@
+import { selectedText } from "./research-selection.ts";
+import { MessageAttachments } from "./research-attachments.tsx";
 import { useState } from "react";
 import type { AssistantMessage, PaperBundle, Source } from "../shared/types.ts";
 import type { ReadingStart, ResearchTurn } from "../shared/workspace.ts";
@@ -14,6 +16,7 @@ export const finished = (turn: ResearchTurn) =>
   );
 export const statusLabel: Record<string, string> = {
   queued: "等待中",
+  "checking-attachments": "检查附件",
   planning: "整理问题",
   running: "处理中",
   teaching: "正在讲解",
@@ -32,6 +35,8 @@ export function ResearchDiscussion({
   turns,
   paper,
   start,
+  onGuide,
+  onCancelGuide,
   busy,
   onSuggest,
   onImport,
@@ -39,7 +44,9 @@ export function ResearchDiscussion({
   onCitation,
   onFocus,
   onSave,
+  onRecord,
   onCancel,
+  onAttachmentRetry,
   onRetry,
   savedIds,
   latestTitle,
@@ -48,6 +55,8 @@ export function ResearchDiscussion({
   turns: ResearchTurn[];
   paper?: PaperBundle;
   start?: ReadingStart;
+  onGuide: () => void;
+  onCancelGuide: () => void;
   busy: boolean;
   onSuggest: (question: string) => void;
   onImport: () => void;
@@ -55,7 +64,13 @@ export function ResearchDiscussion({
   onCitation: (id: string, source?: Source) => void;
   onFocus: (selection: ResearchSelection, question: string) => void;
   onSave: (turn: ResearchTurn) => void;
+  onRecord: (
+    turn: ResearchTurn,
+    kind: "favorite" | "feedback",
+    feedback?: "confused" | "understood",
+  ) => void;
   onCancel: (turn: ResearchTurn) => void;
+  onAttachmentRetry: (turn: ResearchTurn, id: string, purpose?: string) => void;
   onRetry: (turn: ResearchTurn) => void;
   savedIds: string[];
   latestTitle?: string;
@@ -80,18 +95,30 @@ export function ResearchDiscussion({
                 {paper.parseStatus === "failed"
                   ? "PDF 解析失败，原文件已保留。请重新提供可读取的 PDF。"
                   : paper.parseStatus === "needs-text"
-                    ? "该 PDF 未提取到可用正文，请上传可复制文字的版本，或在现有工具中补充原文。"
+                    ? "该 PDF 未提取到可用正文。可上传可复制文字的版本，或在资料面板补充原文。"
                     : "可以直接提问，也可以先从下面的问题开始。"}
               </p>
-              {start?.excerpt && (
+              {(start?.summary || start?.excerpt) && (
                 <div className="rw-start-excerpt">
                   <small>{start.label}</small>
-                  <p>{start.excerpt}</p>
-                  <button onClick={() => onCitation(start.sourceId!)}>
-                    查看摘录依据
-                  </button>
+                  <p>{start.summary ?? start.excerpt}</p>
+                  {(
+                    start.sourceIds ?? (start.sourceId ? [start.sourceId] : [])
+                  ).map((id) => (
+                    <button key={id} onClick={() => onCitation(id)}>
+                      查看原文依据
+                    </button>
+                  ))}
                 </div>
               )}
+              {start?.status !== "completed" &&
+                !!start?.excerpt &&
+                (["queued", "running"].includes(start.status ?? "") ? (
+                  <button onClick={onCancelGuide}>停止整理研究起点</button>
+                ) : (
+                  <button onClick={onGuide}>整理研究起点</button>
+                ))}
+              {start?.error && <p role="alert">{start.error}</p>}
               {start?.questions.map((q) => (
                 <button key={q} disabled={busy} onClick={() => onSuggest(q)}>
                   {q}
@@ -137,6 +164,15 @@ export function ResearchDiscussion({
                   <small>图件：{turn.message.figureSourceId}</small>
                 )}
                 <p>{turn.message.question}</p>
+                {!!turn.attachments?.length && (
+                  <MessageAttachments
+                    values={turn.attachments}
+                    disabled={!finished(turn)}
+                    onRetry={(id, purpose) =>
+                      onAttachmentRetry(turn, id, purpose)
+                    }
+                  />
+                )}
               </div>
             </div>
             <div className="rw-answer">
@@ -150,9 +186,9 @@ export function ResearchDiscussion({
                   {turn.status === "queued" ? "取消等待" : "停止回答"}
                 </button>
               )}
-              {["cancelled", "failed", "interrupted"].includes(turn.status) && (
-                <button onClick={() => onRetry(turn)}>编辑后重发</button>
-              )}
+              {["cancelled", "failed", "interrupted", "clarification"].includes(
+                turn.status,
+              ) && <button onClick={() => onRetry(turn)}>编辑后重发</button>}
               {unit && (
                 <>
                   <h2>{unit.title}</h2>
@@ -161,21 +197,38 @@ export function ResearchDiscussion({
                       <h3>{section.title}</h3>
                       <p
                         className="rw-selectable"
-                        onMouseUp={() => {
-                          const selection = window.getSelection();
-                          const text = selection?.toString().trim();
-                          if (
-                            complete &&
-                            turn.runId &&
-                            text &&
-                            text.length <= 2000 &&
-                            section.text.includes(text)
-                          )
-                            setSelectedSentence({
-                              turnId: turn.id,
-                              index: i,
-                              text,
-                            });
+                        onMouseUp={(e) => {
+                          const text = selectedText(
+                            e.currentTarget,
+                            section.text,
+                          );
+                          setSelectedSentence(
+                            complete && turn.runId && text
+                              ? { turnId: turn.id, index: i, text }
+                              : undefined,
+                          );
+                        }}
+                        onKeyUp={(e) => {
+                          const text = selectedText(
+                            e.currentTarget,
+                            section.text,
+                          );
+                          setSelectedSentence(
+                            complete && turn.runId && text
+                              ? { turnId: turn.id, index: i, text }
+                              : undefined,
+                          );
+                        }}
+                        onTouchEnd={(e) => {
+                          const element = e.currentTarget;
+                          setTimeout(() => {
+                            const text = selectedText(element, section.text);
+                            setSelectedSentence(
+                              complete && turn.runId && text
+                                ? { turnId: turn.id, index: i, text }
+                                : undefined,
+                            );
+                          }, 100);
                         }}
                       >
                         {section.text}
@@ -189,7 +242,7 @@ export function ResearchDiscussion({
                               onClick={() =>
                                 onFocus(
                                   {
-                                    label: `回答「${section.title}」中的句子`,
+                                    label: selectedSentence.text,
                                     focus: {
                                       runId: turn.runId!,
                                       sectionIndex: i,
@@ -200,7 +253,7 @@ export function ResearchDiscussion({
                                 )
                               }
                             >
-                              解释这句
+                              引用提问
                             </button>
                           )}
                         {section.citations.map((id) => {
@@ -269,6 +322,31 @@ export function ResearchDiscussion({
                   ))}
                 </details>
               ) : null}
+              {complete && unit && (
+                <div className="rw-actions rw-personal-actions">
+                  <button
+                    disabled={busy}
+                    onClick={() => onRecord(turn, "favorite")}
+                  >
+                    收藏解释
+                  </button>
+                  <details>
+                    <summary>我的理解反馈</summary>
+                    <button
+                      disabled={busy}
+                      onClick={() => onRecord(turn, "feedback", "confused")}
+                    >
+                      仍不理解
+                    </button>
+                    <button
+                      disabled={busy}
+                      onClick={() => onRecord(turn, "feedback", "understood")}
+                    >
+                      我已理解
+                    </button>
+                  </details>
+                </div>
+              )}
               {complete && unit && (
                 <button
                   className="rw-save"

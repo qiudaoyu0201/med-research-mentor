@@ -14,6 +14,10 @@ export function ResearchNavigation({
   onPaper,
   onProject,
   onHome,
+  onPpt,
+  onSettings,
+  onRecords,
+  mode,
   onImport,
   onCreateProject,
   onEditProject,
@@ -32,6 +36,10 @@ export function ResearchNavigation({
   onPaper: (paper: PaperBundle) => void;
   onProject: (id: string | null) => void;
   onHome: () => void;
+  onPpt: () => void;
+  onSettings: () => void;
+  onRecords: () => void;
+  mode: "research" | "ppt";
   onImport: () => void;
   onCreateProject: () => void;
   onEditProject: (id: string) => void;
@@ -79,10 +87,19 @@ export function ResearchNavigation({
           </button>
         </div>
         <nav className="rw-main-nav" aria-label="主导航">
-          <button aria-current="page" disabled={busy} onClick={onHome}>
+          <button
+            aria-current={mode === "research" ? "page" : undefined}
+            disabled={busy}
+            onClick={onHome}
+          >
             论文研究
           </button>
-          <a href="/assistant">PPT · 现有汇报工具 ↗</a>
+          <button
+            aria-current={mode === "ppt" ? "page" : undefined}
+            onClick={onPpt}
+          >
+            PPT 汇报
+          </button>
         </nav>
         <button className="rp-new-task" disabled={busy} onClick={onImport}>
           ＋ 导入论文
@@ -191,8 +208,8 @@ export function ResearchNavigation({
         </div>
         <footer className="rw-sidebar-footer">
           <small>PDF · 上限 30 MiB / 100 页</small>
-          <a href="/assistant">设置与个人学习记录 ↗</a>
-          <a href="/prototype">查看布局示例 ↗</a>
+          <button onClick={onSettings}>设置</button>
+          <button onClick={onRecords}>个人记录</button>
         </footer>
       </aside>
     </>

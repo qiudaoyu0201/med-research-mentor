@@ -37,17 +37,21 @@ try {
     fullPage: true,
   });
   await page.getByRole("button", { name: "导入材料", exact: true }).click();
-  await page.locator("input[type=file]").setInputFiles({
-    name: "wrong.docx",
-    mimeType: "application/octet-stream",
-    buffer: Buffer.from("wrong"),
-  });
+  await page
+    .locator('input[type=file][accept=".pdf,application/pdf"]')
+    .setInputFiles({
+      name: "wrong.docx",
+      mimeType: "application/octet-stream",
+      buffer: Buffer.from("wrong"),
+    });
   await page.getByRole("alert").filter({ hasText: "当前支持 PDF" }).waitFor();
-  await page.locator("input[type=file]").setInputFiles({
-    name: "bad.pdf",
-    mimeType: "application/pdf",
-    buffer: Buffer.from("not a PDF"),
-  });
+  await page
+    .locator('input[type=file][accept=".pdf,application/pdf"]')
+    .setInputFiles({
+      name: "bad.pdf",
+      mimeType: "application/pdf",
+      buffer: Buffer.from("not a PDF"),
+    });
   await page
     .getByRole("alert")
     .filter({ hasText: "文件内容不是 PDF" })
@@ -102,11 +106,13 @@ try {
   );
 
   // Import without a project, select real extracted text, verify requests and cancellation using browser fixtures.
-  await page.locator("input[type=file]").setInputFiles({
-    name: "engineering-exercise.pdf",
-    mimeType: "application/pdf",
-    buffer: pdfFixture(),
-  });
+  await page
+    .locator('input[type=file][accept=".pdf,application/pdf"]')
+    .setInputFiles({
+      name: "engineering-exercise.pdf",
+      mimeType: "application/pdf",
+      buffer: pdfFixture(),
+    });
   await page
     .getByRole("heading", { name: "从这篇论文的一个问题开始" })
     .waitFor();
@@ -137,8 +143,8 @@ try {
       element.dispatchEvent(new MouseEvent("mouseup", { bubbles: true }));
     });
   assert.equal(await page.getByLabel("向科研助手提问").inputValue(), "");
-  await page.getByRole("button", { name: "解释所选文字", exact: true }).click();
-  await page.getByText("正在问：第 1 页这句话").waitFor();
+  await page.getByRole("button", { name: "引用提问", exact: true }).click();
+  await page.locator(".rw-reference-target").waitFor();
   assert.match(
     await page.getByLabel("向科研助手提问").inputValue(),
     /解释这段/,
@@ -217,11 +223,13 @@ try {
     .getByRole("button", { name: "保存", exact: true })
     .click();
   await page.getByRole("dialog").waitFor({ state: "hidden" });
-  await page.locator("input[type=file]").setInputFiles({
-    name: "grouped-exercise.pdf",
-    mimeType: "application/pdf",
-    buffer: pdfFixture(),
-  });
+  await page
+    .locator('input[type=file][accept=".pdf,application/pdf"]')
+    .setInputFiles({
+      name: "grouped-exercise.pdf",
+      mimeType: "application/pdf",
+      buffer: pdfFixture(),
+    });
   await page
     .getByRole("heading", { name: "从这篇论文的一个问题开始" })
     .waitFor();

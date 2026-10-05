@@ -75,7 +75,12 @@ export function groundedTeachingSchema(sources: Source[]) {
   const slides = slideSchema.extend({
     citations: ids,
     imageSource: z
-      .enum(["", ...sources.filter((s) => s.figure).map((s) => s.id)])
+      .enum([
+        "",
+        ...sources
+          .filter((s) => s.image || s.figure || s.attachmentId)
+          .map((s) => s.id),
+      ])
       .optional()
       .describe("仅写原图来源 ID；无图写空字符串，不能附说明。"),
   });
@@ -126,6 +131,7 @@ export const conversationSchema = z.object({
   profileId: z.enum(["beginner", "methods", "reasoning"]).optional(),
 });
 export const messageSchema = z.object({
+  slideCount: z.number().int().min(1).max(16).optional(),
   clientMessageId: recordId,
   question: z.string().trim().min(1).max(2000),
   mode: z.enum(["example", "live"]).default("live"),
@@ -144,6 +150,7 @@ export const messageSchema = z.object({
     .optional(),
   sourceAnchor: z
     .object({
+      textView: z.literal("pdf").optional(),
       paperId: recordId,
       sourceVersion: z.string().min(1).max(200),
       sourceId: recordId,
@@ -152,7 +159,10 @@ export const messageSchema = z.object({
     })
     .optional(),
   figureSourceId: recordId.optional(),
-  depth: z.enum(["brief", "standard", "deep"]).optional(),
+  depth: z
+    .enum(["brief", "standard", "deep", "foundations", "mechanism"])
+    .optional(),
+  attachmentIds: z.array(recordId).max(4).optional(),
   readabilityCheck: z.boolean().optional(),
   deckEdit: z
     .object({

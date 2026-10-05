@@ -34,6 +34,12 @@ import { exportDeck } from "./export.ts";
 import { ResultCache } from "./cache.ts";
 import type { DeckVersions } from "./deck-versions.ts";
 import { TaskScheduler, taskKey } from "./scheduler.ts";
+import type { Attachments } from "./attachments.ts";
+import {
+  attachmentSource,
+  type ResearchAttachment,
+} from "../shared/attachments.ts";
+import { requestedDepth } from "./depth.ts";
 import { validateAnchor } from "../shared/workspace.ts";
 
 const terminal = new Set([
@@ -60,7 +66,8 @@ export function rulePlan(
   const question = state.pending
     ? `${state.pending.question}\n用户补充：${message.question}`
     : message.question;
-  const report = /PPT|汇报|幻灯|演示文稿/i.test(question);
+  const report =
+    message.module === "ppt" || /PPT|汇报|幻灯|演示文稿/i.test(question);
   const figure =
     figureNumber(question) !== undefined || /读图|图表/.test(question);
   const knownMethod = foundationCatalog.match(question).length > 0;
@@ -95,11 +102,8 @@ export function rulePlan(
       ? digit(chinese[1])
       : null;
   const slideCount = report
-    ? count
-      ? Number(count[1])
-      : chinese
-        ? chineseCount
-        : null
+    ? (message.slideCount ??
+      (count ? Number(count[1]) : chinese ? chineseCount : null))
     : null;
   let sourceIds = message.sourceIds ?? state.pending?.sourceIds;
   if (
@@ -223,6 +227,7 @@ export class AssistantService {
     private exporter: typeof exportDeck = exportDeck,
     private decks?: DeckVersions,
     readonly scheduler = new TaskScheduler(),
+    private attachments?: Attachments,
   ) {
     if (decks) decks.scheduler = scheduler;
   }
@@ -304,6 +309,10 @@ export class AssistantService {
       message.paperId !== state.paperId
     )
       throw new Error("问题与当前聊天的论文不匹配，请打开对应论文。");
+    const submittedAttachments = (message.attachmentIds ?? []).map((id) => {
+      if (!this.attachments) throw new Error("附件服务不可用。");
+      return this.attachments.get(id, state.id);
+    });
     const paper = state.paperId
       ? await this.paperById(state.paperId)
       : undefined;
@@ -319,6 +328,9 @@ export class AssistantService {
       sourceVersion: paper?.version ?? null,
       createdAt: new Date().toISOString(),
       status: "queued",
+      ...(submittedAttachments.length
+        ? { attachments: submittedAttachments }
+        : {}),
       budget: ledger.state,
     };
     await this.persist("turns", id, turn);
@@ -368,6 +380,72 @@ export class AssistantService {
     return turn;
   }
 
+  async retryAttachment(
+    turnId: string,
+    attachmentId: string,
+    purpose?: string,
+  ) {
+    if (!this.attachments) throw new Error("附件服务不可用。");
+    const turn = this.turns.get(turnId);
+    if (
+      !turn ||
+      this.controllers.has(turnId) ||
+      !terminal.has(turn.status) ||
+      !turn.message.attachmentIds?.includes(attachmentId)
+    )
+      throw new Error("请等待这条问题完成后重试该附件。");
+    const state = this.conversations.get(turn.conversationId);
+    const paper = state.paperId
+      ? await this.paperById(state.paperId)
+      : {
+          id: "foundation-only",
+          title: "研究想法",
+          scope: "用户提供材料",
+          version: foundationCatalog.version,
+          sources: [],
+        };
+    const hadReply = turn.status === "completed";
+    const controller = new AbortController();
+    const ledger = new BudgetLedger(
+      turn.id,
+      () => this.persist("turns", turn.id, turn),
+      turn.budget,
+    );
+    turn.status = "queued";
+    await this.persist("turns", turn.id, turn);
+    this.controllers.set(turn.id, controller);
+    const completion = this.scheduler
+      .run(taskKey(state.paperId, state.id), controller.signal, async () => {
+        ledger.state.deadline = new Date(Date.now() + 480_000).toISOString();
+        const checked = await this.attachments!.check(
+          attachmentId,
+          state.id,
+          turn.message.question,
+          paper,
+          ledger,
+          controller.signal,
+          purpose,
+          true,
+        );
+        turn.attachments = (turn.attachments ?? []).map((a) =>
+          a.id === attachmentId ? checked : a,
+        );
+        if (hadReply) turn.status = "completed";
+        else
+          await this.execute(turn, ledger, controller.signal, false, () => {});
+      })
+      .catch((error) => {
+        turn.status = controller.signal.aborted ? "cancelled" : "failed";
+        turn.error = String(error);
+      })
+      .finally(async () => {
+        this.controllers.delete(turn.id);
+        await this.persist("turns", turn.id, turn);
+      });
+    this.completions.set(turn.id, completion);
+    void completion.catch(() => {});
+    return turn;
+  }
   async wait(id: string) {
     await this.completions.get(id);
   }
@@ -436,7 +514,12 @@ export class AssistantService {
               title: "独立基础课程",
               version: foundationCatalog.version,
               scope: "独立基础资料；未绑定论文。",
-              sources: [],
+              sources:
+                this.attachments?.sources(
+                  null,
+                  state.id,
+                  foundationCatalog.version,
+                ) ?? [],
             };
       if (
         turn.paperId !== undefined &&
@@ -444,7 +527,64 @@ export class AssistantService {
           (turn.sourceVersion && turn.sourceVersion !== original.version))
       )
         throw new Error("等待期间论文资料发生变化，请重新选择材料后发送。");
-      const paper = withFoundationSources(original);
+      const checked: ResearchAttachment[] = [];
+      if (message.attachmentIds?.length) {
+        if (!this.attachments) throw new Error("附件服务不可用。");
+        turn.status = "checking-attachments";
+        await this.persist("turns", turn.id, turn);
+        for (const id of message.attachmentIds) {
+          signal.throwIfAborted();
+          checked.push(
+            await this.attachments.check(
+              id,
+              state.id,
+              message.question,
+              original,
+              ledger,
+              signal,
+            ),
+          );
+          turn.attachments = message.attachmentIds.map(
+            (id) =>
+              checked.find((a) => a.id === id) ??
+              this.attachments!.get(id, state.id),
+          );
+          await this.persist("turns", turn.id, turn);
+        }
+        const unavailable = checked.filter((a) => a.status !== "ready");
+        const depends = /仅.{0,12}(图|附件)|这[张幅].{0,8}图|图中|截图上/.test(
+          message.question,
+        );
+        if (
+          unavailable.some(
+            (a) =>
+              a.dependsOnImage || (a.dependsOnImage === undefined && depends),
+          )
+        ) {
+          turn.status = "clarification";
+          turn.reply = {
+            content: null,
+            artifacts: [],
+            pendingQuestions: [],
+            nextStep: unavailable
+              .map(
+                (a) => `${a.name}：${a.reason ?? "请补充图片用途或清晰版本。"}`,
+              )
+              .join("\n"),
+          };
+          return;
+        }
+      }
+      const admitted = checked.flatMap((a) => attachmentSource(a) ?? []);
+      const paper = withFoundationSources({
+        ...original,
+        sources: [
+          ...original.sources.filter(
+            (s) => !admitted.some((a) => a.id === s.id),
+          ),
+          ...admitted,
+        ],
+      });
       if (
         [message.focus, message.sourceAnchor, message.figureSourceId].filter(
           Boolean,
@@ -470,6 +610,9 @@ export class AssistantService {
       state.paperId = binding;
       state.sourceVersion = paper.version;
       state.profileId = message.profileId ?? state.profileId;
+      const depthRequest = requestedDepth(message.question, message.depth);
+      state.explanationDepth =
+        depthRequest ?? state.explanationDepth ?? "standard";
       if (!profiles.some((p) => p.id === state.profileId))
         throw new Error("新手画像不存在");
       const pageRequest =
@@ -565,12 +708,14 @@ export class AssistantService {
       const referential =
         !message.module &&
         !message.sourceIds &&
-        /^(为什么|这|那|继续|还是|上一)/.test(message.question) &&
+        (/^(为什么|这|那|继续|还是|上一)/.test(message.question) ||
+          Boolean(depthRequest)) &&
         !/PCR|流式|Figure|图\s*\d|PPT|汇报/i.test(message.question);
       let focusedText: string | undefined;
       let focusedSources: string[] | undefined;
       let focusedPaper = false;
-      let visibleImage = message.visibleImage;
+      let visibleImage =
+        (await this.attachments?.sheet(checked)) ?? message.visibleImage;
       if (message.sourceAnchor) {
         const source = validateAnchor(message.sourceAnchor, original);
         focusedText = message.sourceAnchor.excerpt;
@@ -622,9 +767,11 @@ export class AssistantService {
         !message.readabilityCheck &&
         !explicitFacts &&
         !focusedPaper &&
+        !admitted.length &&
         !state.pending &&
         (Boolean(focusedText) ||
-          /一句话|通俗|简单解释|简短说明/.test(message.question)) &&
+          /一句话|通俗|简单解释|简短说明/.test(message.question) ||
+          (Boolean(depthRequest) && last?.input.workflow === "direct")) &&
         !(message.sourceIds ?? []).some((id) =>
           paper.sources.some((s) => s.id === id && s.kind === "paper"),
         );
@@ -639,13 +786,26 @@ export class AssistantService {
                   : ("method" as const),
               sourceIds: focusedSources,
             }
-          : referential && last
+          : admitted.length
             ? {
                 ...message,
-                module: last.input.module,
-                sourceIds: last.input.sourceIds,
+                module: "paper" as const,
+                sourceIds: [
+                  ...new Set([
+                    ...admitted.map((a) => a.id),
+                    ...defaultPaperSources(paper, message.question, [
+                      "paper",
+                    ]).map((s) => s.id),
+                  ]),
+                ],
               }
-            : message;
+            : referential && last
+              ? {
+                  ...message,
+                  module: last.input.module,
+                  sourceIds: last.input.sourceIds,
+                }
+              : message;
       let plan: AssistantPlan | undefined = direct
         ? {
             goal: message.question,
@@ -702,6 +862,10 @@ export class AssistantService {
       plan = validatePlan(plan, paper, message, direct);
       if (
         !binding &&
+        !admitted.length &&
+        !plan.sourceIds.some((id) =>
+          paper.sources.some((s) => s.id === id && s.attachmentId),
+        ) &&
         message.mode === "live" &&
         !plan.clarification &&
         (plan.modules.some((m) => m === "paper" || m === "figure") ||
@@ -843,9 +1007,11 @@ export class AssistantService {
               sourceIds: plan.sourceIds,
               ...(direct ? { workflow: "direct" as const } : {}),
               ...(focusedText ? { focusedText } : {}),
-              depth: message.depth ?? "standard",
+              depth: state.explanationDepth,
               checks: {
-                readability: message.readabilityCheck ?? !message.focus,
+                readability:
+                  message.readabilityCheck ??
+                  !(message.focus || admitted.length || depthRequest),
               },
               ...(missingFoundations.length ? { missingFoundations } : {}),
               taughtConcepts: state.taughtConcepts
@@ -855,13 +1021,13 @@ export class AssistantService {
                 ? {
                     previous: {
                       title: previous.title.slice(0, 80),
-                      question: previous.question.slice(0, 100),
+                      question: previous.question,
                       terms: [],
                       nextQuestion: "",
-                      sections: previous.sections.slice(0, 4).map((s) => ({
+                      sections: previous.sections.map((s) => ({
                         ...s,
                         title: s.title.slice(0, 50),
-                        text: s.text.slice(0, 100),
+                        text: s.text,
                       })),
                     },
                   }
@@ -1019,6 +1185,10 @@ export class AssistantService {
         await this.manager.publishCache(turn.runId, this.cache);
       }
     } catch (error) {
+      if (this.attachments && turn.message.attachmentIds?.length)
+        turn.attachments = turn.message.attachmentIds.map((id) =>
+          this.attachments!.get(id, turn.conversationId),
+        );
       turn.status = signal.aborted ? "cancelled" : "failed";
       turn.error = error instanceof Error ? error.message : "请求失败";
       turn.reply = undefined;
@@ -1052,6 +1222,13 @@ export class AssistantService {
       mainChat: current.mainChat,
       title: current.title,
       titleEdited: current.titleEdited,
+      ...(current.preferenceRevision !== state.preferenceRevision
+        ? {
+            profileId: current.profileId,
+            explanationDepth: current.explanationDepth,
+            preferenceRevision: current.preferenceRevision,
+          }
+        : {}),
     }));
   }
   private context(state: ConversationState) {

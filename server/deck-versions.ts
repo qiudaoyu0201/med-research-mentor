@@ -36,6 +36,14 @@ export class DeckVersions {
   get busy() {
     return this.controllers.size > 0;
   }
+  async rename(id: string, conversationId: string, displayName: string) {
+    const version = this.get(id, conversationId);
+    if (["queued", "revising", "checking"].includes(version.status))
+      throw new Error("请等待此版本处理完成后重命名。");
+    version.displayName = displayName;
+    await this.store(version);
+    return version;
+  }
   async restoreDisk() {
     for (const version of await list<DeckVersion>("deck-versions")) {
       if (["queued", "revising", "checking"].includes(version.status)) {

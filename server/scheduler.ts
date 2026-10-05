@@ -3,6 +3,7 @@ type Entry = {
   signal: AbortSignal;
   start: () => Promise<void>;
   abort: () => void;
+  background: boolean;
 };
 
 // A slot covers the entire answer/review/revision, including nested deck work.
@@ -16,12 +17,18 @@ export class TaskScheduler {
   has(key: string) {
     return this.running.has(key) || this.pending.some((e) => e.key === key);
   }
-  run(key: string, signal: AbortSignal, task: () => Promise<void>) {
+  run(
+    key: string,
+    signal: AbortSignal,
+    task: () => Promise<void>,
+    background = false,
+  ) {
     return new Promise<void>((resolve, reject) => {
       signal.throwIfAborted();
       const entry: Entry = {
         key,
         signal,
+        background,
         abort: () => {
           this.pending = this.pending.filter((e) => e !== entry);
           signal.removeEventListener("abort", entry.abort);
@@ -48,7 +55,11 @@ export class TaskScheduler {
   }
   private drain() {
     while (this.running.size < this.limit) {
-      const index = this.pending.findIndex((e) => !this.running.has(e.key));
+      let index = this.pending.findIndex(
+        (e) => !e.background && !this.running.has(e.key),
+      );
+      if (index < 0)
+        index = this.pending.findIndex((e) => !this.running.has(e.key));
       if (index < 0) return;
       const [entry] = this.pending.splice(index, 1);
       entry.signal.removeEventListener("abort", entry.abort);

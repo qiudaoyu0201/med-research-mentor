@@ -19,6 +19,7 @@ export interface PaperMetadata {
   displayName?: string;
 }
 export interface SourceAnchor {
+  textView?: "pdf";
   paperId: string;
   sourceVersion: string;
   sourceId: string;
@@ -54,12 +55,17 @@ export interface WorkspaceIndex {
   currentProjectId?: string | null;
 }
 export interface ReadingStart {
+  autoGenerate?: boolean;
   paperId: string;
   sourceVersion: string;
   label: string;
   excerpt: string;
   sourceId?: string;
   questions: string[];
+  summary?: string;
+  sourceIds?: string[];
+  status?: "queued" | "running" | "completed" | "failed" | "cancelled";
+  error?: string;
 }
 export type ResearchTurn = AssistantTurn & {
   run?: import("./types.ts").TaskRun;
@@ -86,7 +92,14 @@ export function validateAnchor(
     anchor.sourceVersion !== paper.version ||
     !source ||
     !anchor.excerpt.trim() ||
-    !source.text.includes(anchor.excerpt) ||
+    !(
+      source.text.includes(anchor.excerpt) ||
+      (anchor.textView === "pdf" &&
+        paper.pdfUrl &&
+        source.text
+          .replace(/\s/g, "")
+          .includes(anchor.excerpt.replace(/\s/g, "")))
+    ) ||
     anchor.page !== source.page
   ) {
     throw new Error("所选原文不属于当前论文或来源版本，请重新选择。");

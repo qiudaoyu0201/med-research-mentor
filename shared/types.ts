@@ -1,4 +1,6 @@
 export type Module = "paper" | "method" | "figure" | "ppt";
+export type ExplanationDepth =
+  "brief" | "standard" | "deep" | "foundations" | "mechanism";
 export type Mode = "example" | "live";
 export type SourceKind = "paper" | "foundation" | "interpretation";
 export interface Source {
@@ -13,6 +15,7 @@ export interface Source {
   caption?: string;
   verified: boolean;
   image?: string;
+  attachmentId?: string;
   paperId?: string;
   paperVersion?: string;
   section?: "figure" | "results" | "methods" | "overview";
@@ -115,6 +118,7 @@ export interface DeckOutline {
   slides: Slide[];
 }
 export interface DeckVersion {
+  displayName?: string;
   id: string;
   conversationId: string;
   paperId: string;
@@ -176,7 +180,7 @@ export interface TaskInput {
   workflow?: "direct";
   checks?: { readability: boolean };
   focusedText?: string;
-  depth?: "brief" | "standard" | "deep";
+  depth?: ExplanationDepth;
 }
 export type RunStatus =
   | "queued"
@@ -277,6 +281,7 @@ export interface AssistantPlan {
   estimatedCalls: number;
 }
 export interface AssistantMessage {
+  slideCount?: number;
   clientMessageId: string;
   question: string;
   mode: Mode;
@@ -289,11 +294,14 @@ export interface AssistantMessage {
   focus?: { runId: string; sectionIndex: number; excerpt: string };
   sourceAnchor?: import("./workspace.ts").SourceAnchor;
   figureSourceId?: string;
-  depth?: "brief" | "standard" | "deep";
+  attachmentIds?: string[];
+  depth?: ExplanationDepth;
   readabilityCheck?: boolean;
   deckEdit?: { versionId: string; slideIndex: number };
 }
 export interface ConversationState {
+  explanationDepth?: ExplanationDepth;
+  preferenceRevision?: number;
   mainChat?: boolean;
   id: string;
   version: number;
@@ -355,9 +363,11 @@ export interface AssistantTurn {
   message: AssistantMessage;
   paperId?: string | null;
   sourceVersion?: string | null;
+  attachments?: import("./attachments.ts").ResearchAttachment[];
   status:
     | "queued"
     | "planning"
+    | "checking-attachments"
     | "running"
     | "clarification"
     | "completed"

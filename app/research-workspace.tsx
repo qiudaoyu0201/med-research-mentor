@@ -1,3 +1,7 @@
+import { useResearchLayout, Splitter } from "./research-layout.tsx";
+import { ResearchPpt } from "./research-ppt.tsx";
+import { ResearchSettings } from "./research-settings.tsx";
+import { PersonalRecordsPanel } from "./learning-records.tsx";
 import { useEffect, useRef, useState } from "react";
 import type {
   ConversationState,
@@ -21,6 +25,11 @@ import {
   statusLabel,
 } from "./research-discussion.tsx";
 import type { ResearchSelection } from "./research-discussion.tsx";
+import {
+  PendingAttachments,
+  useAttachmentDraft,
+} from "./research-attachments.tsx";
+import type { ResearchAttachment } from "../shared/attachments.ts";
 import { ResearchReading } from "./research-reading.tsx";
 import "./reading-prototype.css";
 import "./research-workspace.css";
@@ -43,6 +52,14 @@ function titleOf(c: ConversationState) {
 }
 
 export function ResearchWorkspace() {
+  const { layout, update: resize, reset: resetLayout } = useResearchLayout();
+  const [mode, setMode] = useState<"research" | "ppt">("research"),
+    [settings, setSettings] = useState(false),
+    [records, setRecords] = useState(false);
+  const recordsDialog = useRef<HTMLDialogElement>(null);
+  useEffect(() => {
+    if (records) recordsDialog.current?.showModal();
+  }, [records]);
   const [index, setIndex] = useState<WorkspaceIndex>(emptyIndex);
   const [papers, setPapers] = useState<PaperBundle[]>([]);
   const [conversations, setConversations] = useState<ConversationState[]>([]);
@@ -53,6 +70,7 @@ export function ResearchWorkspace() {
   const [start, setStart] = useState<ReadingStart>();
   const [panel, setPanel] = useState<"sources" | "notes" | null>(null);
   const [sourceId, setSourceId] = useState<string>();
+  const [sourceRevision, setSourceRevision] = useState(0);
   const [extraSource, setExtraSource] = useState<Source>();
   const [question, setQuestion] = useState("");
   const [selection, setSelection] = useState<ResearchSelection>();
@@ -65,6 +83,8 @@ export function ResearchWorkspace() {
   const [error, setError] = useState("");
   const [notice, setNotice] = useState("");
   const [management, setManagement] = useState<Management>();
+  const attachmentInput = useRef<HTMLInputElement>(null),
+    imageInput = useRef<HTMLInputElement>(null);
   const fileInput = useRef<HTMLInputElement>(null),
     composer = useRef<HTMLTextAreaElement>(null);
   const dialog = useRef<HTMLDialogElement>(null),
@@ -77,12 +97,15 @@ export function ResearchWorkspace() {
           selection?: ResearchSelection;
           clientMessageId: string;
           conversationId: string;
+          attachmentIds?: string[];
+          targetPaperId?: string | null;
         }
       | undefined
     >(undefined);
   const draftKey = `research-draft:${paper?.id ?? projectId ?? "idea"}`;
   const draftKeyRef = useRef(draftKey);
   draftKeyRef.current = draftKey;
+  const pendingAttachments = useAttachmentDraft(draftKey, setError);
   const active = turns.find((t) => !finished(t));
   const busy = loading || working || uploading;
   const historical = !!paper && !!conversation && !conversation.mainChat;
@@ -153,7 +176,20 @@ export function ResearchWorkspace() {
         const nextStart = await researchApi<ReadingStart>(
           `/api/papers/${bound.id}/start`,
         );
-        if (token === revision.current) setStart(nextStart);
+        if (token === revision.current) {
+          setStart(nextStart);
+          if (nextStart.autoGenerate && !state.recentTurnIds.length) {
+            void researchApi<ReadingStart>(`/api/papers/${bound.id}/start`, {
+              automatic: true,
+            })
+              .then((guide) => {
+                if (token === revision.current) setStart(guide);
+              })
+              .catch((err) => {
+                if (token === revision.current) setError(err.message);
+              });
+          }
+        }
       }
     } catch (err) {
       if (token === revision.current) setError((err as Error).message);
@@ -208,6 +244,24 @@ export function ResearchWorkspace() {
       revision.current++;
     };
   }, []);
+  useEffect(() => {
+    if (!paper || !start || !["queued", "running"].includes(start.status ?? ""))
+      return;
+    let closed = false;
+    const timer = setInterval(() => {
+      void researchApi<ReadingStart>(`/api/papers/${paper.id}/start`)
+        .then((value) => {
+          if (!closed) setStart(value);
+        })
+        .catch((err) => {
+          if (!closed) setError(err.message);
+        });
+    }, 900);
+    return () => {
+      closed = true;
+      clearInterval(timer);
+    };
+  }, [paper?.id, start?.status]);
   useEffect(() => {
     try {
       setQuestion(localStorage.getItem(draftKey) || "");
@@ -429,14 +483,47 @@ export function ResearchWorkspace() {
     suggest(text);
   }
   function citation(id: string, source?: Source) {
+    setSourceRevision((value) => value + 1);
     setSourceId(id);
     setExtraSource(source);
     setPanel("sources");
   }
+  const currentPaper = useRef(paper);
+  currentPaper.current = paper;
+  const currentConversation = useRef(conversation);
+  currentConversation.current = conversation;
+  function applyConversation(state: ConversationState) {
+    if (currentConversation.current?.id === state.id) setConversation(state);
+  }
+  async function ensure() {
+    if (conversation) return conversation;
+    const token = revision.current;
+    const state = paper
+      ? await researchApi<ConversationState>(`/api/papers/${paper.id}/chat`, {})
+      : await researchApi<ConversationState>("/api/conversations", {
+          paperId: null,
+          projectId,
+        });
+    if (token === revision.current) {
+      setConversation(state);
+      setConversations((old) =>
+        old.some((c) => c.id === state.id) ? old : [...old, state],
+      );
+    }
+    return state;
+  }
   async function send() {
-    if (busy || historical || !question.trim() || actionLock.current) return;
+    if (
+      busy ||
+      historical ||
+      (!question.trim() && !pendingAttachments.files.length) ||
+      actionLock.current
+    )
+      return;
     const token = revision.current;
     const submittedDraftKey = draftKeyRef.current;
+    const submittedFiles = [...pendingAttachments.files];
+    const submittedQuestion = question.trim() || "请带我理解这些材料。";
     await action(async () => {
       let state = conversation;
       if (!state) {
@@ -453,12 +540,58 @@ export function ResearchWorkspace() {
           setConversations((prev) => [...prev, state!]);
         }
       }
+      const pdf = submittedFiles.find(
+        (a) => a.file && /\.pdf$/i.test(a.file.name),
+      );
+      let targetPaperId = paper?.id ?? null;
+      if (pdf?.file) {
+        const result = await importPaper([pdf.file], pdf.id);
+        await researchApi(
+          `/api/papers/${result.paper.id}/metadata`,
+          { projectId },
+          "PATCH",
+        );
+        state = await researchApi<ConversationState>(
+          `/api/papers/${result.paper.id}/chat`,
+          {},
+        );
+        targetPaperId = result.paper.id;
+      }
+      const attachmentIds: string[] = [];
+      for (const item of submittedFiles.filter((a) => a !== pdf)) {
+        if (item.record && item.record.conversationId === state.id) {
+          attachmentIds.push(item.id);
+          continue;
+        }
+        let file = item.file,
+          id = item.id;
+        if (item.record) {
+          if (!item.record.image)
+            throw new Error(`${item.record.name} 需要重新选择文件。`);
+          const blob = await (await fetch(item.record.image)).blob();
+          file = new File([blob], item.record.name, { type: blob.type });
+          id = `${item.id}-${state.id}`;
+        }
+        const body = new FormData();
+        body.append("image", file!);
+        body.append("attachmentId", id);
+        const response = await fetch(
+          `/api/conversations/${state.id}/attachments`,
+          { method: "POST", body },
+        );
+        const value = await response.json();
+        if (!response.ok)
+          throw new Error(value.error || "附件上传失败，请重试。");
+        attachmentIds.push((value as ResearchAttachment).id);
+      }
       const pending =
         retry.current?.conversationId === state.id
           ? retry.current
           : {
-              question: question.trim(),
-              selection,
+              question: submittedQuestion,
+              selection: pdf ? undefined : selection,
+              attachmentIds,
+              targetPaperId,
               clientMessageId: crypto.randomUUID(),
               conversationId: state.id,
             };
@@ -469,7 +602,8 @@ export function ResearchWorkspace() {
           question: pending.question,
           clientMessageId: pending.clientMessageId,
           mode: "live",
-          paperId: paper?.id ?? null,
+          paperId: pending.targetPaperId ?? targetPaperId,
+          attachmentIds: pending.attachmentIds ?? attachmentIds,
           ...(pending.selection?.sourceAnchor
             ? { sourceAnchor: pending.selection.sourceAnchor }
             : {}),
@@ -481,6 +615,18 @@ export function ResearchWorkspace() {
             : {}),
         },
       );
+      await pendingAttachments.sent(
+        submittedFiles.map((a) => a.id),
+        submittedDraftKey,
+      );
+      if (pdf) {
+        if (token === revision.current) await openConversation(state.id);
+        try {
+          localStorage.setItem(submittedDraftKey, "");
+          localStorage.removeItem(`${submittedDraftKey}:selection`);
+        } catch {}
+        return;
+      }
       let clearDraft =
         token === revision.current && composer.current?.value === question;
       try {
@@ -545,6 +691,13 @@ export function ResearchWorkspace() {
   const archived = index.projects.filter((p) => p.archived);
   return (
     <div
+      style={
+        {
+          "--rw-navigation": `${layout.navigation}px`,
+          "--rw-reading": `${layout.reading}%`,
+          "--rw-composer": `${layout.composer}px`,
+        } as import("react").CSSProperties
+      }
       className="rp rw"
       onDragEnter={(e) => {
         if (e.dataTransfer.types.includes("Files")) {
@@ -563,6 +716,7 @@ export function ResearchWorkspace() {
         }
       }}
       onDrop={(e) => {
+        if (e.defaultPrevented) return;
         e.preventDefault();
         dragDepth.current = 0;
         setDragging(false);
@@ -580,7 +734,20 @@ export function ResearchWorkspace() {
         setSearch={setSearch}
         onPaper={(p) => void selectPaper(p)}
         onProject={(id) => blank(id)}
-        onHome={() => blank()}
+        mode={mode}
+        onHome={() => setMode("research")}
+        onPpt={() => {
+          setMode("ppt");
+          setMobile(false);
+        }}
+        onSettings={() => {
+          setSettings(true);
+          setMobile(false);
+        }}
+        onRecords={() => {
+          setRecords(true);
+          setMobile(false);
+        }}
         onImport={() => fileInput.current?.click()}
         onCreateProject={() => setManagement({ kind: "create", name: "" })}
         onEditProject={(id) => {
@@ -596,6 +763,14 @@ export function ResearchWorkspace() {
         mobile={mobile}
         close={() => setMobile(false)}
       />
+      <Splitter
+        className="rw-navigation-split"
+        label="调整导航宽度"
+        value={layout.navigation}
+        min={200}
+        max={340}
+        onChange={(v) => resize("navigation", v)}
+      />
       <main className="rw-main">
         <header className="rp-topbar">
           <button
@@ -606,7 +781,7 @@ export function ResearchWorkspace() {
             ☰
           </button>
           <div className="rw-breadcrumb">
-            <span>论文研究</span>
+            <span>{mode === "research" ? "论文研究" : "PPT 汇报"}</span>
             <strong>{currentName}</strong>
           </div>
           <button disabled={busy} onClick={() => fileInput.current?.click()}>
@@ -616,382 +791,555 @@ export function ResearchWorkspace() {
             资料与笔记
           </button>
         </header>
-        <div className="rw-content">
-          <section className="rw-chat">
-            <header className="rp-chat-header rw-chat-header">
-              <div>
-                <small>
-                  {paper
-                    ? paper.parseStatus === "ready" || !paper.parseStatus
-                      ? "论文资料可用"
-                      : "需要补充正文"
-                    : "无需先创建课题"}
-                  {uploading ? " · 正在上传并解析" : ""}
-                </small>
-                <h1>
-                  {conversation &&
-                  (conversation.recentTurnIds.length ||
-                    conversation.titleEdited)
-                    ? titleOf(conversation)
-                    : currentName}
-                </h1>
-              </div>
-              <details className="rw-discussion-menu">
-                <summary>讨论记录</summary>
-                {!paper && (
-                  <button
-                    disabled={busy}
-                    onClick={() => {
-                      blank(projectId, paper);
-                    }}
-                  >
-                    开始新讨论
-                  </button>
-                )}
-                {conversations
-                  .filter(
-                    (c) =>
-                      c.paperId === (paper?.id ?? null) &&
-                      (paper || (c.projectId ?? null) === projectId),
-                  )
-                  .sort((a, b) =>
-                    (b.updatedAt || "").localeCompare(a.updatedAt || ""),
-                  )
-                  .map((c) => (
+        {mode === "ppt" ? (
+          <ResearchPpt
+            key={conversation?.id ?? paper?.id ?? "empty"}
+            paper={paper}
+            conversation={conversation}
+            turns={turns}
+            notes={notes}
+            ensure={ensure}
+            onState={applyConversation}
+            onCitation={(id) => {
+              setMode("research");
+              citation(id);
+            }}
+            onResearch={() => setMode("research")}
+            layout={layout}
+            resize={resize}
+          />
+        ) : (
+          <div className="rw-content">
+            <section className="rw-chat">
+              <header className="rp-chat-header rw-chat-header">
+                <div>
+                  <small>
+                    {paper
+                      ? paper.parseStatus === "ready" || !paper.parseStatus
+                        ? "论文资料可用"
+                        : "需要补充正文"
+                      : "无需先创建课题"}
+                    {uploading ? " · 正在上传并解析" : ""}
+                  </small>
+                  <h1>
+                    {conversation &&
+                    (conversation.recentTurnIds.length ||
+                      conversation.titleEdited)
+                      ? titleOf(conversation)
+                      : currentName}
+                  </h1>
+                </div>
+                <details className="rw-discussion-menu">
+                  <summary>讨论记录</summary>
+                  {!paper && (
                     <button
-                      key={c.id}
-                      onClick={() => void openConversation(c.id)}
-                    >
-                      {titleOf(c)}
-                    </button>
-                  ))}
-              </details>
-            </header>
-            <div className="rw-toolbar">
-              {paper && (
-                <button
-                  disabled={busy}
-                  onClick={() =>
-                    setManagement({
-                      kind: "paper",
-                      id: paper.id,
-                      name: currentName,
-                      projectId,
-                    })
-                  }
-                >
-                  论文名称与归组
-                </button>
-              )}
-              {conversation && (
-                <button
-                  disabled={busy}
-                  onClick={() =>
-                    setManagement({
-                      kind: "discussion",
-                      id: conversation.id,
-                      name: titleOf(conversation),
-                    })
-                  }
-                >
-                  重命名讨论
-                </button>
-              )}
-              {paper && (
-                <details className="rw-route">
-                  <summary>阅读路线</summary>
-                  {[
-                    "这篇论文提出了什么研究问题？",
-                    "这篇论文的核心实验怎样设计？",
-                    "这篇论文的结果有哪些证据？",
-                    "这篇论文有哪些局限，对后续研究有什么启发？",
-                  ].map((q) => (
-                    <button key={q} disabled={busy} onClick={() => suggest(q)}>
-                      {q}
-                    </button>
-                  ))}
-                </details>
-              )}
-              {!!archived.length && (
-                <details className="rw-route">
-                  <summary>已归档课题</summary>
-                  {archived.map((p) => (
-                    <button
-                      key={p.id}
                       disabled={busy}
-                      onClick={() =>
-                        setManagement({
-                          kind: "project",
-                          id: p.id,
-                          name: p.name,
-                          archived: true,
-                        })
-                      }
+                      onClick={() => {
+                        blank(projectId, paper);
+                      }}
                     >
-                      {p.name}
-                    </button>
-                  ))}
-                </details>
-              )}
-            </div>
-            {loading && (
-              <p className="rw-loading" role="status">
-                正在恢复资料与讨论…
-              </p>
-            )}
-            <ResearchDiscussion
-              turns={turns}
-              paper={paper}
-              start={start}
-              busy={working}
-              onCancel={(turn) =>
-                void researchApi(`/api/turns/${turn.id}/cancel`, {}).catch(
-                  (err) => setError(err.message),
-                )
-              }
-              onRetry={(turn) => {
-                draft(turn.message.question);
-                const restored = turn.message.sourceAnchor
-                  ? {
-                      label: "原文引用",
-                      sourceAnchor: turn.message.sourceAnchor,
-                    }
-                  : turn.message.focus
-                    ? { label: "回答引用", focus: turn.message.focus }
-                    : turn.message.figureSourceId
-                      ? {
-                          label: "图件引用",
-                          figureSourceId: turn.message.figureSourceId,
-                        }
-                      : undefined;
-                setSelection(restored);
-                try {
-                  if (restored)
-                    localStorage.setItem(
-                      `${draftKeyRef.current}:selection`,
-                      JSON.stringify(restored),
-                    );
-                  else
-                    localStorage.removeItem(`${draftKeyRef.current}:selection`);
-                } catch {}
-                composer.current?.focus();
-              }}
-              onSuggest={suggest}
-              onImport={() => fileInput.current?.click()}
-              onIdea={() => {
-                blank(projectId);
-                composer.current?.focus();
-              }}
-              onCitation={citation}
-              onFocus={focus}
-              onSave={(turn) =>
-                void action(async () => {
-                  await researchApi("/api/workspace/notes", {
-                    conversationId: turn.conversationId,
-                    turnId: turn.id,
-                  });
-                  await refresh();
-                  setPanel("notes");
-                  setNotice("回答已保存，原讨论与依据已保留。");
-                })
-              }
-              savedIds={index.notes.map((n) => n.turnId)}
-              latestTitle={
-                !conversation && !paper && recent ? titleOf(recent) : undefined
-              }
-              onResume={() => recent && void openConversation(recent.id)}
-            />
-            <div className="rp-composer-area rw-composer-area">
-              {error && (
-                <div className="rw-error" role="alert">
-                  <span>{error}</span>
-                  {importRetry.current && (
-                    <button
-                      disabled={uploading}
-                      onClick={() =>
-                        importRetry.current &&
-                        void upload([importRetry.current.file])
-                      }
-                    >
-                      重试导入
+                      开始新讨论
                     </button>
                   )}
+                  {conversations
+                    .filter(
+                      (c) =>
+                        c.paperId === (paper?.id ?? null) &&
+                        (paper || (c.projectId ?? null) === projectId),
+                    )
+                    .sort((a, b) =>
+                      (b.updatedAt || "").localeCompare(a.updatedAt || ""),
+                    )
+                    .map((c) => (
+                      <button
+                        key={c.id}
+                        onClick={() => void openConversation(c.id)}
+                      >
+                        {titleOf(c)}
+                      </button>
+                    ))}
+                </details>
+              </header>
+              <div className="rw-toolbar">
+                {paper && (
                   <button
-                    aria-label="关闭错误提示"
-                    onClick={() => setError("")}
-                  >
-                    ×
-                  </button>
-                </div>
-              )}
-              {active && (
-                <div className="rw-running" role="status">
-                  <span>
-                    {statusLabel[active.run?.status ?? active.status] ??
-                      "处理中"}
-                  </span>
-                  <button
-                    disabled={working}
+                    disabled={busy}
                     onClick={() =>
-                      void action(async () => {
-                        await researchApi(`/api/turns/${active.id}/cancel`, {});
-                        setNotice("已请求停止，正在保存记录。");
+                      setManagement({
+                        kind: "paper",
+                        id: paper.id,
+                        name: currentName,
+                        projectId,
                       })
                     }
                   >
-                    停止
+                    论文名称与归组
                   </button>
-                </div>
-              )}
-              {latestReply && (
-                <div className="rp-suggestions">
+                )}
+                {conversation && (
                   <button
                     disabled={busy}
-                    onClick={() => {
-                      const unit = latestReply.reply!.content!;
-                      const i = unit.sections.length - 1;
-                      const section = unit.sections[i];
-                      focus(
-                        {
-                          label: `回答「${section.title}」`,
-                          focus: {
-                            runId: latestReply.runId!,
-                            sectionIndex: i,
-                            excerpt: section.text.slice(0, 2000),
-                          },
-                        },
-                        "把这段讲得更通俗一些。",
-                      );
-                    }}
+                    onClick={() =>
+                      setManagement({
+                        kind: "discussion",
+                        id: conversation.id,
+                        name: titleOf(conversation),
+                      })
+                    }
                   >
-                    讲得更通俗
+                    重命名讨论
                   </button>
-                  {!!latestReply.reply?.content?.sections.some(
-                    (s) => s.citations.length,
-                  ) && (
-                    <button
-                      onClick={() => {
-                        const id = latestReply.reply!.content!.sections.flatMap(
-                          (s) => s.citations,
-                        )[0];
-                        citation(
-                          id,
-                          latestReply.run?.materials
-                            ?.at(-1)
-                            ?.sources.find((s) => s.id === id),
-                        );
-                      }}
-                    >
-                      查看依据
-                    </button>
-                  )}
-                  {latestReply.reply?.nextStep && (
-                    <button
-                      disabled={busy}
-                      title={latestReply.reply.nextStep}
-                      onClick={() => suggest(latestReply.reply!.nextStep)}
-                    >
-                      继续探索
-                    </button>
-                  )}
-                </div>
-              )}
-              {selection && (
-                <div className="rw-reference">
-                  <span>正在问：{selection.label}</span>
-                  <button
-                    aria-label="移除提问引用"
-                    onClick={() => {
-                      setSelection(undefined);
-                      try {
-                        localStorage.removeItem(
-                          `${draftKeyRef.current}:selection`,
-                        );
-                      } catch {}
-                      retry.current = undefined;
-                    }}
-                  >
-                    ×
-                  </button>
-                </div>
-              )}
-              {historical && (
-                <p>
-                  正在查看历史讨论。
-                  <button onClick={() => paper && void selectPaper(paper)}>
-                    回到主聊天
-                  </button>
+                )}
+                {paper && (
+                  <details className="rw-route">
+                    <summary>阅读路线</summary>
+                    {[
+                      "这篇论文提出了什么研究问题？",
+                      "这篇论文的核心实验怎样设计？",
+                      "这篇论文的结果有哪些证据？",
+                      "这篇论文有哪些局限，对后续研究有什么启发？",
+                    ].map((q) => (
+                      <button
+                        key={q}
+                        disabled={busy}
+                        onClick={() => suggest(q)}
+                      >
+                        {q}
+                      </button>
+                    ))}
+                  </details>
+                )}
+                {!!archived.length && (
+                  <details className="rw-route">
+                    <summary>已归档课题</summary>
+                    {archived.map((p) => (
+                      <button
+                        key={p.id}
+                        disabled={busy}
+                        onClick={() =>
+                          setManagement({
+                            kind: "project",
+                            id: p.id,
+                            name: p.name,
+                            archived: true,
+                          })
+                        }
+                      >
+                        {p.name}
+                      </button>
+                    ))}
+                  </details>
+                )}
+              </div>
+              {loading && (
+                <p className="rw-loading" role="status">
+                  正在恢复资料与讨论…
                 </p>
               )}
-              <form
-                className="rp-composer rw-composer"
-                onSubmit={(e) => {
-                  e.preventDefault();
-                  void send();
+              <ResearchDiscussion
+                turns={turns}
+                paper={paper}
+                start={start}
+                onGuide={() => {
+                  const token = revision.current;
+                  if (paper)
+                    void researchApi<ReadingStart>(
+                      `/api/papers/${paper.id}/start`,
+                      {},
+                    )
+                      .then((value) => {
+                        if (token === revision.current) setStart(value);
+                      })
+                      .catch((err) => setError(err.message));
                 }}
-              >
-                <textarea
-                  ref={composer}
-                  aria-label="向科研助手提问"
-                  placeholder="哪里没读懂？可以用自己的话问。"
-                  value={question}
-                  maxLength={2000}
-                  onChange={(e) => draft(e.target.value)}
-                  onKeyDown={(e) => {
-                    if (
-                      e.key === "Enter" &&
-                      !e.shiftKey &&
-                      !e.nativeEvent.isComposing
-                    ) {
+                onCancelGuide={() =>
+                  paper &&
+                  void researchApi(
+                    `/api/papers/${paper.id}/start/cancel`,
+                    {},
+                  ).catch((err) => setError(err.message))
+                }
+                busy={working}
+                onAttachmentRetry={(turn, id, purpose) =>
+                  void researchApi(
+                    `/api/turns/${turn.id}/attachments/${id}/retry`,
+                    { purpose },
+                  ).catch((err) => setError(err.message))
+                }
+                onCancel={(turn) =>
+                  void researchApi(`/api/turns/${turn.id}/cancel`, {}).catch(
+                    (err) => setError(err.message),
+                  )
+                }
+                onRetry={(turn) => {
+                  draft(turn.message.question);
+                  pendingAttachments.restore(turn.attachments ?? []);
+                  const restored = turn.message.sourceAnchor
+                    ? {
+                        label: turn.message.sourceAnchor.excerpt,
+                        sourceAnchor: turn.message.sourceAnchor,
+                      }
+                    : turn.message.focus
+                      ? {
+                          label: turn.message.focus.excerpt,
+                          focus: turn.message.focus,
+                        }
+                      : turn.message.figureSourceId
+                        ? {
+                            label: "图件引用",
+                            figureSourceId: turn.message.figureSourceId,
+                          }
+                        : undefined;
+                  setSelection(restored);
+                  try {
+                    if (restored)
+                      localStorage.setItem(
+                        `${draftKeyRef.current}:selection`,
+                        JSON.stringify(restored),
+                      );
+                    else
+                      localStorage.removeItem(
+                        `${draftKeyRef.current}:selection`,
+                      );
+                  } catch {}
+                  composer.current?.focus();
+                }}
+                onSuggest={suggest}
+                onImport={() => fileInput.current?.click()}
+                onIdea={() => {
+                  blank(projectId);
+                  composer.current?.focus();
+                }}
+                onCitation={citation}
+                onFocus={focus}
+                onRecord={(turn, kind, feedback) =>
+                  void action(async () => {
+                    const state = await researchApi<ConversationState>(
+                      `/api/conversations/${turn.conversationId}`,
+                    );
+                    const next = await researchApi<ConversationState>(
+                      `/api/conversations/${state.id}/records`,
+                      {
+                        version: state.version,
+                        kind,
+                        unitId: turn.runId,
+                        text:
+                          turn.reply?.content?.title ?? turn.message.question,
+                        ...(feedback ? { feedback } : {}),
+                      },
+                    );
+                    applyConversation(next);
+                    setNotice(
+                      kind === "favorite"
+                        ? "解释已收藏。"
+                        : "你的理解反馈已保存。",
+                    );
+                  })
+                }
+                onSave={(turn) =>
+                  void action(async () => {
+                    await researchApi("/api/workspace/notes", {
+                      conversationId: turn.conversationId,
+                      turnId: turn.id,
+                    });
+                    await refresh();
+                    setPanel("notes");
+                    setNotice("回答已保存，原讨论与依据已保留。");
+                  })
+                }
+                savedIds={index.notes.map((n) => n.turnId)}
+                latestTitle={
+                  !conversation && !paper && recent
+                    ? titleOf(recent)
+                    : undefined
+                }
+                onResume={() => recent && void openConversation(recent.id)}
+              />
+              <Splitter
+                className="rw-composer-split"
+                label="调整输入区高度"
+                value={layout.composer}
+                min={175}
+                max={360}
+                horizontal
+                reverse
+                onChange={(v) => resize("composer", v)}
+              />
+              <div className="rp-composer-area rw-composer-area">
+                {error && (
+                  <div className="rw-error" role="alert">
+                    <span>{error}</span>
+                    {importRetry.current && (
+                      <button
+                        disabled={uploading}
+                        onClick={() =>
+                          importRetry.current &&
+                          void upload([importRetry.current.file])
+                        }
+                      >
+                        重试导入
+                      </button>
+                    )}
+                    <button
+                      aria-label="关闭错误提示"
+                      onClick={() => setError("")}
+                    >
+                      ×
+                    </button>
+                  </div>
+                )}
+                {active && (
+                  <div className="rw-running" role="status">
+                    <span>
+                      {statusLabel[active.run?.status ?? active.status] ??
+                        "处理中"}
+                    </span>
+                    <button
+                      disabled={working}
+                      onClick={() =>
+                        void action(async () => {
+                          await researchApi(
+                            `/api/turns/${active.id}/cancel`,
+                            {},
+                          );
+                          setNotice("已请求停止，正在保存记录。");
+                        })
+                      }
+                    >
+                      停止
+                    </button>
+                  </div>
+                )}
+                {latestReply && (
+                  <div className="rp-suggestions">
+                    <button
+                      disabled={busy}
+                      onClick={() => {
+                        suggest("再简单一点，继续解释上一轮完整问题。");
+                      }}
+                    >
+                      讲得更通俗
+                    </button>
+                    {!!latestReply.reply?.content?.sections.some(
+                      (s) => s.citations.length,
+                    ) && (
+                      <button
+                        onClick={() => {
+                          const id =
+                            latestReply.reply!.content!.sections.flatMap(
+                              (s) => s.citations,
+                            )[0];
+                          citation(
+                            id,
+                            latestReply.run?.materials
+                              ?.at(-1)
+                              ?.sources.find((s) => s.id === id),
+                          );
+                        }}
+                      >
+                        查看依据
+                      </button>
+                    )}
+                    {latestReply.reply?.nextStep && (
+                      <button
+                        disabled={busy}
+                        title={latestReply.reply.nextStep}
+                        onClick={() => suggest(latestReply.reply!.nextStep)}
+                      >
+                        继续探索
+                      </button>
+                    )}
+                  </div>
+                )}
+                {selection && (
+                  <div className="rw-reference">
+                    <button
+                      type="button"
+                      className="rw-reference-target"
+                      onClick={() => {
+                        if (selection.sourceAnchor)
+                          citation(selection.sourceAnchor.sourceId);
+                        else if (selection.figureSourceId)
+                          citation(selection.figureSourceId);
+                        else if (selection.focus)
+                          document
+                            .querySelector(
+                              `[data-turn-id="${turns.find((t) => t.runId === selection.focus!.runId)?.id}"]`,
+                            )
+                            ?.scrollIntoView({ block: "center" });
+                      }}
+                    >
+                      正在问：{selection.label}
+                    </button>
+                    <button
+                      aria-label="移除提问引用"
+                      onClick={() => {
+                        setSelection(undefined);
+                        try {
+                          localStorage.removeItem(
+                            `${draftKeyRef.current}:selection`,
+                          );
+                        } catch {}
+                        retry.current = undefined;
+                      }}
+                    >
+                      ×
+                    </button>
+                  </div>
+                )}
+                {historical && (
+                  <p>
+                    正在查看历史讨论。
+                    <button onClick={() => paper && void selectPaper(paper)}>
+                      回到主聊天
+                    </button>
+                  </p>
+                )}
+                <form
+                  className="rp-composer rw-composer"
+                  onDragOver={(e) => {
+                    if (e.dataTransfer.types.includes("Files"))
                       e.preventDefault();
-                      void send();
+                  }}
+                  onDrop={(e) => {
+                    e.preventDefault();
+                    e.stopPropagation();
+                    setDragging(false);
+                    dragDepth.current = 0;
+                    pendingAttachments.add([...e.dataTransfer.files]);
+                  }}
+                  onPaste={(e) => {
+                    const images = [...e.clipboardData.files].filter((f) =>
+                      /image\/(png|jpeg)/.test(f.type),
+                    );
+                    if (images.length) {
+                      e.preventDefault();
+                      pendingAttachments.add(images);
                     }
                   }}
-                />
-                <div>
-                  <small>支持 PDF · 图片检查即将接入</small>
-                  <button
-                    type="submit"
-                    className="rp-primary"
-                    disabled={busy || historical || !question.trim()}
-                  >
-                    {working ? "正在提交" : active ? "加入队列 ↑" : "发送 ↑"}
-                  </button>
-                </div>
-              </form>
-              <p className="rp-composer-note">
-                Enter 发送 · Shift + Enter 换行
-              </p>
-            </div>
-          </section>
-          {panel && (
-            <ResearchReading
-              paper={paper}
-              name={currentName}
-              panel={panel}
-              sourceId={sourceId}
-              extraSource={extraSource}
-              notes={notes}
-              busy={busy}
-              onPanel={setPanel}
-              onClose={() => setPanel(null)}
-              onSource={(id) => citation(id)}
-              onFocus={focus}
-              onSaveNote={(note: ResearchNote, title, text) =>
-                void action(async () => {
-                  await researchApi(
-                    `/api/workspace/notes/${note.id}`,
-                    { title, text, updatedAt: note.updatedAt },
-                    "PATCH",
-                  );
-                  await refresh();
-                  setNotice("笔记修改已保存。");
-                })
-              }
-              onReturn={(id) => void openConversation(id)}
-            />
-          )}
-        </div>
+                  onSubmit={(e) => {
+                    e.preventDefault();
+                    void send();
+                  }}
+                >
+                  <PendingAttachments
+                    files={pendingAttachments.files}
+                    remove={pendingAttachments.remove}
+                  />
+                  <textarea
+                    ref={composer}
+                    aria-label="向科研助手提问"
+                    placeholder="哪里没读懂？可以用自己的话问。"
+                    value={question}
+                    maxLength={2000}
+                    onChange={(e) => draft(e.target.value)}
+                    onKeyDown={(e) => {
+                      if (
+                        e.key === "Enter" &&
+                        !e.shiftKey &&
+                        !e.nativeEvent.isComposing
+                      ) {
+                        e.preventDefault();
+                        void send();
+                      }
+                    }}
+                  />
+                  <div>
+                    <div className="rw-file-buttons">
+                      <button
+                        type="button"
+                        onClick={() => attachmentInput.current?.click()}
+                      >
+                        添加文件
+                      </button>
+                      <button
+                        type="button"
+                        onClick={() => imageInput.current?.click()}
+                      >
+                        添加图片
+                      </button>
+                    </div>
+                    <button
+                      type="submit"
+                      className="rp-primary"
+                      disabled={
+                        busy ||
+                        historical ||
+                        (!question.trim() && !pendingAttachments.files.length)
+                      }
+                    >
+                      {working ? "正在提交" : active ? "加入队列 ↑" : "发送 ↑"}
+                    </button>
+                  </div>
+                </form>
+                <p className="rp-composer-note">
+                  Enter 发送 · Shift + Enter 换行
+                </p>
+              </div>
+            </section>
+            {panel && (
+              <Splitter
+                className="rw-reading-split"
+                label="调整聊天与阅读宽度"
+                value={layout.reading}
+                min={30}
+                max={60}
+                reverse
+                scale={
+                  100 / Math.max(600, window.innerWidth - layout.navigation)
+                }
+                onChange={(v) => resize("reading", v)}
+              />
+            )}
+            {panel && (
+              <ResearchReading
+                key={paper?.id ?? "idea"}
+                paper={paper}
+                name={currentName}
+                panel={panel}
+                sourceId={sourceId}
+                locatorRevision={sourceRevision}
+                onMaterial={(value) => {
+                  if (value.id === currentPaper.current?.id) {
+                    const token = revision.current;
+                    setPaper(value);
+                    setSelection(undefined);
+                    localStorage.removeItem(`${draftKeyRef.current}:selection`);
+                    void refresh()
+                      .then(() =>
+                        researchApi<ReadingStart>(
+                          `/api/papers/${value.id}/start`,
+                        ),
+                      )
+                      .then((guide) => {
+                        if (token === revision.current) setStart(guide);
+                      })
+                      .catch((err) => setError(err.message));
+                  }
+                }}
+                extraSource={extraSource}
+                notes={notes}
+                busy={busy}
+                onPanel={setPanel}
+                onClose={() => setPanel(null)}
+                onSource={(id) => citation(id)}
+                onFocus={focus}
+                onSaveNote={(note: ResearchNote, title, text) =>
+                  void action(async () => {
+                    await researchApi(
+                      `/api/workspace/notes/${note.id}`,
+                      { title, text, updatedAt: note.updatedAt },
+                      "PATCH",
+                    );
+                    await refresh();
+                    setNotice("笔记修改已保存。");
+                  })
+                }
+                onReturn={(id) => void openConversation(id)}
+              />
+            )}
+          </div>
+        )}
       </main>
       {dragging && (
         <div className="rw-drop" role="status">
@@ -1005,6 +1353,28 @@ export function ResearchWorkspace() {
         </div>
       )}
       <input
+        ref={attachmentInput}
+        type="file"
+        accept=".pdf,.png,.jpg,.jpeg"
+        multiple
+        hidden
+        onChange={(e) => {
+          if (e.target.files) pendingAttachments.add([...e.target.files]);
+          e.target.value = "";
+        }}
+      />
+      <input
+        ref={imageInput}
+        type="file"
+        accept=".png,.jpg,.jpeg"
+        multiple
+        hidden
+        onChange={(e) => {
+          if (e.target.files) pendingAttachments.add([...e.target.files]);
+          e.target.value = "";
+        }}
+      />
+      <input
         ref={fileInput}
         type="file"
         accept=".pdf,application/pdf"
@@ -1014,6 +1384,48 @@ export function ResearchWorkspace() {
           e.target.value = "";
         }}
       />
+      {settings && (
+        <ResearchSettings
+          conversation={conversation}
+          ensure={ensure}
+          onState={applyConversation}
+          close={() => setSettings(false)}
+          reset={resetLayout}
+        />
+      )}
+      {records && (
+        <dialog
+          ref={recordsDialog}
+          className="rp-settings rw-settings rw-records"
+          onCancel={() => setRecords(false)}
+        >
+          <header className="rp-modal-heading">
+            <h2>个人记录 · {currentName}</h2>
+            <button aria-label="关闭个人记录" onClick={() => setRecords(false)}>
+              ×
+            </button>
+          </header>
+          <PersonalRecordsPanel
+            key={conversation?.id}
+            state={conversation}
+            ensure={ensure}
+            onState={applyConversation}
+            disabled={false}
+            onView={(run) => {
+              setRecords(false);
+              setMode("research");
+              const id = turns.find((t) => t.runId === run.id)?.id;
+              setTimeout(
+                () =>
+                  document
+                    .querySelector(`[data-turn-id="${id}"]`)
+                    ?.scrollIntoView({ block: "center" }),
+                50,
+              );
+            }}
+          />
+        </dialog>
+      )}
       {management && (
         <dialog
           ref={dialog}

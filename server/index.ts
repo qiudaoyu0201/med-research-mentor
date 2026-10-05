@@ -35,8 +35,10 @@ import { digest } from "./materials.ts";
 import { LearningRecords } from "./learning-records.ts";
 import { Projects } from "./projects.ts";
 import { PaperImports } from "./paper-imports.ts";
+import { Attachments } from "./attachments.ts";
+import { attachmentLimits } from "../shared/attachments.ts";
 import { taskKey } from "./scheduler.ts";
-import { readingStart } from "../shared/workspace.ts";
+import { ReadingGuides } from "./reading-guides.ts";
 
 const app = express(),
   port = Number(process.env.PORT || 4317),
@@ -83,13 +85,13 @@ const upload = multer({
   limits: { fileSize: 30 * 1024 * 1024, files: 1 },
   fileFilter: (_req, file, callback) => {
     if (!/\.pdf$/i.test(file.originalname))
-      return callback(
-        new Error("当前支持 PDF 导入；图片准入将在下一阶段开放。"),
-      );
+      return callback(new Error("此入口用于导入 PDF；图片请在输入区添加。"));
     callback(null, true);
   },
 });
-const paperById = async (id: string) =>
+const attachments = new Attachments(provider);
+await attachments.restore();
+const basePaperById = async (id: string) =>
   id === "foundation-only"
     ? {
         id,
@@ -101,6 +103,16 @@ const paperById = async (id: string) =>
     : id === sample.id
       ? structuredClone(loadedSample)
       : read<PaperBundle>("papers", id);
+const paperById = async (id: string): Promise<PaperBundle> => {
+  const paper = await basePaperById(id);
+  return {
+    ...paper,
+    sources: [
+      ...paper.sources.filter((s) => !s.attachmentId),
+      ...attachments.sources(id, undefined, paper.version),
+    ],
+  };
+};
 const deckVersions = new DeckVersions(provider, paperById);
 await deckVersions.restoreDisk();
 const assistant = new AssistantService(
@@ -112,15 +124,62 @@ const assistant = new AssistantService(
   new ResultCache(),
   exportDeck,
   deckVersions,
+  undefined,
+  attachments,
 );
+const readingGuides = new ReadingGuides(provider, assistant.scheduler);
+await readingGuides.restore();
 await assistant.restore();
 const imports = new PaperImports();
 const projects = new Projects();
 await projects.restore();
 const entityId = z.string().regex(/^[a-zA-Z0-9_-]{1,100}$/);
 const nameInput = z.string().trim().min(1).max(120);
+const imageUpload = multer({
+  storage: multer.memoryStorage(),
+  limits: { fileSize: attachmentLimits.imageBytes, files: 1 },
+});
+app.post(
+  "/api/conversations/:id/attachments",
+  imageUpload.single("image"),
+  async (req, res) => {
+    const state = assistant.conversations.get(entityId.parse(req.params.id));
+    if (!req.file) throw new Error("请选择要发送的图片。");
+    const id = entityId.parse(req.body.attachmentId);
+    const name = Buffer.from(req.file.originalname, "latin1").toString("utf8");
+    res
+      .status(201)
+      .json(
+        await attachments.upload(
+          id,
+          state.id,
+          state.paperId,
+          name,
+          req.file.buffer,
+        ),
+      );
+  },
+);
+app.post("/api/turns/:id/attachments/:attachmentId/retry", async (req, res) => {
+  const body = z
+    .object({ purpose: z.string().max(1000).optional() })
+    .parse(req.body);
+  res
+    .status(202)
+    .json(
+      await assistant.retryAttachment(
+        req.params.id,
+        req.params.attachmentId,
+        body.purpose,
+      ),
+    );
+});
 app.get("/api/workspace", async (_req, res) => {
-  const papers = [loadedSample, ...(await list<PaperBundle>("papers"))];
+  const papers = await Promise.all(
+    [loadedSample, ...(await list<PaperBundle>("papers"))].map((p) =>
+      paperById(p.id),
+    ),
+  );
   const index = projects.snapshot();
   index.positions = index.positions.map((p) =>
     projects.validatePosition(
@@ -167,9 +226,27 @@ app.post("/api/papers/:id/chat", async (req, res) => {
       ?.projectId ?? null;
   res.json(await assistant.conversations.mainForPaper(req.params.id, owner));
 });
-app.get("/api/papers/:id/start", async (req, res) =>
-  res.json(readingStart(await paperById(req.params.id))),
-);
+app.get("/api/papers/:id/start", async (req, res) => {
+  const guide = readingGuides.get(await paperById(req.params.id));
+  res.json({
+    ...guide,
+    autoGenerate:
+      process.env.TUTOR_READING_GUIDES !== "manual" &&
+      !guide.status &&
+      Boolean(guide.excerpt),
+  });
+});
+app.post("/api/papers/:id/start", async (req, res) => {
+  const body = z.object({ automatic: z.boolean().optional() }).parse(req.body);
+  const paper = await paperById(req.params.id);
+  if (body.automatic && assistant.scheduler.has(taskKey(paper.id, "guide")))
+    return res.json(readingGuides.get(paper));
+  res.status(202).json(await readingGuides.start(paper));
+});
+app.post("/api/papers/:id/start/cancel", (req, res) => {
+  readingGuides.cancel(req.params.id);
+  res.json({ ok: true });
+});
 app.patch("/api/conversations/:id/title", async (req, res) => {
   const body = z
     .object({ title: nameInput, version: z.number().int().min(0) })
@@ -360,6 +437,8 @@ app.put("/api/conversations/:id/progress", async (req, res) => {
   );
 });
 app.post("/api/conversations/:id/messages", async (req, res) => {
+  assistant.conversations.get(req.params.id);
+  readingGuides.cancelAll();
   if (replayController) throw new Error("开发回放运行中，请先取消或等待。");
   res
     .status(202)
@@ -460,7 +539,7 @@ app.get("/api/papers/:id/pdf", async (req, res) => {
 app.post("/api/papers/:id/text", async (req, res) => {
   if (req.params.id === sample.id)
     throw new Error("示例证据只读；请在上传资料中补充文本。");
-  const paper = await paperById(req.params.id);
+  const paper = await basePaperById(req.params.id);
   const body = z
     .object({
       text: z.string().min(1).max(20_000),
@@ -486,7 +565,8 @@ app.post("/api/papers/:id/text", async (req, res) => {
     relatedFigures: body.relatedFigures,
   };
   paper.sources.push(source);
-  paper.version = `manual-${Date.now()}`;
+  paper.version = `manual-${source.id}`;
+  paper.parseStatus = "ready";
   await save("papers", paper.id, paper);
   res.json(paper);
 });
@@ -508,7 +588,7 @@ app.post("/api/papers/:id/evidence", async (req, res) => {
     })
     .parse(req.body);
   const paper = await registerFigureEvidence(
-    await paperById(req.params.id),
+    await basePaperById(req.params.id),
     resolve(root, "uploads", req.params.id + ".pdf"),
     spec,
   );
@@ -518,7 +598,7 @@ app.post("/api/papers/:id/evidence", async (req, res) => {
 app.post("/api/papers/:id/figure", async (req, res) => {
   if (req.params.id === sample.id)
     throw new Error("请先上传原始 PDF，再保存圈选图件。");
-  const paper = await paperById(req.params.id);
+  const paper = await basePaperById(req.params.id);
   const body = z
     .object({
       image: z
@@ -705,6 +785,35 @@ app.post("/api/deck-versions", async (req, res) => {
   await assistant.conversations.put(state, state.version);
   res.status(201).json(version);
 });
+app.patch("/api/deck-versions/:id/name", async (req, res) => {
+  const body = z
+    .object({ conversationId: entityId, displayName: nameInput })
+    .parse(req.body);
+  res.json(
+    await deckVersions.rename(
+      req.params.id,
+      body.conversationId,
+      body.displayName,
+    ),
+  );
+});
+app.patch("/api/conversations/:id/preferences", async (req, res) => {
+  const body = z
+    .object({
+      profileId: z.enum(profiles.map((p) => p.id)).optional(),
+      explanationDepth: z
+        .enum(["brief", "standard", "deep", "foundations", "mechanism"])
+        .optional(),
+    })
+    .parse(req.body);
+  res.json(
+    await assistant.conversations.update(req.params.id, (state) => ({
+      ...state,
+      ...body,
+      preferenceRevision: (state.preferenceRevision ?? 0) + 1,
+    })),
+  );
+});
 app.get("/api/deck-versions/:id", (req, res) =>
   res.json(deckVersions.get(req.params.id)),
 );
@@ -719,6 +828,7 @@ app.post("/api/deck-versions/:id/edit", async (req, res) => {
     })
     .parse(req.body);
   assistant.conversations.get(body.conversationId);
+  readingGuides.cancelAll();
   res
     .status(202)
     .json(await deckVersions.start(req.params.id, body.conversationId, body));
@@ -847,6 +957,7 @@ const server = app.listen(port, "127.0.0.1", () =>
   console.log(`医学科研入门导师：http://127.0.0.1:${port}`),
 );
 async function shutdown() {
+  readingGuides.cancelAll();
   replayController?.abort();
   await Promise.all([
     ...[...assistant.turns.values()]
