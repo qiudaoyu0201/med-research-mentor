@@ -199,6 +199,28 @@ try {
     "L1: same answer baseline versus chat-first layout, no duplicate header/management toolbar; default reader hidden",
   );
 
+  const importGap = await page.locator(".rp-new-task").evaluate((button) => {
+    const icon = button.querySelector("svg")!.getBoundingClientRect();
+    const label = button.querySelector("span")!.getBoundingClientRect();
+    return label.left - icon.right;
+  });
+  assert.ok(importGap >= 0 && importGap <= 16);
+  await page.getByRole("button", { name: "打开导航", exact: true }).click();
+  for (const name of ["论文研究", "设置", "个人记录", "PPT 汇报"]) {
+    const button = page.getByRole("button", { name, exact: true });
+    assert.ok(await button.isVisible());
+    assert.ok(
+      await button.evaluate((e) => {
+        const b = e.getBoundingClientRect(),
+          i = e.querySelector("svg")!.getBoundingClientRect();
+        return i.left >= b.left && i.right <= b.right;
+      }),
+    );
+  }
+  await page.getByRole("button", { name: "设置", exact: true }).click();
+  await page.getByRole("button", { name: "关闭设置" }).click();
+  await page.getByRole("button", { name: "打开导航", exact: true }).click();
+
   const answer = page.locator(`[data-turn-id="${turn.id}"]`);
   await answer.getByRole("button", { name: "回答操作" }).click();
   const normalActions = await page.getByRole("menuitem").allTextContents();
@@ -247,6 +269,11 @@ try {
   await page.getByRole("button", { name: "移除提问引用" }).click();
   await page.getByRole("button", { name: "资料", exact: true }).click();
   await page.locator(".rw-pdf-page .textLayer span").first().waitFor();
+  const tabWidths = await page
+    .getByRole("tab")
+    .evaluateAll((tabs) => tabs.map((e) => e.getBoundingClientRect().width));
+  assert.equal(tabWidths.length, 2);
+  assert.ok(Math.abs(tabWidths[0] - tabWidths[1]) < 1 && tabWidths[0] > 140);
   assert.equal(
     await page.getByRole("button", { name: "提取原文", exact: true }).count(),
     0,
@@ -454,6 +481,11 @@ try {
       ?.value.includes("长草稿"),
   );
   assert.match(await page.getByLabel("向科研助手提问").inputValue(), /长草稿/);
+  await page.waitForFunction(
+    () =>
+      document.querySelectorAll('[aria-label="待发送附件"] > .rw-object')
+        .length === 4,
+  );
   assert.equal(
     await page.getByLabel("待发送附件").locator(":scope > .rw-object").count(),
     4,
@@ -682,7 +714,34 @@ try {
       .locator(".rw-image-dialog")
       .getByRole("button", { name: "返回", exact: true })
       .click();
+    await page.locator(".rw-ppt-preview").evaluate((e) => {
+      e.scrollTop = e.scrollHeight;
+    });
+    assert.ok(
+      await page.locator(".rw-ppt-preview").evaluate((e) => e.scrollTop > 0),
+    );
+    const otherPage = figurePage === 0 ? 1 : 0;
+    await page
+      .getByRole("button", { name: new RegExp(`^第 ${otherPage + 1} 页 ·`) })
+      .first()
+      .click();
+    assert.equal(
+      await page.locator(".rw-ppt-preview").evaluate((e) => e.scrollTop),
+      0,
+    );
+    await page
+      .getByRole("button", { name: new RegExp(`^第 ${figurePage + 1} 页 ·`) })
+      .first()
+      .click();
   }
+  await page.setViewportSize({ width: 1280, height: 768 });
+  await page.getByRole("button", { name: "编辑这一页", exact: true }).click();
+  assert.ok(!(await page.locator(".rw-ppt-preview").isVisible()));
+  assert.ok((await page.locator(".rw-ppt-editor").boundingBox())!.width > 900);
+  await page.getByRole("button", { name: "返回预览", exact: true }).click();
+  report.assertions.push(
+    "Desktop visual regressions: aligned import label; collapsed navigation keeps reachable tools and unclipped icons; tabs fill equal halves; page changes reset PPT scroll; constrained editor uses full panel width",
+  );
   await page.setViewportSize({ width: 1024, height: 768 });
   await page.getByRole("button", { name: "编辑这一页", exact: true }).click();
   assert.ok(await page.getByLabel("幻灯片标题").isVisible());

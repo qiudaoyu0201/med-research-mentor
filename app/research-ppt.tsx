@@ -426,7 +426,7 @@ export function ResearchPpt({
               onChange={(v) => resize("pptList", v)}
               className="rw-ppt-list-split"
             />
-            <div className="rw-ppt-preview">
+            <div className="rw-ppt-preview" key={`${current?.id}:${page}`}>
               {current && draft && (
                 <>
                   <details>

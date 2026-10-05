@@ -115,6 +115,11 @@
   flex-basis: var(--rw-navigation);
   border-color: var(--rw-line);
 }
+@media (min-width: 1001px) {
+  .rw:not(.rw-nav-collapsed) .rp-sidebar {
+    border-right: 0;
+  }
+}
 .rw .rp-sidebar-brand {
   padding: 20px 16px;
   gap: 8px;
@@ -358,6 +363,7 @@
   box-shadow: 0 12px 48px #0002;
 }
 .rw .rw-object-menu button {
+  position: relative;
   display: flex;
   align-items: center;
   gap: 12px;
@@ -369,7 +375,14 @@
   border-radius: 9px;
 }
 .rw .rw-object-menu button + button {
+  border-top: 0;
+}
+.rw .rw-object-menu button + button::before {
+  content: "";
+  position: absolute;
+  inset: 0 12px auto;
   border-top: 1px solid color-mix(in srgb, var(--rw-line) 45%, transparent);
+  pointer-events: none;
 }
 .rw .rw-object-menu button span {
   flex: 1;
@@ -564,7 +577,7 @@
   min-width: 0;
   background: var(--rw-surface);
   color: var(--rw-text);
-  border-color: var(--rw-line);
+  border: 0;
 }
 .rw .rw-reader .rp-viewer-header {
   padding: 8px 10px;
@@ -580,6 +593,9 @@
 .rw .rw-reader .rp-viewer-header strong {
   width: 100%;
   font-size: 14px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
 }
 .rw .rw-reader .rp-viewer-header button {
   font-size: 13px;
@@ -596,10 +612,12 @@
   color: var(--rw-secondary);
 }
 .rw .rp-tabs button {
+  flex: 1;
+  min-width: 0;
   min-height: 30px;
   border: 0;
   border-radius: 7px;
-  font-size: 14px;
+  font-size: 14px !important;
 }
 .rw .rp-tabs button[aria-selected="true"] {
   color: var(--rw-text);
@@ -702,6 +720,50 @@
 }
 .rw .rp-modal-heading {
   border-color: var(--rw-line);
+  gap: 12px;
+}
+.rw .rp-modal-heading h2 {
+  min-width: 0;
+  overflow-wrap: anywhere;
+}
+.rw .rp-modal-heading button {
+  flex-shrink: 0;
+  align-self: flex-start;
+  display: grid;
+  place-items: center;
+  width: 36px;
+  height: 36px;
+  padding: 0;
+  margin: 0;
+  border: 0;
+  border-radius: 50%;
+  background: var(--rw-background);
+  color: var(--rw-secondary);
+  font-size: 20px;
+}
+.rw .rp-modal-heading button:hover {
+  background: var(--rw-secondary-surface);
+  color: var(--rw-text);
+}
+.rw .rw-settings > .rp-modal-heading,
+.rw .rw-management .rp-modal-heading {
+  position: sticky;
+  top: -24px;
+  z-index: 1;
+  background: var(--rw-surface);
+  padding: 12px 0;
+}
+.rw .rw-records {
+  width: min(760px, calc(100% - 28px));
+}
+.rw .rw-records .rp-modal-heading h2 {
+  display: -webkit-box;
+  -webkit-box-orient: vertical;
+  -webkit-line-clamp: 2;
+  overflow: hidden;
+}
+.rw .rw-management p {
+  overflow-wrap: anywhere;
 }
 .rw .rp-toast {
   background: var(--rw-surface);
@@ -745,6 +807,7 @@
   color: var(--rw-text);
 }
 .rw .rw-ppt {
+  container: ppt / inline-size;
   background: var(--rw-background);
   color: var(--rw-text);
 }
@@ -755,6 +818,14 @@
   background: var(--rw-surface);
   color: var(--rw-text);
   border-color: var(--rw-line);
+}
+.rw .rw-ppt input[type="checkbox"] {
+  width: auto;
+  accent-color: var(--rw-accent);
+  margin-right: 8px;
+}
+.rw .rw-ppt summary {
+  overflow-wrap: anywhere;
 }
 .rw .rw-ppt-generate {
   border-color: var(--rw-line);
@@ -803,6 +874,7 @@
   margin-top: 10px;
 }
 .rw .rw-slide {
+  color-scheme: only light;
   background: #fff;
   color: #1c1c1e;
   border-color: var(--rw-line);
@@ -812,6 +884,21 @@
 }
 .rw .rw-slide :is(h2, li) {
   color: #1c1c1e;
+  overflow-wrap: anywhere;
+}
+.rw .rw-slide > :is(small, p) {
+  color: #636366;
+}
+.rw .rw-slide .rw-image-open {
+  color: #007aff;
+  border-color: #d1d1d6;
+}
+.rw .rw-slide > .rw-object > .rw-more {
+  color: #636366;
+}
+.rw .rw-slide .rw-image-open:hover,
+.rw .rw-slide > .rw-object > .rw-more:hover {
+  background: #f2f2f7;
 }
 .rw .rw-slide img {
   max-height: none;
@@ -842,6 +929,16 @@
   align-items: center;
   justify-content: space-between;
   flex-wrap: wrap;
+}
+.rw .rw-image-dialog header {
+  position: sticky;
+  top: -16px;
+  z-index: 2;
+  background: var(--rw-surface);
+  padding: 8px 0;
+}
+.rw .rw-image-dialog :is(strong, p) {
+  overflow-wrap: anywhere;
 }
 .rw .rw-image-controls {
   justify-content: flex-start;
@@ -879,26 +976,58 @@
   }
   .rw.rw-nav-collapsed
     .rp-sidebar
-    :is(
-      .rp-sidebar-brand,
-      .rw-main-nav,
-      .rp-search,
-      .rp-sidebar-scroll,
-      .rw-sidebar-footer
-    ) {
+    :is(.rp-sidebar-brand, .rp-search, .rp-sidebar-scroll) {
     display: none;
   }
   .rw.rw-nav-collapsed .rp-new-task {
     width: 40px;
-    margin: 14px 8px;
-    overflow: hidden;
+    margin: 8px;
+    padding: 9px !important;
+    justify-content: center;
     font-size: 0;
   }
-  .rw.rw-nav-collapsed .rp-new-task span {
+  .rw.rw-nav-collapsed
+    .rp-sidebar
+    :is(button > span, .rw-sidebar-footer > small) {
     display: none;
+  }
+  .rw.rw-nav-collapsed .rw-main-nav {
+    margin: 12px 8px 0;
+  }
+  .rw.rw-nav-collapsed .rw-main-nav button,
+  .rw.rw-nav-collapsed .rw-sidebar-footer button {
+    width: 40px;
+    height: 40px;
+    padding: 9px;
+    justify-content: center;
+    gap: 0;
+  }
+  .rw.rw-nav-collapsed .rw-sidebar-footer {
+    margin-top: auto;
+    padding: 8px;
   }
   .rw.rw-nav-collapsed .rw-navigation-split {
     display: none;
+  }
+}
+@container ppt (max-width: 1080px) {
+  .rw .rw-ppt-editing {
+    display: block;
+  }
+  .rw
+    .rw-ppt-editing
+    :is(
+      .rw-ppt-preview,
+      .rw-ppt-list,
+      .rw-ppt-list-split,
+      .rw-ppt-editor-split
+    ) {
+    display: none;
+  }
+  .rw .rw-ppt-editing .rw-ppt-editor {
+    width: 100% !important;
+    margin: 0;
+    overflow: visible;
   }
 }
 @media (max-width: 1200px) {
@@ -999,6 +1128,7 @@
 }
 .rw .rp-new-task span {
   font-size: 0;
+  margin-left: 0;
 }
 .rw .rp-new-task span {
   color: inherit !important;
@@ -1032,6 +1162,11 @@
 }
 .rw .rw-sidebar-footer button {
   color: var(--rw-text);
+}
+.rw .rw-sidebar-footer button[aria-current="page"] {
+  background: var(--rw-secondary-surface);
+  color: var(--rw-accent);
+  font-weight: 600;
 }
 .rw .rp-topbar > button {
   color: var(--rw-accent);

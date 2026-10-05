@@ -92,17 +92,20 @@ export function ResearchNavigation({
         </div>
         <nav className="rw-main-nav" aria-label="主导航">
           <button
+            aria-label="论文研究"
+            title="论文研究"
             aria-current={mode === "research" ? "page" : undefined}
             disabled={busy}
             onClick={onHome}
           >
             <ResearchIcon name="book" />
-            论文研究
+            <span>论文研究</span>
           </button>
         </nav>
         <button
           className="rp-new-task"
           aria-label="＋ 导入论文"
+          title="导入论文"
           disabled={busy}
           onClick={onImport}
         >
@@ -233,17 +236,22 @@ export function ResearchNavigation({
         </div>
         <footer className="rw-sidebar-footer">
           <small>PDF · 上限 30 MiB / 100 页</small>
-          <button onClick={onSettings}>
+          <button aria-label="设置" title="设置" onClick={onSettings}>
             <ResearchIcon name="gear" />
-            设置
+            <span>设置</span>
           </button>
-          <button onClick={onRecords}>
+          <button aria-label="个人记录" title="个人记录" onClick={onRecords}>
             <ResearchIcon name="person" />
-            个人记录
+            <span>个人记录</span>
           </button>
-          <button onClick={onPpt}>
+          <button
+            aria-label="PPT 汇报"
+            title="PPT 汇报"
+            aria-current={mode === "ppt" ? "page" : undefined}
+            onClick={onPpt}
+          >
             <ResearchIcon name="slides" />
-            PPT 汇报
+            <span>PPT 汇报</span>
           </button>
         </footer>
       </aside>

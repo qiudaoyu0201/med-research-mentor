@@ -1469,7 +1469,7 @@ export function ResearchWorkspace() {
           onCancel={() => setRecords(false)}
         >
           <header className="rp-modal-heading">
-            <h2>个人记录 · {currentName}</h2>
+            <h2 title={currentName}>个人记录 · {currentName}</h2>
             <button aria-label="关闭个人记录" onClick={() => setRecords(false)}>
               ×
             </button>

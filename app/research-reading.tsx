@@ -235,7 +235,7 @@ export function ResearchReading({
   return (
     <aside className="rp-viewer rw-reader" aria-label="资料与笔记面板">
       <header className="rp-viewer-header">
-        <strong>{name}</strong>
+        <strong title={name}>{name}</strong>
         <button aria-pressed={pinned} onClick={onPin}>
           {pinned ? "取消固定" : "固定对照"}
         </button>
