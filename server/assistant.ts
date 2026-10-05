@@ -33,6 +33,7 @@ import { foundationCatalog, withFoundationSources } from "./foundations.ts";
 import { exportDeck } from "./export.ts";
 import { ResultCache } from "./cache.ts";
 import type { DeckVersions } from "./deck-versions.ts";
+import { TaskScheduler, taskKey } from "./scheduler.ts";
 import { validateAnchor } from "../shared/workspace.ts";
 
 const terminal = new Set([
@@ -203,8 +204,10 @@ export function validatePlan(
 
 export class AssistantService {
   turns = new Map<string, AssistantTurn>();
-  active: string | undefined;
-  private accepting = false;
+  readonly activeIds = new Set<string>();
+  get active() {
+    return this.activeIds.values().next().value;
+  }
   private controllers = new Map<string, AbortController>();
   private completions = new Map<string, Promise<void>>();
   private ready = new Map<string, Promise<void>>();
@@ -219,13 +222,16 @@ export class AssistantService {
     private cache?: ResultCache,
     private exporter: typeof exportDeck = exportDeck,
     private decks?: DeckVersions,
-  ) {}
-  get busy() {
-    return this.accepting || !!this.active;
+    readonly scheduler = new TaskScheduler(),
+  ) {
+    if (decks) decks.scheduler = scheduler;
   }
-  async restore() {
-    await this.conversations.restore();
-    for (const turn of await list<AssistantTurn>("turns")) {
+  get busy() {
+    return this.scheduler.busy || this.submissions.size > 0;
+  }
+  async restore(loader: typeof list = list) {
+    await this.conversations.restore(loader);
+    for (const turn of await loader<AssistantTurn>("turns")) {
       if (!terminal.has(turn.status)) {
         turn.status = "interrupted";
         turn.error = "后台重启中断了此轮，请提交新消息继续。";
@@ -248,6 +254,12 @@ export class AssistantService {
         }
       if (changed) await this.conversations.put(state, state.version);
     }
+    for (const paperId of new Set(
+      [...this.conversations.states.values()]
+        .map((s) => s.paperId)
+        .filter((id): id is string => Boolean(id)),
+    ))
+      await this.conversations.mainForPaper(paperId);
   }
   async submit(
     conversationId: string,
@@ -285,65 +297,77 @@ export class AssistantService {
         throw new Error("客户端消息 ID 已用于不同内容。");
       return duplicate;
     }
+    const state = this.conversations.get(conversationId);
     if (
-      this.busy ||
-      this.manager.active ||
-      this.manager.starting ||
-      this.decks?.busy
+      state.mainChat &&
+      message.paperId !== undefined &&
+      message.paperId !== state.paperId
     )
-      throw new Error("已有学习请求运行中，请先取消或等待完成。");
-    this.accepting = true;
+      throw new Error("问题与当前聊天的论文不匹配，请打开对应论文。");
+    const paper = state.paperId
+      ? await this.paperById(state.paperId)
+      : undefined;
+    const id = randomUUID();
+    const ledger = new BudgetLedger(id, async () =>
+      this.persist("turns", id, turn),
+    );
+    const turn: AssistantTurn = {
+      id,
+      conversationId,
+      message: structuredClone(message),
+      paperId: state.paperId,
+      sourceVersion: paper?.version ?? null,
+      createdAt: new Date().toISOString(),
+      status: "queued",
+      budget: ledger.state,
+    };
+    await this.persist("turns", id, turn);
+    this.turns.set(id, turn);
     try {
-      const state = this.conversations.get(conversationId);
-      if (!state.titleEdited && !state.recentTurnIds.length)
-        state.title = message.question.replace(/\s+/g, " ").slice(0, 45);
-      const id = randomUUID();
-      const ledger = new BudgetLedger(id, async () =>
-        this.persist("turns", id, turn),
-      );
-      const turn: AssistantTurn = {
-        id,
-        conversationId,
-        message,
-        createdAt: new Date().toISOString(),
-        status: "queued",
-        budget: ledger.state,
-      };
+      await this.conversations.update(conversationId, (current) => {
+        if (!current.titleEdited && !current.recentTurnIds.length)
+          current.title = message.question.replace(/\s+/g, " ").slice(0, 45);
+        current.recentTurnIds.push(id);
+        return current;
+      });
+    } catch (error) {
+      turn.status = "failed";
+      turn.error = "会话保存失败，未发送模型请求。";
       await this.persist("turns", id, turn);
-      this.turns.set(id, turn);
-      state.recentTurnIds = [...state.recentTurnIds, id];
-      try {
-        await this.conversations.put(state, state.version);
-      } catch (error) {
-        turn.status = "failed";
-        turn.error = "会话保存失败，未发送模型请求。";
-        await this.persist("turns", id, turn);
-        throw error;
-      }
-      const controller = new AbortController();
-      this.controllers.set(id, controller);
-      this.active = id;
-      let markReady!: () => void;
-      this.ready.set(
-        id,
-        new Promise((resolve) => {
-          markReady = resolve;
-        }),
-      );
-      const completion = this.execute(
-        turn,
-        ledger,
-        controller.signal,
-        legacy,
-        markReady,
-      );
-      this.completions.set(id, completion);
-      void completion.catch(() => {});
-      return turn;
-    } finally {
-      this.accepting = false;
+      throw error;
     }
+    const controller = new AbortController();
+    this.controllers.set(id, controller);
+    let markReady!: () => void;
+    this.ready.set(
+      id,
+      new Promise((resolve) => {
+        markReady = resolve;
+      }),
+    );
+    const completion = this.scheduler
+      .run(taskKey(state.paperId, state.id), controller.signal, async () => {
+        this.activeIds.add(id);
+        // Waiting does not consume the execution deadline.
+        ledger.state.deadline = new Date(Date.now() + 480_000).toISOString();
+        await this.execute(turn, ledger, controller.signal, legacy, markReady);
+      })
+      .catch(async (error) => {
+        turn.status = controller.signal.aborted ? "cancelled" : "failed";
+        turn.error = controller.signal.aborted ? undefined : String(error);
+        turn.endedAt = new Date().toISOString();
+        await this.persist("turns", id, turn);
+      })
+      .finally(() => {
+        this.controllers.delete(id);
+        this.activeIds.delete(id);
+        markReady();
+      });
+    this.completions.set(id, completion);
+    void completion.catch(() => {});
+    return turn;
   }
+
   async wait(id: string) {
     await this.completions.get(id);
   }
@@ -400,6 +424,7 @@ export class AssistantService {
   ) {
     let state = this.conversations.get(turn.conversationId);
     try {
+      signal.throwIfAborted();
       const message = turn.message;
       const binding =
         message.paperId === undefined ? state.paperId : message.paperId;
@@ -413,6 +438,12 @@ export class AssistantService {
               scope: "独立基础资料；未绑定论文。",
               sources: [],
             };
+      if (
+        turn.paperId !== undefined &&
+        ((state.mainChat && turn.paperId !== state.paperId) ||
+          (turn.sourceVersion && turn.sourceVersion !== original.version))
+      )
+        throw new Error("等待期间论文资料发生变化，请重新选择材料后发送。");
       const paper = withFoundationSources(original);
       if (
         [message.focus, message.sourceAnchor, message.figureSourceId].filter(
@@ -472,7 +503,7 @@ export class AssistantService {
           nextStep: question.question,
         };
         turn.status = "clarification";
-        await this.conversations.put(state, state.version);
+        await this.commitExecution(state);
         return;
       }
       if (edit) {
@@ -525,7 +556,7 @@ export class AssistantService {
           deckVersionId: version.id,
         };
         turn.status = "completed";
-        await this.conversations.put(state, state.version);
+        await this.commitExecution(state);
         return;
       }
       const last = state.lastRunId
@@ -779,7 +810,7 @@ export class AssistantService {
           status: "running",
           dependsOn: [],
         });
-        state = await this.conversations.put(state, state.version);
+        state = await this.commitExecution(state);
         turn.status = "running";
         await this.persist("turns", turn.id, turn);
         const artifacts: NonNullable<AssistantTurn["reply"]>["artifacts"] = [];
@@ -977,7 +1008,7 @@ export class AssistantService {
       state.taskGroups = state.taskGroups.map((g) =>
         g.id.startsWith(turn.id) ? { ...g, status: turn.status } : g,
       );
-      await this.conversations.put(state, state.version);
+      await this.commitExecution(state);
       if (
         turn.status === "completed" &&
         turn.runId &&
@@ -996,7 +1027,7 @@ export class AssistantService {
         g.id.startsWith(turn.id) ? { ...g, status: turn.status } : g,
       );
       try {
-        await this.conversations.put(current, current.version);
+        await this.commitExecution(current);
       } catch {
         turn.error = "会话保存失败，请重新读取记录。";
       }
@@ -1010,8 +1041,18 @@ export class AssistantService {
       }
       markReady();
       this.controllers.delete(turn.id);
-      if (this.active === turn.id) this.active = undefined;
+      this.activeIds.delete(turn.id);
     }
+  }
+  private commitExecution(state: ConversationState) {
+    return this.conversations.update(state.id, (current) => ({
+      ...state,
+      version: current.version,
+      recentTurnIds: current.recentTurnIds,
+      mainChat: current.mainChat,
+      title: current.title,
+      titleEdited: current.titleEdited,
+    }));
   }
   private context(state: ConversationState) {
     const feedback = (state.learningRecords ?? [])

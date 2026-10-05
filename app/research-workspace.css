@@ -233,6 +233,15 @@
 }
 .rw-answer > small {
   color: #92a8c8;
+  margin-right: 12px;
+}
+.rw-answer > button:not(.rw-save) {
+  min-height: 36px;
+  margin: 6px 8px 6px 0;
+  padding: 7px 12px;
+  border: 1px solid #465873;
+  border-radius: 6px;
+  color: #b9cff0;
 }
 .rw-answer h2 {
   font-size: 20px;

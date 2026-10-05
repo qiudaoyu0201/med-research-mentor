@@ -2,7 +2,7 @@ import express from "express";
 import multer from "multer";
 import { mkdir, readFile, writeFile, rename, rm } from "node:fs/promises";
 import { resolve, join } from "node:path";
-import { randomUUID } from "node:crypto";
+import { randomUUID, createHash } from "node:crypto";
 import { createServer as createVite } from "vite";
 import { z } from "zod";
 import { sample, profiles, defaultDeck } from "../examples/bundle.ts";
@@ -34,6 +34,8 @@ import { DeckVersions } from "./deck-versions.ts";
 import { digest } from "./materials.ts";
 import { LearningRecords } from "./learning-records.ts";
 import { Projects } from "./projects.ts";
+import { PaperImports } from "./paper-imports.ts";
+import { taskKey } from "./scheduler.ts";
 import { readingStart } from "../shared/workspace.ts";
 
 const app = express(),
@@ -112,6 +114,7 @@ const assistant = new AssistantService(
   deckVersions,
 );
 await assistant.restore();
+const imports = new PaperImports();
 const projects = new Projects();
 await projects.restore();
 const entityId = z.string().regex(/^[a-zA-Z0-9_-]{1,100}$/);
@@ -157,18 +160,30 @@ app.patch("/api/papers/:id/metadata", async (req, res) => {
     .parse(req.body);
   res.json(await projects.paper(req.params.id, body));
 });
+app.post("/api/papers/:id/chat", async (req, res) => {
+  await paperById(req.params.id);
+  const owner =
+    projects.snapshot().papers.find((p) => p.paperId === req.params.id)
+      ?.projectId ?? null;
+  res.json(await assistant.conversations.mainForPaper(req.params.id, owner));
+});
 app.get("/api/papers/:id/start", async (req, res) =>
   res.json(readingStart(await paperById(req.params.id))),
 );
 app.patch("/api/conversations/:id/title", async (req, res) => {
-  recordsIdle();
   const body = z
     .object({ title: nameInput, version: z.number().int().min(0) })
     .parse(req.body);
   const state = assistant.conversations.get(req.params.id);
   state.title = body.title;
   state.titleEdited = true;
-  res.json(await assistant.conversations.put(state, body.version));
+  res.json(
+    await assistant.conversations.update(state.id, (current) => {
+      current.title = body.title;
+      current.titleEdited = true;
+      return current;
+    }),
+  );
 });
 app.put("/api/workspace/position", async (req, res) => {
   const body = z
@@ -243,17 +258,18 @@ const recordPatch = recordVersion.extend({
   feedback: z.enum(["read", "confused", "understood"]).optional(),
   resolved: z.boolean().optional(),
 });
-function recordsIdle() {
-  if (assistant.busy || deckVersions.busy)
+function recordsIdle(conversationId: string) {
+  const state = assistant.conversations.get(conversationId);
+  if (assistant.scheduler.has(taskKey(state.paperId, state.id)))
     throw new Error("请等待当前请求保存完成后记录反馈。");
 }
 app.post("/api/conversations/:id/records", async (req, res) => {
-  recordsIdle();
+  recordsIdle(req.params.id);
   const body = recordInput.parse(req.body);
   res.json(await learningRecords.create(req.params.id, body.version, body));
 });
 app.put("/api/conversations/:id/records/:recordId", async (req, res) => {
-  recordsIdle();
+  recordsIdle(req.params.id);
   const body = recordPatch.parse(req.body);
   res.json(
     await learningRecords.edit(
@@ -266,7 +282,7 @@ app.put("/api/conversations/:id/records/:recordId", async (req, res) => {
   );
 });
 app.post("/api/conversations/:id/records/:recordId/undo", async (req, res) => {
-  recordsIdle();
+  recordsIdle(req.params.id);
   const body = recordVersion.parse(req.body);
   res.json(
     await learningRecords.undo(
@@ -278,7 +294,7 @@ app.post("/api/conversations/:id/records/:recordId/undo", async (req, res) => {
   );
 });
 app.delete("/api/conversations/:id/records/:recordId", async (req, res) => {
-  recordsIdle();
+  recordsIdle(req.params.id);
   const body = recordVersion.parse(req.body);
   res.json(
     await learningRecords.delete(
@@ -319,7 +335,7 @@ app.get("/api/conversations/:id", (req, res) => {
   res.json(assistant.conversations.get(req.params.id));
 });
 app.put("/api/conversations/:id/progress", async (req, res) => {
-  if (assistant.busy) throw new Error("请等待当前请求保存完成后记录反馈。");
+  recordsIdle(req.params.id);
   const body = z
     .object({
       version: z.number().int().min(0),
@@ -395,34 +411,43 @@ app.post("/api/papers", upload.single("pdf"), async (req, res) => {
     await rm(req.file.path, { force: true });
     throw error;
   }
-  const id = randomUUID();
-  let paper: PaperBundle;
   try {
-    paper = await parsePdf(
-      req.file.path,
-      id,
-      Buffer.from(req.file.originalname, "latin1").toString("utf8"),
+    const importId = entityId.parse(req.headers["x-import-id"] ?? randomUUID());
+    const hash = createHash("sha256")
+      .update(await readFile(req.file.path))
+      .digest("hex");
+    const path = req.file.path;
+    const filename = Buffer.from(req.file.originalname, "latin1").toString(
+      "utf8",
     );
-  } catch (error) {
-    paper = {
-      id,
-      title: "待修复的上传 PDF",
-      version: "failed-upload",
-      scope: "原文件已保留，请补充原文。",
-      pdfUrl: `/api/papers/${id}/pdf`,
-      sources: [],
-      parseStatus: "failed",
-    };
-    await rename(req.file.path, join(root, "uploads", id + ".pdf"));
-    await save("papers", id, paper);
-    return res.status(422).json({
-      error: error instanceof Error ? error.message : "PDF 解析失败",
-      paper,
+    const result = await imports.run(importId, hash, async (id) => {
+      let paper: PaperBundle;
+      let parseError: string | undefined;
+      try {
+        paper = await parsePdf(path, id, filename);
+      } catch (error) {
+        parseError = error instanceof Error ? error.message : "PDF 解析失败";
+        paper = {
+          id,
+          title: filename,
+          version: "failed-upload",
+          scope: "原文件已保留，请补充原文。",
+          pdfUrl: `/api/papers/${id}/pdf`,
+          sources: [],
+          parseStatus: "failed",
+        };
+      }
+      await rename(path, join(root, "uploads", id + ".pdf"));
+      await save("papers", id, paper);
+      return { paper, ...(parseError ? { error: parseError } : {}) };
     });
+    await assistant.conversations.mainForPaper(result.paper.id);
+    res
+      .status(result.error ? 422 : 201)
+      .json(result.error ? result : result.paper);
+  } finally {
+    await rm(req.file.path, { force: true });
   }
-  await rename(req.file.path, join(root, "uploads", id + ".pdf"));
-  await save("papers", id, paper);
-  res.status(201).json(paper);
 });
 app.get("/api/papers/:id/pdf", async (req, res) => {
   safeId(req.params.id);
@@ -658,8 +683,6 @@ app.get("/api/deck-versions", (req, res) => {
   );
 });
 app.post("/api/deck-versions", async (req, res) => {
-  if (assistant.busy || deckVersions.busy)
-    throw new Error("请等待当前请求完成。");
   const body = z
     .object({
       conversationId: z.string(),
@@ -667,6 +690,7 @@ app.post("/api/deck-versions", async (req, res) => {
       runId: z.string().optional(),
     })
     .parse(req.body);
+  recordsIdle(body.conversationId);
   const state = assistant.conversations.get(body.conversationId);
   const run = body.runId ? manager.runs.get(body.runId) : undefined;
   if (body.runId && !run) throw new Error("汇报记录不存在。");
@@ -685,8 +709,7 @@ app.get("/api/deck-versions/:id", (req, res) =>
   res.json(deckVersions.get(req.params.id)),
 );
 app.post("/api/deck-versions/:id/edit", async (req, res) => {
-  if (assistant.busy || manager.active || replayController)
-    throw new Error("请等待当前请求完成。");
+  if (replayController) throw new Error("开发回放运行中，请先取消或等待。");
   const body = z
     .object({
       conversationId: z.string(),
@@ -705,10 +728,10 @@ app.post("/api/deck-versions/:id/cancel", async (req, res) => {
   res.json({ ok: true });
 });
 app.post("/api/deck-versions/:id/restore", async (req, res) => {
-  if (assistant.busy) throw new Error("请等待当前请求完成。");
   const body = z
     .object({ conversationId: z.string(), targetId: z.string() })
     .parse(req.body);
+  recordsIdle(body.conversationId);
   const version = await deckVersions.restoreVersion(
     req.params.id,
     body.targetId,
@@ -720,9 +743,8 @@ app.post("/api/deck-versions/:id/restore", async (req, res) => {
   res.json(version);
 });
 app.post("/api/deck-versions/:id/export", async (req, res) => {
-  if (assistant.busy || deckVersions.busy)
-    throw new Error("请等待当前请求完成。");
   const body = z.object({ conversationId: z.string() }).parse(req.body);
+  recordsIdle(body.conversationId);
   const state = assistant.conversations.get(body.conversationId);
   const artifact = await deckVersions.export(
     req.params.id,
@@ -738,10 +760,9 @@ app.post("/api/deck-versions/:id/export", async (req, res) => {
   res.json(artifact);
 });
 app.post("/api/deck-versions/:id/select", async (req, res) => {
-  if (assistant.busy || deckVersions.busy)
-    throw new Error("请等待当前请求完成。");
   const body = z.object({ conversationId: z.string() }).parse(req.body);
   const version = deckVersions.get(req.params.id, body.conversationId);
+  recordsIdle(body.conversationId);
   const state = assistant.conversations.get(body.conversationId);
   if (
     version.status !== "completed" ||
@@ -827,9 +848,24 @@ const server = app.listen(port, "127.0.0.1", () =>
 );
 async function shutdown() {
   replayController?.abort();
-  if (assistant.active) await assistant.cancel(assistant.active);
-  if (manager.active) await manager.cancel(manager.active);
-  if (deckVersions.active) await deckVersions.cancel(deckVersions.active);
+  await Promise.all([
+    ...[...assistant.turns.values()]
+      .filter(
+        (t) =>
+          ![
+            "completed",
+            "failed",
+            "cancelled",
+            "interrupted",
+            "clarification",
+          ].includes(t.status),
+      )
+      .map((t) => assistant.cancel(t.id)),
+    ...[...deckVersions.versions.values()]
+      .filter((v) => ["queued", "revising", "checking"].includes(v.status))
+      .map((v) => deckVersions.cancel(v.id)),
+    ...[...manager.activeIds].map((id) => manager.cancel(id)),
+  ]);
   server.close();
   process.exit(0);
 }

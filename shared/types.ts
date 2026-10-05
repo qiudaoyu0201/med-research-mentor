@@ -294,6 +294,7 @@ export interface AssistantMessage {
   deckEdit?: { versionId: string; slideIndex: number };
 }
 export interface ConversationState {
+  mainChat?: boolean;
   id: string;
   version: number;
   title?: string;
@@ -352,6 +353,8 @@ export interface AssistantTurn {
   id: string;
   conversationId: string;
   message: AssistantMessage;
+  paperId?: string | null;
+  sourceVersion?: string | null;
   status:
     | "queued"
     | "planning"

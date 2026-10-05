@@ -4,9 +4,11 @@ import { save, list } from "./storage.ts";
 export class ConversationStore {
   states = new Map<string, ConversationState>();
   private writing = new Set<string>();
+  private updates = new Map<string, Promise<unknown>>();
+  private mainPending = new Map<string, Promise<ConversationState>>();
   constructor(private persist: typeof save = save) {}
-  async restore() {
-    for (const state of await list<ConversationState>("conversations"))
+  async restore(loader: typeof list = list) {
+    for (const state of await loader<ConversationState>("conversations"))
       this.states.set(state.id, state);
   }
   async create(
@@ -48,6 +50,42 @@ export class ConversationStore {
     if (!state) throw new Error("会话不存在");
     return structuredClone(state);
   }
+  mainForPaper(paperId: string, projectId: string | null = null) {
+    const pending = this.mainPending.get(paperId);
+    if (pending) return pending;
+    const operation = (async () => {
+      const existing = [...this.states.values()]
+        .filter((s) => s.paperId === paperId)
+        .sort(
+          (a, b) =>
+            Number(Boolean(b.mainChat)) - Number(Boolean(a.mainChat)) ||
+            (b.updatedAt ?? "").localeCompare(a.updatedAt ?? ""),
+        )[0];
+      const state = existing ?? (await this.create({ paperId, projectId }));
+      return state.mainChat
+        ? this.get(state.id)
+        : this.update(state.id, (next) => {
+            next.mainChat = true;
+            return next;
+          });
+    })();
+    this.mainPending.set(paperId, operation);
+    void operation
+      .finally(() => this.mainPending.delete(paperId))
+      .catch(() => {});
+    return operation;
+  }
+  update(id: string, apply: (state: ConversationState) => ConversationState) {
+    const operation = (this.updates.get(id) ?? Promise.resolve()).then(() => {
+      const current = this.get(id);
+      return this.put(apply(current), current.version);
+    });
+    this.updates.set(
+      id,
+      operation.catch(() => {}),
+    );
+    return operation;
+  }
   async put(state: ConversationState, expectedVersion: number) {
     if (this.writing.has(state.id))
       throw new Error("会话正在保存，请重新读取后重试。");
@@ -56,7 +94,12 @@ export class ConversationStore {
     const next = {
       ...structuredClone(state),
       version: expectedVersion + 1,
-      updatedAt: new Date().toISOString(),
+      updatedAt: new Date(
+        Math.max(
+          Date.now(),
+          Date.parse(this.states.get(state.id)?.updatedAt ?? "1970-01-01") + 1,
+        ),
+      ).toISOString(),
     };
     this.writing.add(state.id);
     try {

@@ -158,18 +158,31 @@ try {
       },
     });
   });
-  await page.route("**/api/turns/browser-workspace-fixture", async (route) =>
-    route.fulfill({
-      json: {
+  await page.route("**/api/conversations/*/turns", async (route) => {
+    const response = await route.fetch();
+    const history = await response.json();
+    if (
+      payload &&
+      route
+        .request()
+        .url()
+        .includes(
+          (await bootstrap()).conversations.find(
+            (c: any) => c.paperId === imported.id && c.mainChat,
+          ).id,
+        )
+    ) {
+      history.push({
         id: "browser-workspace-fixture",
-        conversationId: (await bootstrap()).conversations.at(-1).id,
+        conversationId: route.request().url().split("/").at(-2),
         message: payload,
         status: cancelled ? "cancelled" : "running",
         createdAt: new Date().toISOString(),
         budget: { attempts: [] },
-      },
-    }),
-  );
+      });
+    }
+    await route.fulfill({ json: history });
+  });
   await page.route(
     "**/api/turns/browser-workspace-fixture/cancel",
     async (route) => {
@@ -189,6 +202,7 @@ try {
   await page.getByRole("button", { name: "停止", exact: true }).click();
   await page.getByText("已停止", { exact: true }).waitFor();
   await page.unroute("**/api/conversations/*/messages");
+  await page.unroute("**/api/conversations/*/turns");
   report.assertions.push(
     "ungrouped real PDF import and original-text anchor reach the unified API; cancel displays true state (browser fixture, zero model calls)",
   );
@@ -254,7 +268,9 @@ try {
   await page
     .getByRole("button", { name: "engineering-exercise.pdf", exact: true })
     .click();
-  await page.getByRole("heading", { name: "新讨论", exact: true }).waitFor();
+  await page
+    .getByRole("heading", { name: "engineering-exercise.pdf", exact: true })
+    .waitFor();
   assert.equal(await page.locator(".rw-reference").count(), 0);
   await page
     .locator(".rw-project > summary")
@@ -277,7 +293,7 @@ try {
   // Existing sample material produces explicitly engineering/example records with zero model calls.
   workspace = await bootstrap();
   const sample = workspace.papers.find((p: any) => p.doi);
-  const conversation = await post("/api/conversations", { paperId: sample.id });
+  const conversation = await post(`/api/papers/${sample.id}/chat`, {});
   const turn = await post(`/api/conversations/${conversation.id}/messages`, {
     clientMessageId: "workspace-engineering-example",
     mode: "example",

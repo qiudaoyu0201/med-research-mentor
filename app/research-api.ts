@@ -34,11 +34,18 @@ export function validateImport(files: File[]) {
     throw new Error("PDF 超过 30 MiB，请拆分后导入。");
   return file;
 }
-export async function importPaper(files: File[]) {
+export async function importPaper(
+  files: File[],
+  importId: string = crypto.randomUUID(),
+) {
   const file = validateImport(files);
   const body = new FormData();
   body.append("pdf", file);
-  const response = await fetch("/api/papers", { method: "POST", body });
+  const response = await fetch("/api/papers", {
+    method: "POST",
+    headers: { "X-Import-Id": importId },
+    body,
+  });
   const value = await response.json();
   if (!response.ok && !value.paper)
     throw new Error(value.error || "上传失败，请重试。");

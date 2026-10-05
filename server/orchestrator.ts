@@ -240,7 +240,10 @@ export function confirmedUnit(
 export class TaskManager {
   runs = new Map<string, TaskRun>();
   private controllers = new Map<string, AbortController>();
-  active: string | undefined;
+  readonly activeIds = new Set<string>();
+  get active() {
+    return this.activeIds.values().next().value;
+  }
   starting = false;
   private completions = new Map<string, Promise<void>>();
   private resultKeys = new Map<string, string>();
@@ -269,7 +272,7 @@ export class TaskManager {
       cache?: ResultCache;
     },
   ) {
-    if (this.active || this.starting)
+    if (!execution?.ledger && (this.active || this.starting))
       throw new Error("已有学习任务运行中，请先取消或等待完成。");
     this.starting = true;
     try {
@@ -375,13 +378,13 @@ export class TaskManager {
       }
       this.runs.set(run.id, run);
       this.controllers.set(run.id, controller);
-      this.active = run.id;
+      this.activeIds.add(run.id);
       try {
         await this.persist("runs", run.id, run);
       } catch (error) {
         this.runs.delete(run.id);
         this.controllers.delete(run.id);
-        this.active = undefined;
+        this.activeIds.delete(run.id);
         throw error;
       }
       this.resultKeys.set(run.id, resultKey);
@@ -826,7 +829,7 @@ export class TaskManager {
         run.error = "保存失败，请复制当前内容。";
       }
       this.controllers.delete(run.id);
-      if (this.active === run.id) this.active = undefined;
+      this.activeIds.delete(run.id);
     }
   }
 }

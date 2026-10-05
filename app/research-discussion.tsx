@@ -13,7 +13,7 @@ export const finished = (turn: ResearchTurn) =>
     turn.status,
   );
 export const statusLabel: Record<string, string> = {
-  queued: "准备材料",
+  queued: "等待中",
   planning: "整理问题",
   running: "处理中",
   teaching: "正在讲解",
@@ -39,6 +39,8 @@ export function ResearchDiscussion({
   onCitation,
   onFocus,
   onSave,
+  onCancel,
+  onRetry,
   savedIds,
   latestTitle,
   onResume,
@@ -53,6 +55,8 @@ export function ResearchDiscussion({
   onCitation: (id: string, source?: Source) => void;
   onFocus: (selection: ResearchSelection, question: string) => void;
   onSave: (turn: ResearchTurn) => void;
+  onCancel: (turn: ResearchTurn) => void;
+  onRetry: (turn: ResearchTurn) => void;
   savedIds: string[];
   latestTitle?: string;
   onResume: () => void;
@@ -141,6 +145,14 @@ export function ResearchDiscussion({
                   !finished(turn) && turn.run ? turn.run.status : turn.status
                 ] ?? turn.status}
               </small>
+              {!finished(turn) && (
+                <button onClick={() => onCancel(turn)}>
+                  {turn.status === "queued" ? "取消等待" : "停止回答"}
+                </button>
+              )}
+              {["cancelled", "failed", "interrupted"].includes(turn.status) && (
+                <button onClick={() => onRetry(turn)}>编辑后重发</button>
+              )}
               {unit && (
                 <>
                   <h2>{unit.title}</h2>

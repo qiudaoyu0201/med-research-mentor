@@ -1,3 +1,4 @@
+import { TaskScheduler, taskKey } from "./scheduler.ts";
 import { randomUUID } from "node:crypto";
 import type {
   DeckVersion,
@@ -19,8 +20,10 @@ import { exportDeck } from "./export.ts";
 
 export class DeckVersions {
   versions = new Map<string, DeckVersion>();
-  active?: string;
-  private starting = false;
+  readonly activeIds = new Set<string>();
+  get active() {
+    return this.activeIds.values().next().value;
+  }
   private controllers = new Map<string, AbortController>();
   private completions = new Map<string, Promise<void>>();
   constructor(
@@ -28,9 +31,10 @@ export class DeckVersions {
     private paperById: (id: string) => Promise<PaperBundle>,
     private persist: typeof save = save,
     private exporter: typeof exportDeck = exportDeck,
+    public scheduler = new TaskScheduler(),
   ) {}
   get busy() {
-    return this.starting || Boolean(this.active);
+    return this.controllers.size > 0;
   }
   async restoreDisk() {
     for (const version of await list<DeckVersion>("deck-versions")) {
@@ -130,62 +134,78 @@ export class DeckVersions {
     input: { slideIndex: number; question: string; slide?: Slide },
     external?: { ledger: BudgetLedger; signal: AbortSignal },
   ) {
-    if (this.busy) throw new Error("已有汇报修改运行中，请等待或停止。");
-    this.starting = true;
-    try {
-      const parent = this.get(parentId, conversationId);
-      if (parent.status !== "completed")
-        throw new Error("请选择已完成版本作为修改起点。");
-      if (
-        !Number.isInteger(input.slideIndex) ||
-        !parent.outline.slides[input.slideIndex]
-      )
-        throw new Error("指定页不存在。");
-      const paper = await this.sources(parent);
-      const version: DeckVersion = {
-        ...structuredClone(parent),
-        id: randomUUID(),
-        parentId,
-        restoredFrom: undefined,
-        slideIndex: input.slideIndex,
-        request: input.question,
-        createdAt: new Date().toISOString(),
-        status: "queued",
-        roles: [],
-        budget: undefined,
-        error: undefined,
-      };
-      const ledger =
-        external?.ledger ??
-        new BudgetLedger(version.id, () => this.store(version));
-      if (!external) ledger.state.limit = 4;
-      version.budget = ledger.state;
-      if (input.slide)
-        version.outline.slides[input.slideIndex] = slideSchema.parse(
-          input.slide,
-        );
-      await this.store(version);
-      const controller = new AbortController();
-      this.controllers.set(version.id, controller);
-      this.active = version.id;
-      const signal = external
-        ? AbortSignal.any([external.signal, controller.signal])
-        : controller.signal;
-      const completion = this.execute(
+    const parent = this.get(parentId, conversationId);
+    if (parent.status !== "completed")
+      throw new Error("请选择已完成版本作为修改起点。");
+    if (
+      !Number.isInteger(input.slideIndex) ||
+      !parent.outline.slides[input.slideIndex]
+    )
+      throw new Error("指定页不存在。");
+    await this.sources(parent);
+    const version: DeckVersion = {
+      ...structuredClone(parent),
+      id: randomUUID(),
+      parentId,
+      restoredFrom: undefined,
+      slideIndex: input.slideIndex,
+      request: input.question,
+      createdAt: new Date().toISOString(),
+      status: "queued",
+      roles: [],
+      budget: undefined,
+      error: undefined,
+    };
+    const ledger =
+      external?.ledger ??
+      new BudgetLedger(version.id, () => this.store(version));
+    if (!external) ledger.state.limit = 4;
+    version.budget = ledger.state;
+    if (input.slide)
+      version.outline.slides[input.slideIndex] = slideSchema.parse(input.slide);
+    await this.store(version);
+    const controller = new AbortController();
+    this.controllers.set(version.id, controller);
+
+    const signal = external
+      ? AbortSignal.any([external.signal, controller.signal])
+      : controller.signal;
+    const execute = async () => {
+      this.activeIds.add(version.id);
+      if (!external)
+        ledger.state.deadline = new Date(Date.now() + 480_000).toISOString();
+      await this.execute(
         version,
         parent,
-        paper,
+        await this.sources(parent),
         input,
         ledger,
         signal,
       );
-      this.completions.set(version.id, completion);
-      void completion.catch(() => {});
-      return version;
-    } finally {
-      this.starting = false;
-    }
+    };
+    const completion = (
+      external
+        ? execute()
+        : this.scheduler.run(
+            taskKey(parent.paperId, conversationId),
+            signal,
+            execute,
+          )
+    )
+      .catch(async (error) => {
+        version.status = signal.aborted ? "cancelled" : "failed";
+        version.error = signal.aborted ? undefined : String(error);
+        await this.store(version);
+      })
+      .finally(() => {
+        this.activeIds.delete(version.id);
+        this.controllers.delete(version.id);
+      });
+    this.completions.set(version.id, completion);
+    void completion.catch(() => {});
+    return version;
   }
+
   async wait(id: string) {
     await this.completions.get(id);
     return this.get(id);
@@ -395,7 +415,7 @@ export class DeckVersions {
       try {
         await this.store(version);
       } finally {
-        if (this.active === version.id) this.active = undefined;
+        this.activeIds.delete(version.id);
         this.controllers.delete(version.id);
       }
     }

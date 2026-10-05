@@ -84,7 +84,9 @@ export function ResearchWorkspace() {
   const draftKeyRef = useRef(draftKey);
   draftKeyRef.current = draftKey;
   const active = turns.find((t) => !finished(t));
-  const busy = loading || working || uploading || !!active;
+  const busy = loading || working || uploading;
+  const historical = !!paper && !!conversation && !conversation.mainChat;
+  const importRetry = useRef<{ file: File; id: string } | undefined>(undefined);
   const recent = [...conversations]
     .filter((c) => c.recentTurnIds.length)
     .sort((a, b) => (b.updatedAt || "").localeCompare(a.updatedAt || ""))[0];
@@ -106,7 +108,6 @@ export function ResearchWorkspace() {
     const token = ++revision.current;
     setLoading(true);
     setError("");
-    setSelection(undefined);
     retry.current = undefined;
     try {
       const [value, state, history] = await Promise.all([
@@ -138,7 +139,13 @@ export function ResearchWorkspace() {
       setPanel(position?.panel ?? null);
       setSourceId(position?.sourceId);
       setExtraSource(undefined);
-      setSelection(undefined);
+      try {
+        const key = `research-draft:${bound?.id ?? owner ?? "idea"}:selection`;
+        const stored = localStorage.getItem(key);
+        setSelection(stored ? JSON.parse(stored) : undefined);
+      } catch {
+        setSelection(undefined);
+      }
       setStart(undefined);
       retry.current = undefined;
       setMobile(false);
@@ -182,10 +189,11 @@ export function ResearchWorkspace() {
               : null,
           );
           if (bound) {
-            const next = await researchApi<ReadingStart>(
-              `/api/papers/${bound.id}/start`,
+            const main = await researchApi<ConversationState>(
+              `/api/papers/${bound.id}/chat`,
+              {},
             );
-            if (!closed) setStart(next);
+            if (!closed) await openConversation(main.id);
           }
         }
       })
@@ -203,8 +211,11 @@ export function ResearchWorkspace() {
   useEffect(() => {
     try {
       setQuestion(localStorage.getItem(draftKey) || "");
+      const stored = localStorage.getItem(`${draftKey}:selection`);
+      setSelection(stored ? JSON.parse(stored) : undefined);
     } catch {
       setQuestion("");
+      setSelection(undefined);
     }
   }, [draftKey]);
   function draft(text: string) {
@@ -266,31 +277,26 @@ export function ResearchWorkspace() {
     uploading,
   ]);
   useEffect(() => {
-    if (!active) return;
+    if (!conversation) return;
+    const id = conversation.id;
+    const token = revision.current;
     let stopped = false,
       polling = false;
     const tick = async () => {
       if (polling) return;
       polling = true;
       try {
-        const value = await researchApi<ResearchTurn>(
-          `/api/turns/${active.id}`,
-        );
-        if (stopped) return;
-        if (finished(value)) {
-          const [state, workspace] = await Promise.all([
-            researchApi<ConversationState>(
-              `/api/conversations/${value.conversationId}`,
-            ),
-            researchApi<WorkspaceBootstrap>("/api/workspace"),
-          ]);
-          if (stopped) return;
-          setConversation(state);
-          setIndex(workspace.index);
-          setConversations(workspace.conversations);
-          setPapers(workspace.papers);
-        }
-        setTurns((prev) => prev.map((t) => (t.id === value.id ? value : t)));
+        const [history, state, workspace] = await Promise.all([
+          researchApi<ResearchTurn[]>(`/api/conversations/${id}/turns`),
+          researchApi<ConversationState>(`/api/conversations/${id}`),
+          researchApi<WorkspaceBootstrap>("/api/workspace"),
+        ]);
+        if (stopped || token !== revision.current) return;
+        setTurns(history);
+        setConversation(state);
+        setIndex(workspace.index);
+        setConversations(workspace.conversations);
+        setPapers(workspace.papers);
       } catch (err) {
         if (!stopped) setError((err as Error).message);
       } finally {
@@ -298,12 +304,11 @@ export function ResearchWorkspace() {
       }
     };
     const timer = setInterval(() => void tick(), 900);
-    void tick();
     return () => {
       stopped = true;
       clearInterval(timer);
     };
-  }, [active?.id]);
+  }, [conversation?.id]);
   useEffect(() => {
     const escape = (e: KeyboardEvent) => {
       if (e.key === "Escape") {
@@ -353,46 +358,48 @@ export function ResearchWorkspace() {
     retry.current = undefined;
   }
   async function selectPaper(bound: PaperBundle) {
-    const owner =
-      index.papers.find((m) => m.paperId === bound.id)?.projectId ?? null;
-    const previous = [...conversations]
-      .filter((c) => c.paperId === bound.id)
-      .sort((a, b) => (b.updatedAt || "").localeCompare(a.updatedAt || ""))[0];
-    if (previous) return openConversation(previous.id);
-    blank(owner, bound);
-    const token = revision.current;
+    const token = ++revision.current;
     setLoading(true);
     try {
-      const value = await researchApi<ReadingStart>(
-        `/api/papers/${bound.id}/start`,
+      const main = await researchApi<ConversationState>(
+        `/api/papers/${bound.id}/chat`,
+        {},
       );
-      if (token === revision.current) setStart(value);
+      if (token === revision.current) await openConversation(main.id);
     } catch (err) {
-      if (token === revision.current) setError((err as Error).message);
-    } finally {
-      if (token === revision.current) setLoading(false);
+      if (token === revision.current) {
+        setError((err as Error).message);
+        setLoading(false);
+      }
     }
   }
   async function upload(files: File[]) {
     if (busy || actionLock.current) return;
     actionLock.current = true;
+    const token = revision.current;
     setUploading(true);
     setError("");
     const owner = index.projects.some((p) => p.id === projectId && !p.archived)
       ? projectId
       : null;
     try {
-      const result = await importPaper(files);
+      if (
+        files.length === 1 &&
+        (!importRetry.current ||
+          importRetry.current.file.name !== files[0].name ||
+          importRetry.current.file.size !== files[0].size ||
+          importRetry.current.file.lastModified !== files[0].lastModified)
+      )
+        importRetry.current = { file: files[0], id: crypto.randomUUID() };
+      const result = await importPaper(files, importRetry.current?.id);
+      importRetry.current = undefined;
       await researchApi(
         `/api/papers/${result.paper.id}/metadata`,
         { projectId: owner },
         "PATCH",
       );
       await refresh();
-      blank(owner, result.paper);
-      setStart(
-        await researchApi<ReadingStart>(`/api/papers/${result.paper.id}/start`),
-      );
+      if (token === revision.current) await selectPaper(result.paper);
       if (result.error) setError(result.error);
       else
         setNotice(
@@ -413,6 +420,12 @@ export function ResearchWorkspace() {
   }
   function focus(next: ResearchSelection, text: string) {
     setSelection(next);
+    try {
+      localStorage.setItem(
+        `${draftKeyRef.current}:selection`,
+        JSON.stringify(next),
+      );
+    } catch {}
     suggest(text);
   }
   function citation(id: string, source?: Source) {
@@ -421,7 +434,9 @@ export function ResearchWorkspace() {
     setPanel("sources");
   }
   async function send() {
-    if (busy || !question.trim() || actionLock.current) return;
+    if (busy || historical || !question.trim() || actionLock.current) return;
+    const token = revision.current;
+    const submittedDraftKey = draftKeyRef.current;
     await action(async () => {
       let state = conversation;
       if (!state) {
@@ -433,8 +448,10 @@ export function ResearchWorkspace() {
             ? projectId
             : null,
         });
-        setConversation(state);
-        setConversations((prev) => [...prev, state!]);
+        if (token === revision.current) {
+          setConversation(state);
+          setConversations((prev) => [...prev, state!]);
+        }
       }
       const pending =
         retry.current?.conversationId === state.id
@@ -464,18 +481,28 @@ export function ResearchWorkspace() {
             : {}),
         },
       );
+      let clearDraft =
+        token === revision.current && composer.current?.value === question;
+      try {
+        clearDraft = localStorage.getItem(submittedDraftKey) === question;
+        if (clearDraft) {
+          localStorage.setItem(submittedDraftKey, "");
+          localStorage.removeItem(`${submittedDraftKey}:selection`);
+        }
+      } catch {}
+      if (token !== revision.current) return;
       setTurns((prev) =>
         prev.some((t) => t.id === value.id) ? prev : [...prev, value],
       );
-      draft("");
-      setSelection(undefined);
+      if (clearDraft) {
+        draft("");
+        setSelection(undefined);
+      }
       if (finished(value)) {
-        setConversation(
-          await researchApi<ConversationState>(
-            `/api/conversations/${state.id}`,
-          ),
+        const fresh = await researchApi<ConversationState>(
+          `/api/conversations/${state.id}`,
         );
-        await refresh();
+        if (token === revision.current) setConversation(fresh);
       }
     });
   }
@@ -548,7 +575,7 @@ export function ResearchWorkspace() {
         conversations={conversations}
         paperId={paper?.id}
         projectId={projectId}
-        busy={busy}
+        busy={false}
         search={search}
         setSearch={setSearch}
         onPaper={(p) => void selectPaper(p)}
@@ -601,24 +628,26 @@ export function ResearchWorkspace() {
                     : "无需先创建课题"}
                   {uploading ? " · 正在上传并解析" : ""}
                 </small>
-                <h1>{conversation ? titleOf(conversation) : currentName}</h1>
+                <h1>
+                  {conversation &&
+                  (conversation.recentTurnIds.length ||
+                    conversation.titleEdited)
+                    ? titleOf(conversation)
+                    : currentName}
+                </h1>
               </div>
               <details className="rw-discussion-menu">
                 <summary>讨论记录</summary>
-                <button
-                  disabled={busy}
-                  onClick={() => {
-                    blank(projectId, paper);
-                    if (paper)
-                      void researchApi<ReadingStart>(
-                        `/api/papers/${paper.id}/start`,
-                      )
-                        .then(setStart)
-                        .catch((e) => setError(e.message));
-                  }}
-                >
-                  开始新讨论
-                </button>
+                {!paper && (
+                  <button
+                    disabled={busy}
+                    onClick={() => {
+                      blank(projectId, paper);
+                    }}
+                  >
+                    开始新讨论
+                  </button>
+                )}
                 {conversations
                   .filter(
                     (c) =>
@@ -631,7 +660,6 @@ export function ResearchWorkspace() {
                   .map((c) => (
                     <button
                       key={c.id}
-                      disabled={busy}
                       onClick={() => void openConversation(c.id)}
                     >
                       {titleOf(c)}
@@ -715,7 +743,39 @@ export function ResearchWorkspace() {
               turns={turns}
               paper={paper}
               start={start}
-              busy={busy}
+              busy={working}
+              onCancel={(turn) =>
+                void researchApi(`/api/turns/${turn.id}/cancel`, {}).catch(
+                  (err) => setError(err.message),
+                )
+              }
+              onRetry={(turn) => {
+                draft(turn.message.question);
+                const restored = turn.message.sourceAnchor
+                  ? {
+                      label: "原文引用",
+                      sourceAnchor: turn.message.sourceAnchor,
+                    }
+                  : turn.message.focus
+                    ? { label: "回答引用", focus: turn.message.focus }
+                    : turn.message.figureSourceId
+                      ? {
+                          label: "图件引用",
+                          figureSourceId: turn.message.figureSourceId,
+                        }
+                      : undefined;
+                setSelection(restored);
+                try {
+                  if (restored)
+                    localStorage.setItem(
+                      `${draftKeyRef.current}:selection`,
+                      JSON.stringify(restored),
+                    );
+                  else
+                    localStorage.removeItem(`${draftKeyRef.current}:selection`);
+                } catch {}
+                composer.current?.focus();
+              }}
               onSuggest={suggest}
               onImport={() => fileInput.current?.click()}
               onIdea={() => {
@@ -745,6 +805,17 @@ export function ResearchWorkspace() {
               {error && (
                 <div className="rw-error" role="alert">
                   <span>{error}</span>
+                  {importRetry.current && (
+                    <button
+                      disabled={uploading}
+                      onClick={() =>
+                        importRetry.current &&
+                        void upload([importRetry.current.file])
+                      }
+                    >
+                      重试导入
+                    </button>
+                  )}
                   <button
                     aria-label="关闭错误提示"
                     onClick={() => setError("")}
@@ -832,12 +903,25 @@ export function ResearchWorkspace() {
                     aria-label="移除提问引用"
                     onClick={() => {
                       setSelection(undefined);
+                      try {
+                        localStorage.removeItem(
+                          `${draftKeyRef.current}:selection`,
+                        );
+                      } catch {}
                       retry.current = undefined;
                     }}
                   >
                     ×
                   </button>
                 </div>
+              )}
+              {historical && (
+                <p>
+                  正在查看历史讨论。
+                  <button onClick={() => paper && void selectPaper(paper)}>
+                    回到主聊天
+                  </button>
+                </p>
               )}
               <form
                 className="rp-composer rw-composer"
@@ -869,9 +953,9 @@ export function ResearchWorkspace() {
                   <button
                     type="submit"
                     className="rp-primary"
-                    disabled={busy || !question.trim()}
+                    disabled={busy || historical || !question.trim()}
                   >
-                    {working ? "正在提交" : "发送 ↑"}
+                    {working ? "正在提交" : active ? "加入队列 ↑" : "发送 ↑"}
                   </button>
                 </div>
               </form>
@@ -911,9 +995,7 @@ export function ResearchWorkspace() {
       </main>
       {dragging && (
         <div className="rw-drop" role="status">
-          <strong>
-            {busy ? "请等待当前请求完成后导入" : "放下文件，导入论文"}
-          </strong>
+          <strong>{uploading ? "正在导入论文" : "放下文件，导入论文"}</strong>
           <span>PDF · 每次一个 · 30 MiB 以内</span>
         </div>
       )}
