@@ -22,6 +22,7 @@ export class ConversationStore {
       profileId: input.profileId ?? "beginner",
       taughtConcepts: [],
       userProgress: [],
+      learningRecords: [],
       openQuestions: [],
       taskGroups: [],
       artifacts: [],

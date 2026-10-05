@@ -984,10 +984,32 @@ export class AssistantService {
     }
   }
   private context(state: ConversationState) {
+    const feedback = (state.learningRecords ?? [])
+      .filter(
+        (r) =>
+          r.paperId === state.paperId &&
+          (!r.unitId ||
+            this.manager.runs.get(r.unitId)?.sourceVersion ===
+              state.sourceVersion),
+      )
+      .filter(
+        (r) => r.kind === "feedback" || (r.kind === "question" && !r.resolved),
+      )
+      .slice(-5)
+      .map(
+        (r) =>
+          `${r.kind === "feedback" ? "用户主动反馈（非能力评估）" : "用户待解决问题"}：${r.feedback ?? ""} ${r.text.slice(0, 100)}`,
+      )
+      .join("\n");
     return {
-      summary: state.summaries
-        .slice(-2)
-        .map((s) => s.text)
+      summary: [
+        feedback,
+        state.summaries
+          .slice(-2)
+          .map((s) => s.text)
+          .join("\n"),
+      ]
+        .filter(Boolean)
         .join("\n")
         .slice(0, 1200),
       taughtConcepts: state.taughtConcepts.slice(-20),

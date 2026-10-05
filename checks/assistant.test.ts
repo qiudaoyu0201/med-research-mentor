@@ -26,6 +26,7 @@ import type {
 import { save } from "../server/storage.ts";
 import { DeckVersions } from "../server/deck-versions.ts";
 import { exportDeck } from "../server/export.ts";
+import { LearningRecords } from "../server/learning-records.ts";
 
 const novice = { understood: ["原理"], breakpoints: [] };
 const review = { issues: [], checkedSources: ["qpcr-basics"], limitations: [] };
@@ -80,6 +81,38 @@ const method: AssistantMessage = {
   mode: "live",
 };
 const lesson = { unit: exampleUnits.qpcr, deck: null };
+test("the next explanation carries explicit user feedback without turning teaching into mastery", async () => {
+  const h = harness([lesson, novice, review, lesson, novice, review]);
+  let state = await h.conversations.create();
+  const first = await h.assistant.submit(state.id, method);
+  await h.assistant.wait(first.id);
+  state = h.conversations.get(state.id);
+  const records = new LearningRecords(h.conversations, (id) =>
+    h.manager.runs.get(id),
+  );
+  state = await records.create(state.id, state.version, {
+    kind: "feedback",
+    unitId: first.runId,
+    feedback: "confused",
+    text: "我仍不懂对照如何排除背景信号。",
+  });
+  const second = await h.assistant.submit(state.id, {
+    ...method,
+    clientMessageId: "after-feedback",
+    question: "还是不懂这个对照",
+  });
+  await h.assistant.wait(second.id);
+  assert.equal(second.status, "completed", second.error);
+  assert.match(
+    h.manager.runs.get(second.runId!)!.input.contextSummary!,
+    /用户主动反馈（非能力评估）.*仍不懂对照/,
+  );
+  assert.equal(h.conversations.get(state.id).userProgress[0].state, "confused");
+  assert.equal(
+    h.conversations.get(state.id).learningRecords![0].feedback,
+    "confused",
+  );
+});
 test("natural single-page request continues the current report within the same conversation ledger", async () => {
   const h = harness(
     [

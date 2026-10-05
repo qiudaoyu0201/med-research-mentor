@@ -15,6 +15,8 @@ import type {
 import "./style.css";
 import { useConversation, ConversationPanel } from "./conversation.tsx";
 import { DeckVersionPanel } from "./deck-versions.tsx";
+import { PersonalRecordsPanel } from "./learning-records.tsx";
+import type { ConversationState } from "../shared/types.ts";
 GlobalWorkerOptions.workerSrc = workerUrl;
 const moduleNames: Record<Module, string> = {
   paper: "论文带读",
@@ -481,8 +483,37 @@ function App() {
       setBusy(false);
     }
   }
-  function mark(state: "read" | "confused" | "understood") {
+  async function savePersonal(
+    kind: "favorite" | "feedback",
+    feedback?: "read" | "confused" | "understood",
+    sectionIndex?: number,
+  ) {
+    if (!current?.input.conversationId)
+      throw new Error("此历史讲解未绑定会话；请重新打开讲解后保存个人记录。");
+    const id = current.input.conversationId;
+    if (chat.state?.id !== id) await chat.select(id);
+    const state = await api<ConversationState>(`/api/conversations/${id}`);
+    chat.setState(
+      await api<ConversationState>(
+        `/api/conversations/${id}/records`,
+        json({
+          version: state.version,
+          kind,
+          unitId: current.id,
+          ...(feedback ? { feedback } : {}),
+          ...(sectionIndex !== undefined ? { sectionIndex } : {}),
+        }),
+      ),
+    );
+  }
+  async function mark(state: "read" | "confused" | "understood") {
     if (!current) return;
+    try {
+      await savePersonal("feedback", state);
+    } catch (err) {
+      setError((err as Error).message);
+      return;
+    }
     setProgress((prev) => [
       ...prev.filter((p) => p.unitId !== current.id),
       { unitId: current.id, state },
@@ -637,6 +668,13 @@ function App() {
               </div>
             ))}
           </div>
+          <PersonalRecordsPanel
+            state={chat.state}
+            ensure={chat.ensure}
+            onState={chat.setState}
+            onView={chat.view}
+            disabled={busy || isRunning || Boolean(chat.active)}
+          />
         </section>
       )}
       {showReplay && (
@@ -1401,9 +1439,23 @@ function App() {
                             </div>
                             <p>{s.text}</p>
                             <button
+                              disabled={isRunning}
+                              onClick={() =>
+                                void savePersonal(
+                                  "favorite",
+                                  undefined,
+                                  sectionIndex,
+                                ).catch((err) => setError(err.message))
+                              }
+                            >
+                              收藏这段解释
+                            </button>
+                            <button
                               disabled={
                                 isRunning ||
-                                current.input.conversationId !== chat.state?.id
+                                !chat.state ||
+                                !current.input.conversationId ||
+                                current.input.conversationId !== chat.state.id
                               }
                               onClick={() => {
                                 const selected = window
@@ -1486,8 +1538,11 @@ function App() {
                               understood: "主动标记已理解",
                             } as any
                           )[
-                            progress.find((p) => p.unitId === current.id)
-                              ?.state || ""
+                            (chat.state &&
+                            chat.state.id === current.input.conversationId
+                              ? chat.state.userProgress
+                              : progress
+                            ).find((p) => p.unitId === current.id)?.state || ""
                           ] || "尚未标记"}
                         </p>
                       </>

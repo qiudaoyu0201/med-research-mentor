@@ -300,6 +300,7 @@ export interface ConversationState {
   profileId: string;
   taughtConcepts: { name: string; unitId: string }[];
   userProgress: { unitId: string; state: string }[];
+  learningRecords?: LearningRecord[];
   openQuestions: { id: string; question: string; sourceIds: string[] }[];
   taskGroups: { id: string; status: string; dependsOn: string[] }[];
   artifacts: { id: string; kind: string; sourceHash: string }[];
@@ -313,6 +314,25 @@ export interface ConversationState {
     sourceIds: string[];
     module?: Module;
   };
+}
+export interface LearningRecord {
+  id: string;
+  version: number;
+  kind: "favorite" | "feedback" | "question";
+  paperId: string | null;
+  unitId?: string;
+  sectionIndex?: number;
+  sourceText?: string;
+  text: string;
+  feedback?: "read" | "confused" | "understood";
+  resolved: boolean;
+  createdAt: string;
+  updatedAt: string;
+  history: {
+    text: string;
+    feedback?: "read" | "confused" | "understood";
+    resolved: boolean;
+  }[];
 }
 export interface AssistantReply {
   content: LearningUnit | null;

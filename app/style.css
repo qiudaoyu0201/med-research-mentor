@@ -1200,6 +1200,27 @@ footer {
   border-top: 1px solid #d8ddd8;
   padding: 10px 0;
 }
+.personal-records {
+  margin-top: 22px;
+  max-width: 100%;
+}
+.personal-record {
+  padding: 14px;
+  border: 1px solid #d8ddd8;
+  margin: 10px 0;
+  border-radius: 8px;
+  overflow-wrap: anywhere;
+}
+.personal-record textarea {
+  box-sizing: border-box;
+  width: 100%;
+}
+.personal-record p {
+  white-space: pre-wrap;
+}
+.personal-record label input {
+  width: auto;
+}
 .crop-preview textarea {
   margin-top: 10px;
   font-size: 12px;

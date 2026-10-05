@@ -32,6 +32,7 @@ import { foundationCatalog, withFoundationSources } from "./foundations.ts";
 import { registerFigureEvidence } from "./paper-assets.ts";
 import { DeckVersions } from "./deck-versions.ts";
 import { digest } from "./materials.ts";
+import { LearningRecords } from "./learning-records.ts";
 
 const app = express(),
   port = Number(process.env.PORT || 4317),
@@ -102,6 +103,72 @@ const assistant = new AssistantService(
   deckVersions,
 );
 await assistant.restore();
+const learningRecords = new LearningRecords(assistant.conversations, (id) =>
+  manager.runs.get(id),
+);
+const recordInput = z.object({
+  version: z.number().int().min(0),
+  kind: z.enum(["favorite", "feedback", "question"]),
+  unitId: z.string().optional(),
+  sectionIndex: z.number().int().min(0).max(9).optional(),
+  text: z.string().min(1).max(4000).optional(),
+  feedback: z.enum(["read", "confused", "understood"]).optional(),
+});
+const recordVersion = z.object({
+  version: z.number().int().min(0),
+  recordVersion: z.number().int().min(0),
+});
+const recordPatch = recordVersion.extend({
+  text: z.string().min(1).max(4000).optional(),
+  feedback: z.enum(["read", "confused", "understood"]).optional(),
+  resolved: z.boolean().optional(),
+});
+function recordsIdle() {
+  if (assistant.busy || deckVersions.busy)
+    throw new Error("请等待当前请求保存完成后记录反馈。");
+}
+app.post("/api/conversations/:id/records", async (req, res) => {
+  recordsIdle();
+  const body = recordInput.parse(req.body);
+  res.json(await learningRecords.create(req.params.id, body.version, body));
+});
+app.put("/api/conversations/:id/records/:recordId", async (req, res) => {
+  recordsIdle();
+  const body = recordPatch.parse(req.body);
+  res.json(
+    await learningRecords.edit(
+      req.params.id,
+      body.version,
+      req.params.recordId,
+      body.recordVersion,
+      body,
+    ),
+  );
+});
+app.post("/api/conversations/:id/records/:recordId/undo", async (req, res) => {
+  recordsIdle();
+  const body = recordVersion.parse(req.body);
+  res.json(
+    await learningRecords.undo(
+      req.params.id,
+      body.version,
+      req.params.recordId,
+      body.recordVersion,
+    ),
+  );
+});
+app.delete("/api/conversations/:id/records/:recordId", async (req, res) => {
+  recordsIdle();
+  const body = recordVersion.parse(req.body);
+  res.json(
+    await learningRecords.delete(
+      req.params.id,
+      body.version,
+      req.params.recordId,
+      body.recordVersion,
+    ),
+  );
+});
 app.post("/api/conversations", async (req, res) => {
   const input = conversationSchema.parse(req.body);
   if (input.paperId) await paperById(input.paperId);
@@ -147,11 +214,13 @@ app.put("/api/conversations/:id/progress", async (req, res) => {
     run.status !== "completed"
   )
     throw new Error("学习单元未在本会话交付。");
-  state.userProgress = [
-    ...state.userProgress.filter((p) => p.unitId !== body.unitId),
-    { unitId: body.unitId, state: body.state },
-  ];
-  res.json(await assistant.conversations.put(state, body.version));
+  res.json(
+    await learningRecords.create(state.id, body.version, {
+      kind: "feedback",
+      unitId: body.unitId,
+      feedback: body.state,
+    }),
+  );
 });
 app.post("/api/conversations/:id/messages", async (req, res) => {
   if (replayController) throw new Error("开发回放运行中，请先取消或等待。");
