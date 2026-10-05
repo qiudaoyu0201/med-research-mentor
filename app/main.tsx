@@ -16,6 +16,7 @@ import "./style.css";
 import { useConversation, ConversationPanel } from "./conversation.tsx";
 import { DeckVersionPanel } from "./deck-versions.tsx";
 import { PersonalRecordsPanel } from "./learning-records.tsx";
+import { ReadingPrototype } from "./reading-prototype.tsx";
 import type { ConversationState } from "../shared/types.ts";
 GlobalWorkerOptions.workerSrc = workerUrl;
 const moduleNames: Record<Module, string> = {
@@ -1731,4 +1732,10 @@ function App() {
     </div>
   );
 }
-createRoot(document.getElementById("root")!).render(<App />);
+createRoot(document.getElementById("root")!).render(
+  window.location.pathname.replace(/\/$/, "") === "/assistant" ? (
+    <App />
+  ) : (
+    <ReadingPrototype />
+  ),
+);

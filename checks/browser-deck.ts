@@ -22,7 +22,7 @@ try {
       (id) => localStorage.setItem("tutor-conversation", id),
       prior.version.conversationId,
     );
-    await page.goto(base);
+    await page.goto(base + "/assistant");
     await page.getByRole("button", { name: "打开示例论文" }).click();
     await page.getByRole("button", { name: "汇报 PPT", exact: true }).click();
     await page.getByText("当前版本：", { exact: false }).waitFor();
@@ -41,7 +41,7 @@ try {
     report.newModelCalls = 0;
     report.priorVersion = prior.version.id;
   } else {
-    await page.goto(base);
+    await page.goto(base + "/assistant");
     await page.getByRole("button", { name: "打开示例论文" }).click();
     await page.getByRole("button", { name: "汇报 PPT", exact: true }).click();
     const original = await page.getByLabel("第 2 页标题").inputValue();

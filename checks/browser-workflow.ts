@@ -15,7 +15,7 @@ const report: any = {
 };
 await mkdir("runs/screenshots", { recursive: true });
 try {
-  await page.goto(base);
+  await page.goto(base + "/assistant");
   await page.getByRole("button", { name: "打开示例论文" }).click();
   await page.getByRole("button", { name: "图表解读", exact: true }).click();
   await page.getByRole("button", { name: "打开教学示例" }).click();

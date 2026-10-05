@@ -21,7 +21,7 @@ try {
       (id) => localStorage.setItem("tutor-conversation", id),
       prior.conversationId,
     );
-    await page.goto(base);
+    await page.goto(base + "/assistant");
     await page.getByRole("button", { name: "打开示例论文" }).click();
     await page.getByRole("button", { name: "设置与记录" }).click();
     await page
@@ -42,7 +42,7 @@ try {
       "server restart restores explicit records and prior delivered explanation",
     );
   } else {
-    await page.goto(base);
+    await page.goto(base + "/assistant");
     await page.getByRole("button", { name: "打开示例论文" }).click();
     await page.getByRole("button", { name: "论文带读", exact: true }).click();
     await page.getByRole("button", { name: "打开教学示例" }).click();

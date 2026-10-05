@@ -8,7 +8,7 @@ const page = await browser.newPage({ viewport: { width: 1440, height: 1100 } }),
 page.on("pageerror", (error) => errors.push(error.message));
 await mkdir("runs/screenshots", { recursive: true });
 try {
-  await page.goto(baseUrl);
+  await page.goto(baseUrl + "/assistant");
   await page.getByRole("button", { name: "打开示例论文" }).waitFor();
   await page.screenshot({ path: "runs/screenshots/home.png", fullPage: true });
   await page.getByRole("button", { name: "打开示例论文" }).click();
