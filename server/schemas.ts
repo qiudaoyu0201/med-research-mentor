@@ -94,13 +94,17 @@ export const slideSchema = z.object({
 });
 export const deckSchema = z.object({
   slides: z.array(slideSchema).min(1).max(16),
+  speechScript: z.string().trim().min(1).max(24000).optional(),
 });
 export const teachingSchema = z.object({
   unit: unitSchema,
   deck: deckSchema.nullable(),
 });
 export const groundingContractVersion = "grounded-output-v3-background";
-export function groundedTeachingSchema(sources: Source[]) {
+export function groundedTeachingSchema(
+  sources: Source[],
+  speechScript = false,
+) {
   const ids = z.array(z.enum(sources.map((s) => s.id))).max(20);
   const sections = unitSchema.shape.sections.element.extend({ citations: ids });
   const slides = slideSchema.extend({
@@ -117,7 +121,12 @@ export function groundedTeachingSchema(sources: Source[]) {
   });
   return teachingSchema.extend({
     unit: unitSchema.extend({ sections: z.array(sections).min(1).max(10) }),
-    deck: deckSchema
+    deck: (speechScript
+      ? deckSchema.extend({
+          speechScript: deckSchema.shape.speechScript.unwrap(),
+        })
+      : deckSchema.omit({ speechScript: true })
+    )
       .extend({ slides: z.array(slides).min(1).max(16) })
       .nullable(),
   });
@@ -132,6 +141,7 @@ export function groundedReviewSchema(sources: Source[]) {
   });
 }
 export const inputSchema = z.object({
+  speechScript: z.boolean().optional(),
   paperId: z.string().min(1),
   module: z.enum(["paper", "method", "figure", "ppt"]),
   mode: z.enum(["example", "live"]),
@@ -162,6 +172,7 @@ export const conversationSchema = z.object({
   profileId: z.enum(["beginner", "methods", "reasoning"]).optional(),
 });
 export const messageSchema = z.object({
+  speechScript: z.boolean().optional(),
   learningIntent: learningRequestSchema.optional(),
   slideCount: z.number().int().min(1).max(16).optional(),
   clientMessageId: recordId,

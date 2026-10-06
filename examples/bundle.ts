@@ -8,17 +8,18 @@ import type {
 export const profiles: Profile[] = [
   {
     id: "beginner",
-    version: "1.0.0",
+    version: "1.1.0",
     name: "医学科研初学者",
-    background: "有基础医学背景，听过 PCR 与流式名称。",
-    difficulties: "术语、方法原理、陌生图形、实验到结论的衔接。",
+    background:
+      "医学科研入门，具体专业、方法经验和已知概念以用户提供信息为准。",
+    difficulties: "术语、研究方法、图表阅读，以及问题、证据和结论的衔接。",
   },
   {
     id: "methods",
-    version: "1.0.0",
+    version: "1.1.0",
     name: "方法入门者",
-    background: "知道操作名称和基本步骤。",
-    difficulties: "为什么做、测了什么、对照有什么用。",
+    background: "希望理解当前材料中的研究方法，不预设熟悉特定实验操作。",
+    difficulties: "方法为什么适用、研究或测量了什么、比较条件与适用前提。",
   },
   {
     id: "reasoning",

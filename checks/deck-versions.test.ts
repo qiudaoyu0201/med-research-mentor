@@ -7,6 +7,8 @@ import type { Provider } from "../server/provider.ts";
 import type { DeckVersion, PaperBundle } from "../shared/types.ts";
 import { save } from "../server/storage.ts";
 const review = { issues: [], checkedSources: ["xu-question"], limitations: [] };
+const speechText =
+  "# 开场\n今天分享研究问题与证据。\n\n# 逐页讲述\n按已保存的页面说明方法、结果及限制。\n\n# 转场\n接下来回到证据边界。\n\n# 结尾\n谢谢，欢迎讨论。";
 function harness(
   outputs: unknown[],
   paper: PaperBundle = structuredClone(sample),
@@ -34,6 +36,152 @@ function harness(
   );
   return { store, records, exports, paper, provider };
 }
+
+test("full speech supplements and manual edits preserve the exact deck and previous scripts", async () => {
+  const h = harness([{ speechScript: speechText }, review, review, review]);
+  const base = await h.store.seed("speech-chat", sample.id);
+  const started = await h.store.start(base.id, "speech-chat", {
+    operation: "speech",
+    question: "补写完整演讲稿",
+  });
+  const scripted = await h.store.wait(started.id);
+  assert.equal(scripted.status, "completed", scripted.error);
+  assert.equal(scripted.budget?.attempts.length, 2);
+  assert.deepEqual(scripted.outline.slides, base.outline.slides);
+  assert.equal(await h.store.speech(scripted.id, "speech-chat"), speechText);
+  assert.equal(h.store.get(base.id).outline.speechScript, undefined);
+  const manualText = speechText + "\n用户补充的结尾。";
+  const saved = await h.store.wait(
+    (
+      await h.store.start(scripted.id, "speech-chat", {
+        operation: "speech",
+        question: "保存改稿",
+        speechScript: manualText,
+      })
+    ).id,
+  );
+  assert.equal(saved.status, "completed", saved.error);
+  assert.equal(saved.budget?.attempts.length, 1);
+  assert.equal(await h.store.speech(saved.id, "speech-chat"), manualText);
+  assert.equal(h.store.get(scripted.id).outline.speechScript, speechText);
+  const edited = await h.store.wait(
+    (
+      await h.store.start(saved.id, "speech-chat", {
+        slideIndex: 0,
+        question: "保存页面",
+        slide: { ...saved.outline.slides[0], title: "修改后的页面" },
+      })
+    ).id,
+  );
+  assert.equal(edited.status, "completed", edited.error);
+  assert.equal(edited.outline.speechScript, undefined);
+  assert.equal(h.store.get(saved.id).outline.speechScript, manualText);
+  const restored = await h.store.restoreVersion(
+    edited.id,
+    saved.id,
+    "speech-chat",
+  );
+  assert.equal(await h.store.speech(restored.id, "speech-chat"), manualText);
+  await assert.rejects(h.store.speech(saved.id, "other-chat"), /本会话/);
+  h.paper.version = "changed";
+  await assert.rejects(h.store.speech(saved.id, "speech-chat"), /版本已变化/);
+});
+
+test("blocking full speech stops after one repair and keeps the original usable", async () => {
+  const blocking = {
+    ...review,
+    issues: [
+      {
+        id: "speech-error",
+        location: "结尾",
+        type: "fact",
+        evidence: ["xu-question"],
+        suggestion: "补造结果",
+        severity: "blocking",
+        resolved: false,
+      },
+    ],
+  };
+  const h = harness([
+    { speechScript: speechText },
+    blocking,
+    { speechScript: speechText },
+    blocking,
+  ]);
+  const base = await h.store.seed("speech-chat", sample.id);
+  const result = await h.store.wait(
+    (
+      await h.store.start(base.id, "speech-chat", {
+        operation: "speech",
+        question: "补稿",
+      })
+    ).id,
+  );
+  assert.equal(result.status, "failed");
+  assert.equal(result.budget?.attempts.length, 4);
+  assert.equal(result.budget?.revisions.length, 1);
+  assert.equal(result.outline.speechScript, speechText);
+  assert.equal(h.store.get(base.id).status, "completed");
+  await assert.rejects(h.store.speech(result.id, "speech-chat"), /没有已完成/);
+  await h.store.export(base.id, "speech-chat");
+});
+
+test("blocking manual speech is kept as a draft without automatic rewriting", async () => {
+  const blocking = {
+    ...review,
+    issues: [
+      {
+        id: "draft-error",
+        location: "结尾",
+        type: "fact",
+        evidence: ["xu-question"],
+        suggestion: "需要用户修改",
+        severity: "blocking",
+        resolved: false,
+      },
+    ],
+  };
+  const h = harness([blocking]);
+  const base = await h.store.seed("speech-chat", sample.id);
+  const result = await h.store.wait(
+    (
+      await h.store.start(base.id, "speech-chat", {
+        operation: "speech",
+        question: "保存",
+        speechScript: speechText,
+      })
+    ).id,
+  );
+  assert.equal(result.status, "failed");
+  assert.equal(result.budget?.attempts.length, 1);
+  assert.equal(result.outline.speechScript, speechText);
+});
+
+test("speech cancellation retains the source deck and persists the interrupted attempt", async () => {
+  const h = harness([]);
+  const base = await h.store.seed("speech-chat", sample.id);
+  let entered!: () => void;
+  const entry = new Promise<void>((resolve) => {
+    entered = resolve;
+  });
+  h.provider.generate = async (_i, _x, _s, signal) => {
+    entered();
+    return new Promise((_resolve, reject) =>
+      signal.addEventListener("abort", () => reject(new Error("cancelled")), {
+        once: true,
+      }),
+    );
+  };
+  const result = await h.store.start(base.id, "speech-chat", {
+    operation: "speech",
+    question: "补稿",
+  });
+  await entry;
+  await h.store.cancel(result.id);
+  assert.equal(h.store.get(result.id).status, "cancelled");
+  assert.equal(h.store.get(result.id).budget?.attempts.length, 1);
+  assert.deepEqual(h.store.get(base.id).outline, base.outline);
+});
 test("single page edits preserve all other content and pictures, restore appends a version, exports the selected snapshot", async () => {
   const h = harness([review]);
   for (const source of h.paper.sources.filter((s) => s.figure))

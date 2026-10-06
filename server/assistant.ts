@@ -1081,6 +1081,7 @@ export class AssistantService {
                   }
                 : {}),
               slideCount: plan.slideCount ?? undefined,
+              speechScript: message.speechScript === true,
               contextSummary: this.context(state).summary.slice(
                 0,
                 previous ? 400 : 1200,

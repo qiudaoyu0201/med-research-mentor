@@ -46,15 +46,37 @@ try {
       r.request().method() === "POST" &&
       r.url().endsWith("/api/research-plans"),
   );
-  await page.getByRole("button", { name: "创建方案", exact: true }).click();
+  let firstGeneration: any;
+  await page.route("**/api/research-plans/*/jobs", async (route) => {
+    if (route.request().method() !== "POST") return route.continue();
+    firstGeneration = route.request().postDataJSON();
+    return route.fulfill({
+      status: 409,
+      json: { error: "固定生成提交响应，不调用模型" },
+    });
+  });
+  await page.getByRole("button", { name: "生成方案", exact: true }).click();
   const p = await (await createdResponse).json();
+  await page
+    .getByRole("alert")
+    .getByText("固定生成提交响应，不调用模型")
+    .waitFor();
+  assert.equal(firstGeneration.action, "generate");
+  assert.equal(firstGeneration.expectedTopicVersion, p.topic.version);
+  const firstGenerationKey = firstGeneration.requestKey;
+  await page
+    .getByRole("button", { name: "查询／重试同一请求", exact: true })
+    .click();
+  assert.equal(firstGeneration.requestKey, firstGenerationKey);
+  await page.getByRole("button", { name: "关闭提示", exact: true }).click();
+  await page.unroute("**/api/research-plans/*/jobs");
   assert.equal(p.topic.sources.length, 0);
   assert.equal(p.currentVersion, null);
   await page
     .getByRole("button", { name: "起草并轻量核对", exact: true })
     .waitFor();
   report.assertions.push(
-    "无 PDF 起步；非必填设置默认折叠，展开后可保存；并列入口可达",
+    "无 PDF 一次点击创建并提交生成；非必填设置默认折叠，展开后可保存；并列入口可达",
   );
   const seed = await api(`/api/research-plans/${p.id}/versions`, {
     expectedVersion: null,

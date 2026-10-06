@@ -146,8 +146,10 @@ export interface Slide {
 }
 export interface DeckOutline {
   slides: Slide[];
+  speechScript?: string;
 }
 export interface DeckVersion {
+  operation?: "speech";
   learningIntent?: LearningIntent;
   displayAssets?: Record<string, string>;
   displayAssetQuality?: Record<string, "page" | "original" | "legacy">;
@@ -204,6 +206,7 @@ export interface TaskInput {
   visibleImage?: string;
   modules?: Module[];
   slideCount?: number;
+  speechScript?: boolean;
   contextSummary?: string;
   openQuestions?: { id: string; question: string; sourceIds: string[] }[];
   conversationId?: string;
@@ -316,6 +319,7 @@ export interface AssistantPlan {
   estimatedCalls: number;
 }
 export interface AssistantMessage {
+  speechScript?: boolean;
   learningIntent?: Partial<LearningPreferences> & {
     goal?: LearningGoal;
     preferenceScope?: "turn" | "conversation";

@@ -2,7 +2,7 @@ import { createHash } from "node:crypto";
 import type { Source, PaperBundle } from "../shared/types.ts";
 export const digest = (value: unknown) =>
   createHash("sha256").update(JSON.stringify(value)).digest("hex");
-export const selectionVersion = "generic-evidence-v2";
+export const selectionVersion = "generic-evidence-v3-ppt-methods";
 export function figureNumber(text: string) {
   const match = /(?:Figure|Fig\.?|图)\s*([\d一二两三四五六七八九十]+)/i.exec(
     text,
@@ -65,6 +65,8 @@ export function defaultPaperSources(
       ),
     ];
   }
+  if (modules.includes("ppt"))
+    return paper.sources.filter((s) => s.kind === "paper" && !s.image);
   return paper.sources
     .filter((s) => s.kind === "paper" && !s.image && s.section !== "methods")
     .slice(0, 4);

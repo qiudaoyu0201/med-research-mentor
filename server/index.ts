@@ -961,6 +961,43 @@ app.post("/api/deck-versions/:id/cancel", async (req, res) => {
   await deckVersions.cancel(req.params.id);
   res.json({ ok: true });
 });
+app.post("/api/deck-versions/:id/speech", async (req, res) => {
+  if (replayController) throw new Error("开发回放运行中，请先取消或等待。");
+  const body = z
+    .object({
+      conversationId: z.string(),
+      question: z
+        .string()
+        .trim()
+        .min(1)
+        .max(2000)
+        .default("根据当前 PPT 补写完整演讲稿"),
+      speechScript: deckSchema.shape.speechScript,
+    })
+    .strict()
+    .parse(req.body);
+  assistant.conversations.get(body.conversationId);
+  readingGuides.cancelAll();
+  res
+    .status(202)
+    .json(
+      await deckVersions.start(req.params.id, body.conversationId, {
+        ...body,
+        operation: "speech",
+      }),
+    );
+});
+app.get("/api/deck-versions/:id/speech", async (req, res) => {
+  const text = await deckVersions.speech(
+    req.params.id,
+    safeId(String(req.query.conversationId)),
+  );
+  res.setHeader(
+    "Content-Disposition",
+    'attachment; filename="speech-script.md"',
+  );
+  res.type("text/markdown").send(text);
+});
 app.post("/api/deck-versions/:id/restore", async (req, res) => {
   const body = z
     .object({ conversationId: z.string(), targetId: z.string() })

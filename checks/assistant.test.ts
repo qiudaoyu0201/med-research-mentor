@@ -81,6 +81,45 @@ const method: AssistantMessage = {
   mode: "live",
 };
 const lesson = { unit: exampleUnits.qpcr, deck: null };
+test("optional full speech reaches PPT generation, grounding and saved deck without extra compose calls", async () => {
+  const script =
+    "# 开场\n介绍本次汇报。\n# 逐页讲述\n根据页面解释证据。\n# 转场\n下面讨论边界。\n# 结尾\n谢谢。";
+  const h = harness(
+    [
+      {
+        unit: exampleUnits.paper,
+        deck: { ...defaultDeck, speechScript: script },
+      },
+      novice,
+      {
+        issues: [],
+        checkedSources: ["xu-question"],
+        limitations: ["固定响应工程验证"],
+      },
+    ],
+    undefined,
+    undefined,
+    true,
+  );
+  const state = await h.conversations.create({ paperId: sample.id });
+  const turn = await h.assistant.submit(state.id, {
+    clientMessageId: "speech-compose-test",
+    paperId: sample.id,
+    mode: "live",
+    module: "ppt",
+    question: "根据论文生成汇报",
+    sourceIds: sample.sources.map((s) => s.id),
+    speechScript: true,
+  });
+  await h.assistant.wait(turn.id);
+  assert.equal(turn.status, "completed", turn.error);
+  const run = h.manager.runs.get(turn.runId!)!;
+  assert.equal(run.input.speechScript, true);
+  assert.equal(run.calls, 3);
+  assert.equal((run.roles[0].input as any).speechScript, true);
+  assert.equal((run.roles[2].input as any).deck.speechScript, script);
+  assert.equal([...h.decks!.versions.values()][0].outline.speechScript, script);
+});
 test("shared intent reaches all roles; foundational and focused core learning cannot disable novice checks", async () => {
   const h = harness([lesson, novice, review, lesson, novice, review]);
   const state = await h.conversations.create();

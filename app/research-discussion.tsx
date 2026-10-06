@@ -227,7 +227,7 @@ export function ResearchDiscussion({
             </>
           ) : (
             <>
-              <p>导入后一起理解研究问题、实验和证据。课题整理可以稍后进行。</p>
+              <p>导入后一起理解研究问题、方法和证据。课题整理可以稍后进行。</p>
               <button disabled={busy} onClick={onImport}>
                 ＋ 导入论文
               </button>

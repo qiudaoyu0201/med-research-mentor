@@ -18,7 +18,8 @@ import {
 import type { TaskInput, TaskRun } from "../shared/types.ts";
 import { exportDeck } from "../server/export.ts";
 import { parsePdf } from "../server/pdf.ts";
-import { inputSchema } from "../server/schemas.ts";
+import { inputSchema, groundedTeachingSchema } from "../server/schemas.ts";
+import { defaultPaperSources } from "../server/materials.ts";
 import { staticCheck } from "../server/replay.ts";
 const input: TaskInput = {
   paperId: sample.id,
@@ -59,6 +60,59 @@ function provider(outputs: unknown[]): Provider {
   };
 }
 const discard = async () => {};
+test("full speech is explicit, required when selected, and isolated in cache; generic PPT includes methods", () => {
+  const ordinary = { unit, deck: defaultDeck };
+  assert.throws(() =>
+    groundedTeachingSchema(sample.sources, true).parse(ordinary),
+  );
+  const text = "开场、逐页讲述、转场和结尾";
+  assert.deepEqual(
+    groundedTeachingSchema(sample.sources, true).parse({
+      ...ordinary,
+      deck: { ...defaultDeck, speechScript: text },
+    }).deck,
+    { ...defaultDeck, speechScript: text },
+  );
+  assert.deepEqual(
+    groundedTeachingSchema(sample.sources).parse({
+      ...ordinary,
+      deck: { ...defaultDeck, speechScript: text },
+    }).deck,
+    defaultDeck,
+  );
+  assert.notEqual(
+    cacheKey(input, sample, {}, "fixture"),
+    cacheKey({ ...input, speechScript: true }, sample, {}, "fixture"),
+  );
+  const generic = {
+    ...sample,
+    id: "observational-paper",
+    sources: [
+      {
+        ...sample.sources[0],
+        id: "overview",
+        section: "overview" as const,
+        image: undefined,
+      },
+      {
+        ...sample.sources[0],
+        id: "cohort-methods",
+        section: "methods" as const,
+        image: undefined,
+      },
+      {
+        ...sample.sources[0],
+        id: "observational-result",
+        section: "results" as const,
+        image: undefined,
+      },
+    ],
+  };
+  assert.deepEqual(
+    defaultPaperSources(generic, "生成汇报", ["ppt"]).map((s) => s.id),
+    ["overview", "cohort-methods", "observational-result"],
+  );
+});
 test("three roles pass in three calls, novice cannot see raw methods or review", async () => {
   const manager = new TaskManager(
     provider([{ unit, deck: null }, novice, review]),

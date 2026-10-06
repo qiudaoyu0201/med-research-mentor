@@ -108,6 +108,7 @@ export function validateTeachingSurface(
     ...unit.sections.flatMap((s) => [s.title, s.text]),
     ...unit.terms.flatMap((t) => [t.name, t.explanation]),
     ...(deck?.slides.flatMap((s) => [s.title, ...s.bullets, s.notes]) ?? []),
+    deck?.speechScript ?? "",
   ].join("\n");
   for (const id of new Set(internalIds)) {
     if (
@@ -581,7 +582,8 @@ export class TaskManager {
         const checking =
           skills.shared +
           "\n" +
-          skills.modules.find((m) => m.id === "medical-grounding-check")!.text;
+          skills.modules.find((m) => m.id === "medical-grounding-check")!.text +
+          "\n若 deck 含 speechScript，联合核对完整稿与页面的事实、术语、页序、转场和结尾；仅提供逐页备注不能当作完整稿。";
         const task = {
           question: run.input.question,
           module: run.input.module,
@@ -593,6 +595,7 @@ export class TaskManager {
           previous: run.input.previous || null,
           modules: run.input.modules ?? [run.input.module],
           slideCount: run.input.slideCount ?? null,
+          speechScript: run.input.speechScript === true,
           contextSummary: run.input.contextSummary ?? "",
           openQuestions: run.input.openQuestions ?? [],
           focusedText: run.input.focusedText ?? null,
@@ -602,9 +605,12 @@ export class TaskManager {
         await set("teaching");
         let generated = await call(
           "teaching",
-          teaching,
+          teaching +
+            (run.input.speechScript
+              ? "\n同时在 deck.speechScript 输出完整中文演讲稿（Markdown）：开场、按实际页序逐页讲述与转场、结尾。解释图件与方法，不机械复读 bullet，不补造结果；结构随研究类型和用户要求调整。"
+              : ""),
           task,
-          groundedTeachingSchema(sources),
+          groundedTeachingSchema(sources, run.input.speechScript),
         );
         run.draft = generated.unit;
         if (readCheck) await set("novice");
@@ -731,7 +737,10 @@ export class TaskManager {
           await set("revising");
           generated = await call(
             "revision",
-            teaching,
+            teaching +
+              (run.input.speechScript
+                ? "\n保留并修订 deck.speechScript 完整中文演讲稿，包含开场、按页讲述、转场、结尾，与修改后的页面一致。"
+                : ""),
             {
               ...task,
               draft: generated.unit,
@@ -741,7 +750,7 @@ export class TaskManager {
               materialRequests: run.materialRequests,
               instruction: "只修订一次。逐项解决具体问题；不新增无来源数据。",
             },
-            groundedTeachingSchema(sources),
+            groundedTeachingSchema(sources, run.input.speechScript),
           );
           if (readCheck) await set("rereading");
           feedback = readCheck

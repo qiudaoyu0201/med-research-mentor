@@ -96,6 +96,7 @@ export function ResearchPlanPanel({
   const pending = useRef<{ planId: string; body: unknown } | undefined>(
     undefined,
   );
+  const actionLock = useRef(false);
   const active = jobs.find((j) => !planJobDone(j));
   const latestJob = jobs.at(-1);
   const current = plan?.versions.find((v) => v.id === plan.currentVersion);
@@ -187,7 +188,7 @@ export function ResearchPlanPanel({
     setJobs([]);
     setHistorical("");
     setSectionId("");
-    pending.current = undefined;
+    if (pending.current?.planId !== selected) pending.current = undefined;
     const cached = selected
       ? localRead<Draft>(`research-plan-draft:${selected}`)
       : undefined;
@@ -254,7 +255,8 @@ export function ResearchPlanPanel({
     };
   }, [selected]);
   async function action(work: () => Promise<void>) {
-    if (working) return;
+    if (actionLock.current) return;
+    actionLock.current = true;
     setWorking(true);
     setError("");
     setNotice("");
@@ -263,6 +265,7 @@ export function ResearchPlanPanel({
     } catch (e) {
       setError((e as Error).message);
     } finally {
+      actionLock.current = false;
       setWorking(false);
     }
   }
@@ -284,23 +287,24 @@ export function ResearchPlanPanel({
   async function start(
     actionName: "generate" | "revise" | "review",
     retry = false,
+    target = plan,
   ) {
-    if (!plan) return;
+    if (!target) return;
     const body =
-      retry && pending.current?.planId === plan.id
+      retry && pending.current?.planId === target.id
         ? pending.current.body
         : {
             requestKey: crypto.randomUUID(),
-            expectedVersion: plan.currentVersion,
-            expectedTopicVersion: plan.topic.version,
+            expectedVersion: target.currentVersion,
+            expectedTopicVersion: target.topic.version,
             action: actionName,
             instruction,
             requestedScope: scope,
             ...(sectionId && actionName === "revise" ? { sectionId } : {}),
           };
-    pending.current = { planId: plan.id, body };
+    pending.current = { planId: target.id, body };
     const j = await researchApi<PlanJob>(
-      `/api/research-plans/${plan.id}/jobs`,
+      `/api/research-plans/${target.id}/jobs`,
       body,
     );
     pending.current = undefined;
@@ -577,7 +581,10 @@ export function ResearchPlanPanel({
           </p>
           <button
             disabled={
-              working || !topic.question.trim() || (!!plan && !topicChanged)
+              working ||
+              (!!selected && !plan) ||
+              !topic.question.trim() ||
+              (!!plan && !topicChanged)
             }
             onClick={() =>
               void action(async () => {
@@ -600,13 +607,15 @@ export function ResearchPlanPanel({
                     "/api/research-plans",
                     topic,
                   );
-                  await listPlans();
+                  setPlan(p);
                   setSelected(p.id);
+                  await start("generate", false, p);
+                  await listPlans();
                 }
               })
             }
           >
-            {plan ? "保存课题条件" : "创建方案"}
+            {plan ? "保存课题条件" : "生成方案"}
           </button>
         </details>
         {plan && (
@@ -659,7 +668,7 @@ export function ResearchPlanPanel({
                   aria-label="方案本轮建议"
                   maxLength={3000}
                   rows={2}
-                  placeholder="例如：只讲设计理由；设备有限，请给备选路径"
+                  placeholder="例如：先给整体思路；资源有限，请给备选路径"
                   value={instruction}
                   onChange={(e) => setInstruction(e.target.value)}
                 />

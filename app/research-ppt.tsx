@@ -53,9 +53,7 @@ export function ResearchPpt({
     ),
     [draft, setDraft] = useState<Slide>(),
     [request, setRequest] = useState("");
-  const [question, setQuestion] = useState(
-      "围绕研究问题、实验设计、主要结果和讨论生成汇报",
-    ),
+  const [question, setQuestion] = useState(""),
     [count, setCount] = useState(6);
   const [error, setError] = useState(""),
     [busy, setBusy] = useState(false),
@@ -63,6 +61,9 @@ export function ResearchPpt({
     [name, setName] = useState("");
   const [useNotes, setUseNotes] = useState(true);
   const [editing, setEditing] = useState(false);
+  const [withSpeech, setWithSpeech] = useState(false),
+    [speechDraft, setSpeechDraft] = useState("");
+  const actionLock = useRef(false);
   useEffect(() => {
     try {
       localStorage.setItem(viewKey, JSON.stringify({ selected, page }));
@@ -88,6 +89,18 @@ export function ResearchPpt({
     current &&
     draft &&
     JSON.stringify(draft) !== JSON.stringify(current.outline.slides[page]);
+  const speechChanged = speechDraft !== (current?.outline.speechScript ?? "");
+  useEffect(() => {
+    try {
+      setSpeechDraft(
+        localStorage.getItem(`research-speech-draft:${current?.id}`) ??
+          current?.outline.speechScript ??
+          "",
+      );
+    } catch {
+      setSpeechDraft(current?.outline.speechScript ?? "");
+    }
+  }, [current?.id]);
   useEffect(() => {
     alive.current = true;
     let closed = false;
@@ -99,6 +112,17 @@ export function ResearchPpt({
         );
         if (closed) return;
         setVersions(values);
+        const failed = values.find(
+          (v) =>
+            ["failed", "interrupted"].includes(v.status) &&
+            previousStatus.current.has(v.id) &&
+            previousStatus.current.get(v.id) !== v.status,
+        );
+        if (failed)
+          setError(
+            failed.error ??
+              "任务未完成，已保存的内容保留。请选择已保存版本重试。",
+          );
         const newest = values.filter((v) => v.status === "completed").at(-1);
         const completed = values.find(
           (v) =>
@@ -107,6 +131,10 @@ export function ResearchPpt({
             previousStatus.current.get(v.id) !== "completed",
         );
         if (completed) {
+          if (completed.operation === "speech" && completed.parentId)
+            localStorage.removeItem(
+              `research-speech-draft:${completed.parentId}`,
+            );
           if (completed.parentId) {
             completed.outline.slides.forEach((_slide, i) => {
               const prior = localStorage.getItem(
@@ -180,7 +208,8 @@ export function ResearchPpt({
     );
   }, [selected, page, current?.id]);
   async function action(task: () => Promise<void>) {
-    if (busy) return;
+    if (actionLock.current) return;
+    actionLock.current = true;
     setBusy(true);
     setError("");
     try {
@@ -188,6 +217,7 @@ export function ResearchPpt({
     } catch (err) {
       if (alive.current) setError((err as Error).message);
     } finally {
+      actionLock.current = false;
       if (alive.current) setBusy(false);
     }
   }
@@ -209,18 +239,15 @@ export function ResearchPpt({
           paperId: paper.id,
           module: "ppt",
           slideCount: count,
+          speechScript: withSpeech,
           sourceIds: [
-            ...paper.sources
-              .filter(
-                (s) =>
-                  s.kind === "paper" && !s.image && s.section !== "methods",
-              )
-              .slice(0, 4)
-              .map((s) => s.id),
             ...paper.sources.filter((s) => s.attachmentId).map((s) => s.id),
-          ],
+            ...paper.sources
+              .filter((s) => s.kind === "paper" && !s.image)
+              .map((s) => s.id),
+          ].slice(0, 100),
           question:
-            `${question}${noteText ? `\n以下是我的笔记偏好，论文事实须回到来源核对：\n${noteText}` : ""}`.slice(
+            `${question.trim() || "根据提供的论文材料生成清晰的汇报，结构与研究类型匹配，说明核心问题、方法、证据及局限。"}${noteText ? `\n以下是我的笔记偏好，论文事实须回到来源核对：\n${noteText}` : ""}`.slice(
               0,
               2000,
             ),
@@ -239,6 +266,21 @@ export function ResearchPpt({
           question:
             request || `保存我对第 ${page + 1} 页的修改，并核对事实与引用。`,
           ...(manual ? { slide: draft } : {}),
+        },
+      );
+      if (!alive.current) return;
+      setVersions((old) => [...old, version]);
+      previousStatus.current.set(version.id, version.status);
+    });
+  }
+  async function speech(manual: boolean) {
+    if (!current) return;
+    await action(async () => {
+      const version = await researchApi<DeckVersion>(
+        `/api/deck-versions/${current.id}/speech`,
+        {
+          conversationId: current.conversationId,
+          ...(manual ? { speechScript: speechDraft } : {}),
         },
       );
       if (!alive.current) return;
@@ -267,10 +309,11 @@ export function ResearchPpt({
           <details className="rw-ppt-generate" open={!current}>
             <summary>生成新汇报</summary>
             <label>
-              汇报重点
+              汇报要求（可选）
               <textarea
                 aria-label="汇报重点"
                 maxLength={1100}
+                placeholder="例如：组会汇报，重点讲研究思路；也可以直接生成"
                 value={question}
                 onChange={(e) => setQuestion(e.target.value)}
               />
@@ -297,9 +340,17 @@ export function ResearchPpt({
                 带上当前论文的 {notes.length} 条笔记
               </label>
             )}
+            <label>
+              <input
+                type="checkbox"
+                checked={withSpeech}
+                onChange={(e) => setWithSpeech(e.target.checked)}
+              />
+              同时生成完整演讲稿
+            </label>
             <button
               className="rp-primary"
-              disabled={busy || !question.trim()}
+              disabled={busy || generating.length > 0 || active.length > 0}
               onClick={() => void generate()}
             >
               生成汇报
@@ -321,8 +372,11 @@ export function ResearchPpt({
           ))}
           {active.map((v) => (
             <p role="status" key={v.id}>
-              {v.status === "queued" ? "等待修改" : "正在修改并核对"} · 第{" "}
-              {(v.slideIndex ?? 0) + 1} 页{" "}
+              {v.operation === "speech"
+                ? v.status === "queued"
+                  ? "等待处理演讲稿"
+                  : "正在生成或核对演讲稿"
+                : `${v.status === "queued" ? "等待修改" : "正在修改并核对"} · 第 ${(v.slideIndex ?? 0) + 1} 页`}{" "}
               <button
                 onClick={() =>
                   void researchApi(
@@ -331,7 +385,7 @@ export function ResearchPpt({
                   ).catch((err) => setError(err.message))
                 }
               >
-                停止修改
+                {v.operation === "speech" ? "停止演讲稿任务" : "停止修改"}
               </button>
             </p>
           ))}
@@ -359,7 +413,9 @@ export function ResearchPpt({
                     {v.status === "completed"
                       ? "已保存并核对"
                       : v.status === "failed"
-                        ? "修改失败"
+                        ? v.operation === "speech"
+                          ? "演讲稿未完成"
+                          : "修改失败"
                         : v.status === "cancelled"
                           ? "已停止"
                           : v.status === "interrupted"
@@ -547,6 +603,76 @@ export function ResearchPpt({
                   <details>
                     <summary>讲稿</summary>
                     <p className="rw-ppt-notes">{draft.notes}</p>
+                  </details>
+                  <details>
+                    <summary>完整演讲稿</summary>
+                    {!current.outline.speechScript &&
+                      current.parentId &&
+                      versions.find((v) => v.id === current.parentId)?.outline
+                        .speechScript && (
+                        <p className="hint">
+                          页面已修改，可重新生成对应演讲稿。
+                        </p>
+                      )}
+                    <p className="hint">
+                      根据已保存的 PPT
+                      页面生成，包含开场、逐页讲述、转场和结尾。
+                    </p>
+                    {(current.outline.speechScript || speechDraft) && (
+                      <label>
+                        演讲稿正文
+                        <textarea
+                          aria-label="完整演讲稿正文"
+                          rows={12}
+                          maxLength={24000}
+                          value={speechDraft}
+                          onChange={(e) => {
+                            setSpeechDraft(e.target.value);
+                            localStorage.setItem(
+                              `research-speech-draft:${current.id}`,
+                              e.target.value,
+                            );
+                          }}
+                        />
+                      </label>
+                    )}
+                    <div className="rw-actions">
+                      <button
+                        disabled={
+                          busy ||
+                          active.length > 0 ||
+                          current.status !== "completed" ||
+                          Boolean(changed) ||
+                          speechChanged
+                        }
+                        onClick={() => void speech(false)}
+                      >
+                        {current.outline.speechScript
+                          ? "重新生成演讲稿"
+                          : "补写演讲稿"}
+                      </button>
+                      {speechChanged && (
+                        <button
+                          disabled={
+                            busy ||
+                            active.length > 0 ||
+                            !speechDraft.trim() ||
+                            Boolean(changed)
+                          }
+                          onClick={() => void speech(true)}
+                        >
+                          保存演讲稿
+                        </button>
+                      )}
+                      {current.outline.speechScript && !speechChanged && (
+                        <a
+                          href={`/api/deck-versions/${current.id}/speech?conversationId=${current.conversationId}`}
+                          download
+                        >
+                          下载演讲稿
+                        </a>
+                      )}
+                    </div>
                   </details>
                   <details>
                     <summary>核对结果与版本差异</summary>
