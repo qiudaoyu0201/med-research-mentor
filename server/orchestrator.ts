@@ -10,6 +10,7 @@ import type {
   Source,
 } from "../shared/types.ts";
 import { profiles, exampleUnits, defaultDeck } from "../examples/bundle.ts";
+import { pptImagePacket } from "./ppt-image-packet.ts";
 import {
   teachingSchema,
   noviceSchema,
@@ -322,7 +323,10 @@ export class TaskManager {
       input = {
         ...input,
         visibleImage:
-          input.visibleImage || selected.find((s) => s.image)?.image,
+          input.visibleImage ||
+          ((input.modules ?? [input.module]).includes("ppt")
+            ? await pptImagePacket(selected)
+            : selected.find((s) => s.image)?.image),
       };
       if (sources.length === 0 && input.workflow !== "direct")
         throw new Error("请先选择本任务的原文或基础资料。");
@@ -331,7 +335,7 @@ export class TaskManager {
         (input.module === "ppt" || sources.some((s) => s.kind === "paper"))
       )
         throw new Error("论文事实与汇报必须走来源核对流程。");
-      if (input.mode === "live") materialPacket(sources);
+      if (input.mode === "live") materialPacket(sources, input.question);
       const run: TaskRun = {
         id: execution?.id ?? randomUUID(),
         input,
@@ -541,7 +545,7 @@ export class TaskManager {
             learningIntent: run.input.learningIntent ?? null,
             previous: run.input.previous ?? null,
             contextSummary: run.input.contextSummary ?? "",
-            sources: materialPacket(sources),
+            sources: materialPacket(sources, run.input.question),
             boundary:
               "普通背景解释，不核验论文事实。只用 background 或 interpretation 段落；无来源知识不用编造引用。",
           },
@@ -590,7 +594,7 @@ export class TaskManager {
           sourceScope: sources.every((s) => s.kind === "foundation")
             ? "独立基础课程；未提供论文材料，不把通用方法写成本文具体做法。"
             : paper.scope,
-          sources: materialPacket(sources),
+          sources: materialPacket(sources, run.input.question),
           taughtConcepts: run.input.taughtConcepts,
           previous: run.input.previous || null,
           modules: run.input.modules ?? [run.input.module],
@@ -634,7 +638,7 @@ export class TaskManager {
           "grounding",
           checking,
           {
-            sources: materialPacket(sources),
+            sources: materialPacket(sources, run.input.question),
             draft: generated.unit,
             deck: generated.deck,
             feedback,
@@ -726,7 +730,7 @@ export class TaskManager {
               .filter((s) => !run.input.sourceIds.includes(s.id))
               .map((s) => s.id),
           });
-          task.sources = materialPacket(sources);
+          task.sources = materialPacket(sources, run.input.question);
           await this.persist("runs", run.id, run);
         }
         if (
@@ -773,7 +777,7 @@ export class TaskManager {
             "grounding-final",
             checking,
             {
-              sources: materialPacket(sources),
+              sources: materialPacket(sources, run.input.question),
               draft: generated.unit,
               deck: generated.deck,
               feedback,

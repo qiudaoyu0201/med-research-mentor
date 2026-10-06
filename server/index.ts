@@ -44,6 +44,7 @@ import { DeckVersions } from "./deck-versions.ts";
 import { digest } from "./materials.ts";
 import { LearningRecords } from "./learning-records.ts";
 import { Projects } from "./projects.ts";
+import { saveDisplayAsset, type DisplayAsset } from "./display-assets.ts";
 import { PaperImports } from "./paper-imports.ts";
 import { Attachments } from "./attachments.ts";
 import { attachmentLimits } from "../shared/attachments.ts";
@@ -732,6 +733,15 @@ app.post("/api/papers/:id/text", async (req, res) => {
   await save("papers", paper.id, paper);
   res.json(paper);
 });
+app.get("/api/papers/:id/sources/:sourceId/image", async (req, res) => {
+  const paper = await basePaperById(safeId(req.params.id));
+  const source = paper.sources.find((s) => s.id === req.params.sourceId);
+  if (!source || !(source.image || (source.page && paper.pdfUrl)))
+    return res.status(404).json({ error: "图件或原页不存在。" });
+  const id = await saveDisplayAsset(paper, source),
+    asset = await read<DisplayAsset>("display-assets", id);
+  res.type("png").send(Buffer.from(asset.image.split(",")[1], "base64"));
+});
 app.post("/api/papers/:id/evidence", async (req, res) => {
   safeId(req.params.id);
   if (req.params.id === sample.id)
@@ -785,6 +795,7 @@ app.post("/api/papers/:id/figure", async (req, res) => {
     text: body.caption,
     caption: body.caption,
     image: body.image,
+    imagePurpose: "figure",
     verified: false,
   });
   paper.version = `figure-${Date.now()}`;

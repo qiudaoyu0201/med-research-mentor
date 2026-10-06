@@ -8,6 +8,7 @@ import {
 } from "node:fs/promises";
 import { resolve, join } from "node:path";
 import { randomUUID } from "node:crypto";
+import { validRecordShape } from "./record-shapes.ts";
 export const root = resolve(process.env.TUTOR_DATA_DIR || "data");
 export function safeId(id: string) {
   if (!/^[a-zA-Z0-9_-]{1,100}$/.test(id)) throw new Error("记录编号无效");
@@ -58,7 +59,19 @@ export class RecordStorage {
   private async parsed<T>(target: string, group: string): Promise<T> {
     const content = await readFile(target, "utf8");
     try {
-      return JSON.parse(content);
+      const value = JSON.parse(content);
+      if (
+        !validRecordShape(
+          group,
+          value,
+          target
+            .split(/[\\/]/)
+            .at(-1)
+            ?.replace(/\.json(?:\.backup)?$/, ""),
+        )
+      )
+        throw new SyntaxError("记录结构不完整或字段类型错误。");
+      return value;
     } catch (error) {
       if (!(error instanceof SyntaxError)) throw error;
       const dir = join(this.directory, "quarantine", safeId(group));

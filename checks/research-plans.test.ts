@@ -179,7 +179,7 @@ test("失败的新稿不影响先前成功稿导出；手改和恢复稿必须�
   assert.equal((await h.store.wait(failed.id)).status, "failed");
   assert.match(
     h.store.exportMarkdown(p.id, successful.resultVersion!),
-    /轻量核对完成/,
+    /当前内容核对完成/,
   );
   assert.throws(
     () => h.store.exportMarkdown(p.id, h.store.get(p.id).currentVersion!),

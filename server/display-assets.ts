@@ -6,16 +6,26 @@ import type { PaperBundle, Source } from "../shared/types.ts";
 import { root, read, save, safeId, missingRecord } from "./storage.ts";
 import { samplePdf } from "./sample.ts";
 import { digest } from "./materials.ts";
+import {
+  validRegion,
+  cropPixels,
+  type ImageRegion,
+} from "../shared/image-region.ts";
 
 export interface DisplayAsset {
   image: string;
   width: number;
   height: number;
-  purpose: "page" | "original" | "legacy";
+  purpose: "page" | "original" | "legacy" | "crop";
 }
 // Immutable derivatives are bound when a new deck is saved. Existing versions
 // retain their original source hash and image; viewing never upgrades a version.
-export async function saveDisplayAsset(paper: PaperBundle, source: Source) {
+export async function saveDisplayAsset(
+  paper: PaperBundle,
+  source: Source,
+  crop?: ImageRegion,
+) {
+  if (crop && !validRegion(crop)) throw new Error("图件裁剪区域无效。");
   let bytes: Buffer, purpose: DisplayAsset["purpose"];
   if (source.displayImage?.includes("/attachments/") && source.attachmentId) {
     const original = await read<{ base64: string }>(
@@ -24,7 +34,15 @@ export async function saveDisplayAsset(paper: PaperBundle, source: Source) {
     );
     bytes = Buffer.from(original.base64, "base64");
     purpose = "original";
-  } else if (paper.pdfUrl && source.page) {
+  } else if (
+    paper.pdfUrl &&
+    source.page &&
+    !(
+      source.image &&
+      !source.imageRegion &&
+      (source.imagePurpose === "figure" || source.figure === "用户圈选")
+    )
+  ) {
     bytes = await readFile(
       paper.id === "xu-2018"
         ? samplePdf
@@ -41,6 +59,8 @@ export async function saveDisplayAsset(paper: PaperBundle, source: Source) {
     purpose,
     targetWidth: 3200,
     renderer: "display-v1",
+    ...(source.imageRegion ? { region: source.imageRegion } : {}),
+    ...(crop ? { crop } : {}),
   });
   try {
     await read<DisplayAsset>("display-assets", id);
@@ -88,6 +108,35 @@ export async function saveDisplayAsset(paper: PaperBundle, source: Source) {
       width: img.width,
       height: img.height,
       purpose,
+    };
+  }
+  for (const region of [
+    purpose === "page" ? source.imageRegion : undefined,
+    crop,
+  ]) {
+    if (!region) continue;
+    if (!validRegion(region)) throw new Error("原图定位区域无效。");
+    const original = await loadImage(asset.image),
+      bounds = cropPixels(region, original.width, original.height);
+    const canvas = createCanvas(bounds.width, bounds.height);
+    canvas
+      .getContext("2d")
+      .drawImage(
+        original,
+        bounds.left,
+        bounds.top,
+        canvas.width,
+        canvas.height,
+        0,
+        0,
+        canvas.width,
+        canvas.height,
+      );
+    asset = {
+      image: canvas.toDataURL("image/png"),
+      width: canvas.width,
+      height: canvas.height,
+      purpose: "crop",
     };
   }
   await save("display-assets", id, asset);

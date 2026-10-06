@@ -19,6 +19,7 @@ import { loadSkills } from "./skills.ts";
 import { BudgetLedger } from "./budget.ts";
 import type { Provider } from "./provider.ts";
 import { exportDeck } from "./export.ts";
+import { slideImageKey } from "../shared/image-region.ts";
 
 type DeckChange =
   | { slideIndex: number; question: string; slide?: Slide }
@@ -91,12 +92,20 @@ export class DeckVersions {
   private async bindDisplayAssets(version: DeckVersion, paper: PaperBundle) {
     version.displayAssets = { ...version.displayAssets };
     version.displayAssetQuality = { ...version.displayAssetQuality };
-    for (const id of new Set(
-      version.outline.slides.flatMap((s) => s.imageSource ?? []),
-    )) {
-      const source = paper.sources.find((s) => s.id === id);
-      if (source?.image && !version.displayAssets[id])
-        version.displayAssets[id] = await saveDisplayAsset(paper, source);
+    for (const slide of version.outline.slides) {
+      const id = slideImageKey(slide);
+      if (!id) continue;
+      const source = paper.sources.find((s) => s.id === slide.imageSource);
+      if (
+        source &&
+        (source.image || (source.page && paper.pdfUrl)) &&
+        !version.displayAssets[id]
+      )
+        version.displayAssets[id] = await saveDisplayAsset(
+          paper,
+          source,
+          slide.imageCrop,
+        );
       if (version.displayAssets[id])
         version.displayAssetQuality[id] = (
           await read<DisplayAsset>("display-assets", version.displayAssets[id])
@@ -170,7 +179,14 @@ export class DeckVersions {
     },
   ) {
     const parent = this.get(parentId, conversationId);
-    if (parent.status !== "completed")
+    const recovery = !["queued", "revising", "checking", "completed"].includes(
+      parent.status,
+    );
+    const base =
+      recovery && parent.parentId
+        ? this.get(parent.parentId, conversationId)
+        : parent;
+    if (base.status !== "completed")
       throw new Error("请选择已完成版本作为修改起点。");
     const speech = "operation" in input;
     if (
@@ -179,11 +195,11 @@ export class DeckVersions {
         !parent.outline.slides[input.slideIndex])
     )
       throw new Error("指定页不存在。");
-    await this.sources(parent);
+    await this.sources(base);
     const version: DeckVersion = {
-      ...structuredClone(parent),
+      ...structuredClone(base),
       id: randomUUID(),
-      parentId,
+      parentId: base.id,
       learningIntent: external?.learningIntent ?? parent.learningIntent,
       restoredFrom: undefined,
       slideIndex: speech ? undefined : input.slideIndex,
@@ -214,10 +230,28 @@ export class DeckVersions {
       this.activeIds.add(version.id);
       if (!external)
         ledger.state.deadline = new Date(Date.now() + 480_000).toISOString();
-      const paper = await this.sources(parent);
+      const paper = await this.sources(base);
+      if (
+        !speech &&
+        input.slide?.imageSource &&
+        !paper.sources.some((s) => s.id === input.slide!.imageSource)
+      ) {
+        const all = withFoundationSources(await this.paperById(base.paperId));
+        const image = all.sources.find(
+          (s) =>
+            s.id === input.slide!.imageSource &&
+            (s.image || (s.page && all.pdfUrl)),
+        );
+        if (!image) throw new Error("请选择当前论文的有效图件。");
+        const ids = new Set([...paper.sources.map((s) => s.id), image.id]);
+        // Hash sources in the same canonical order used by sources() on reload.
+        paper.sources = all.sources.filter((s) => ids.has(s.id));
+      }
+      version.sourceIds = paper.sources.map((s) => s.id);
+      version.sourceHash = digest(paper.sources);
       if (speech)
-        await this.executeSpeech(version, parent, paper, input, ledger, signal);
-      else await this.execute(version, parent, paper, input, ledger, signal);
+        await this.executeSpeech(version, base, paper, input, ledger, signal);
+      else await this.execute(version, base, paper, input, ledger, signal);
     };
     const completion = (
       external
@@ -435,10 +469,31 @@ export class DeckVersions {
       ]);
       const sources = paper.sources.filter((s) => localIds.has(s.id));
       const packet = materialPacket(sources);
-      const schema = slideSchema.extend({
+      const selectedImage = input.slide
+        ? input.slide.imageSource
+        : original.imageSource;
+      const selectedSource = sources.find((s) => s.id === selectedImage);
+      const selectedAsset =
+        selectedSource &&
+        (selectedSource.image || (selectedSource.page && paper.pdfUrl))
+          ? await saveDisplayAsset(
+              paper,
+              selectedSource,
+              input.slide ? input.slide.imageCrop : original.imageCrop,
+            )
+          : undefined;
+      const reviewImage = selectedAsset
+        ? (await read<DisplayAsset>("display-assets", selectedAsset)).image
+        : undefined;
+      const schema = slideSchema.omit({ imageCrop: true }).extend({
         citations: z.array(z.enum(sources.map((s) => s.id))).max(20),
         imageSource: z
-          .enum(["", ...sources.filter((s) => s.image).map((s) => s.id)])
+          .enum([
+            "",
+            ...sources
+              .filter((s) => s.image || (s.page && paper.pdfUrl))
+              .map((s) => s.id),
+          ])
           .optional(),
       });
       const call = async <T>(
@@ -469,7 +524,7 @@ export class DeckVersions {
               groupId: version.id,
               sourceHash: digest(sources),
               skillHash: digest(skills.versions),
-              image: sources.find((s) => s.image)?.image,
+              image: reviewImage,
               onReserved: async () => this.store(version),
             },
           );
@@ -488,11 +543,21 @@ export class DeckVersions {
           !slide.citations.length ||
           slide.citations.some((id) => !sources.some((s) => s.id === id)) ||
           (slide.imageSource &&
-            !sources.some((s) => s.id === slide.imageSource && s.image))
+            !sources.some(
+              (s) =>
+                s.id === slide.imageSource &&
+                (s.image || (s.page && paper.pdfUrl)),
+            ))
         )
           throw new Error("修改页缺少有效来源或原图。");
-        if (original.imageSource && slide.imageSource !== original.imageSource)
+        if (
+          !input.slide &&
+          original.imageSource &&
+          slide.imageSource !== original.imageSource
+        )
           throw new Error("单页修改需要保留原图绑定。");
+        if (slide.imageCrop && !slide.imageSource)
+          throw new Error("裁剪区域必须绑定图件。");
         validateTeachingSurface(
           {
             title: "单页修改",
@@ -508,7 +573,7 @@ export class DeckVersions {
       };
       version.status = "revising";
       await this.store(version);
-      let slide =
+      let slide: Slide =
         input.slide ??
         (await call(
           "slide-edit",
@@ -522,6 +587,8 @@ export class DeckVersions {
           },
           schema,
         ));
+      if (!input.slide && original.imageCrop)
+        slide.imageCrop = structuredClone(original.imageCrop);
       validate(slide);
       version.outline.slides[input.slideIndex] = slide;
       version.status = "checking";
@@ -538,6 +605,12 @@ export class DeckVersions {
         groundedReviewSchema(sources),
       );
       if (review.issues.some((i) => !i.resolved && i.severity === "blocking")) {
+        if (input.slide) {
+          version.review = review;
+          throw new Error(
+            "这一页仍有待修改问题，草稿已保留。修改后可再次保存并核对。",
+          );
+        }
         await ledger.revise(version.id);
         version.status = "revising";
         version.review = review;
@@ -555,6 +628,8 @@ export class DeckVersions {
           },
           schema,
         );
+        if (original.imageCrop)
+          slide.imageCrop = structuredClone(original.imageCrop);
         validate(slide);
         version.outline.slides[input.slideIndex] = slide;
         version.status = "checking";
@@ -624,8 +699,7 @@ export class DeckVersions {
     if (
       target.status !== "completed" ||
       current.paperId !== target.paperId ||
-      current.sourceVersion !== target.sourceVersion ||
-      current.sourceHash !== target.sourceHash
+      current.sourceVersion !== target.sourceVersion
     )
       throw new Error("不能恢复未完成或其他资料版本。");
     const version: DeckVersion = {
@@ -654,14 +728,30 @@ export class DeckVersions {
       throw new Error("此版本尚未完成核对，不能导出。");
     const paper = structuredClone(await this.sources(version)),
       artifactId = randomUUID();
-    for (const source of paper.sources) {
-      const assetId = version.displayAssets?.[source.id];
+    for (const slide of version.outline.slides) {
+      const source = paper.sources.find((s) => s.id === slide.imageSource);
+      if (!source) continue;
+      const key = slideImageKey(slide)!;
+      const assetId = version.displayAssets?.[key];
       if (assetId)
-        source.image = (
-          await read<DisplayAsset>("display-assets", assetId)
-        ).image;
+        paper.sources.push({
+          ...source,
+          id: key,
+          locator:
+            source.locator +
+            (slide.imageCrop
+              ? `；局部选区：${JSON.stringify(slide.imageCrop)}`
+              : ""),
+          image: (await read<DisplayAsset>("display-assets", assetId)).image,
+        });
     }
-    await this.exporter(version.outline, paper, artifactId);
+    const outline = structuredClone(version.outline);
+    for (const slide of outline.slides)
+      if (slide.imageSource && version.displayAssets?.[slideImageKey(slide)!]) {
+        slide.imageSource = slideImageKey(slide);
+        delete slide.imageCrop;
+      }
+    await this.exporter(outline, paper, artifactId);
     return { id: artifactId, url: `/api/decks/${artifactId}`, versionId: id };
   }
 }

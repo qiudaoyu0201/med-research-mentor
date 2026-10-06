@@ -1,10 +1,13 @@
 // Minimal PDFs for engineering tests: synthetic text, never presented as research findings.
 export function pdfFixture(
   text = "Engineering fixture: Compare exercise exposure with a control group. Muscle function is measured before and after training. This synthetic PDF tests import and selection only.",
+  commands?: string,
 ) {
-  const content = text
-    ? `BT /F1 12 Tf 30 760 Td (${text.replace(/[()\\]/g, "\\$&")}) Tj ET`
-    : "";
+  const content =
+    commands ??
+    (text
+      ? `BT /F1 12 Tf 30 760 Td (${text.replace(/[()\\]/g, "\\$&")}) Tj ET`
+      : "");
   const objects = [
     "<< /Type /Catalog /Pages 2 0 R >>",
     "<< /Type /Pages /Kids [3 0 R] /Count 1 >>",

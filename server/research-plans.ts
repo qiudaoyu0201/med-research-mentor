@@ -776,40 +776,30 @@ export class ResearchPlans {
     const refs = v.topic.sources;
     const citation = (ids: string[]) =>
       ids.map((id) => `[${refs.findIndex((s) => s.id === id) + 1}]`).join(" ");
-    const status = !v.review
-      ? "未核对"
-      : v.review.status === "checked"
-        ? "轻量核对完成（限所列范围）"
-        : "核对有待处理问题";
+    const status = "当前内容核对完成（限所列范围，待确认条件保留在正文）";
     return [
       `# ${v.content.title}`,
-      `保存版本：${v.id} · ${v.createdAt}`,
+      `保存日期：${v.createdAt.slice(0, 10)}`,
       `课题：${v.topic.question}`,
       `条件（用户陈述）：${v.topic.conditions || "未提供"}`,
       `核对：${status}${v.topic.version !== plan.topic.version ? "；当前课题条件已变化，本导出仍为选定历史版本" : ""}`,
       ...v.content.sections.flatMap((s) => [
         `## ${s.title}`,
-        `${s.text} ${citation(s.sourceRefs)}`,
+        `${s.kind === "hypothesis" ? "待验证假设：" : s.kind === "possible-result" ? "可能出现的结果（尚未观察到）：" : ""}${s.text} ${citation(s.sourceRefs)}`,
         `设计理由：${s.rationale}`,
-        `类别：${s.kind} · 参与：${s.author}`,
         ...(s.unknowns.length ? [`待确认：${s.unknowns.join("；")}`] : []),
       ]),
       "## 假设与待确认",
-      ...v.content.assumptions,
-      ...v.content.questions,
+      ...new Set([...v.content.assumptions, ...v.content.questions]),
       "## 范围与核对问题",
-      ...v.content.limitations,
-      ...(v.review?.limitations ?? []),
-      ...(v.review?.issues.map(
-        (i) => `${i.severity}: ${i.message} ${citation(i.evidence)}`,
-      ) ?? []),
-      "## 来源（实际可见片段）",
+      ...new Set([...v.content.limitations, ...(v.review?.limitations ?? [])]),
+      ...(v.review?.issues.map((i) => `${i.message} ${citation(i.evidence)}`) ??
+        []),
+      "## 来源",
       ...(refs.length
         ? refs.flatMap((r, i) => [
-            `[${i + 1}] ${r.title} · ${r.paperId}@${r.sourceVersion} · ${r.locator}`,
-            `稳定引用：${r.id} · 来源核验登记：${r.verified ? "已登记" : "未核验"}`,
+            `[${i + 1}] ${r.title} · ${r.locator}`,
             ...(r.url ? [`链接：${r.url}`] : []),
-            `> ${r.excerpt.replace(/\n/g, "\n> ")}`,
           ])
         : ["本版本未提供文献；设计建议与假设仍待核对。"]),
       "本文件记录方案草稿及其依据，不代表实验已实施、伦理已获批或学习迁移已验证。",

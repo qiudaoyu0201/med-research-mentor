@@ -106,6 +106,23 @@ test("隔离损坏会话后，其健康回答不阻断其他聊天恢复，也�
   assert.ok(restored.assistant.turns.has(orphan.id));
   assert.equal(restored.records.has("turns/orphan-turn"), false);
 });
+test("generic PPT requests with methods keep paper evidence and do not ask for a method name", async () => {
+  const h = harness([]),
+    state = await h.conversations.create({ paperId: sample.id });
+  const plan = rulePlan(
+    {
+      clientMessageId: "generic-ppt",
+      mode: "live",
+      module: "ppt",
+      question: "根据论文生成汇报，说明核心问题、方法、证据及局限。",
+    },
+    state,
+    sample,
+  )!;
+  assert.equal(plan.clarification, null);
+  assert.ok(plan.modules.includes("ppt"));
+  assert.ok(plan.sourceIds.includes("xu-question"));
+});
 test("optional full speech reaches PPT generation, grounding and saved deck without extra compose calls", async () => {
   const script =
     "# 开场\n介绍本次汇报。\n# 逐页讲述\n根据页面解释证据。\n# 转场\n下面讨论边界。\n# 结尾\n谢谢。";
@@ -115,7 +132,6 @@ test("optional full speech reaches PPT generation, grounding and saved deck with
         unit: exampleUnits.paper,
         deck: { ...defaultDeck, speechScript: script },
       },
-      novice,
       {
         issues: [],
         checkedSources: ["xu-question"],
@@ -140,9 +156,9 @@ test("optional full speech reaches PPT generation, grounding and saved deck with
   assert.equal(turn.status, "completed", turn.error);
   const run = h.manager.runs.get(turn.runId!)!;
   assert.equal(run.input.speechScript, true);
-  assert.equal(run.calls, 3);
+  assert.equal(run.calls, 2);
   assert.equal((run.roles[0].input as any).speechScript, true);
-  assert.equal((run.roles[2].input as any).deck.speechScript, script);
+  assert.equal((run.roles[1].input as any).deck.speechScript, script);
   assert.equal([...h.decks!.versions.values()][0].outline.speechScript, script);
 });
 test("shared intent reaches all roles; foundational and focused core learning cannot disable novice checks", async () => {

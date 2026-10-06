@@ -277,6 +277,7 @@ try {
   await page.request.put(base + "/api/workspace/position", {
     data: { paperId: "xu-2018", conversationId: realChat.id, panel: null },
   });
+  await page.evaluate(() => sessionStorage.removeItem("research-current-chat"));
   await page.reload();
   await page.getByRole("button", { name: "资料", exact: true }).click();
   await page.getByRole("button", { name: "展开阅读", exact: true }).click();

@@ -82,7 +82,7 @@ export function rulePlan(
   const modules: Module[] = [];
   if (report) {
     if (figure) modules.push("figure");
-    if (method) modules.push("method");
+    if (knownMethod || (figure && method)) modules.push("method");
     modules.push("ppt");
   } else if (message.module) modules.push(message.module);
   else if (figure) modules.push("figure");
@@ -113,7 +113,8 @@ export function rulePlan(
   let sourceIds = message.sourceIds ?? state.pending?.sourceIds;
   if (
     !sourceIds?.length &&
-    modules.includes("method") &&
+    modules.length > 0 &&
+    modules.every((m) => m === "method") &&
     !figure &&
     !knownMethod &&
     !state.lastRunId
@@ -131,7 +132,7 @@ export function rulePlan(
   if (!sourceIds?.length) {
     sourceIds =
       modules.every((m) => m === "method") ||
-      (modules.includes("method") && !figure)
+      (modules.includes("method") && !figure && !modules.includes("ppt"))
         ? foundationCatalog.match(question).map((s) => s.id)
         : defaultPaperSources(paper, question, modules).map((s) => s.id);
     if (!sourceIds.length && !clarify && !message.exportRunId)
@@ -942,7 +943,9 @@ export class AssistantService {
         const wanted = foundationCatalog.match(
           [
             plan.goal,
-            ...selected.map((s) => s.caption ?? s.text),
+            ...(plan.modules.some((m) => m === "figure" || m === "method")
+              ? selected.map((s) => s.caption ?? s.text)
+              : []),
             ...state.openQuestions.map((q) => q.question),
           ].join("\n"),
         );
@@ -1057,6 +1060,9 @@ export class AssistantService {
               checks: {
                 readability:
                   !direct &&
+                  (!plan.modules.includes("ppt") ||
+                    plan.modules.includes("figure") ||
+                    message.readabilityCheck === true) &&
                   (!wordingOnly || message.readabilityCheck === true),
                 reason: direct
                   ? "简短独立背景解释，未核验论文事实"

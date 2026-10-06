@@ -328,9 +328,10 @@ try {
       );
       assert.equal(
         await page
-          .locator(".rw-slide h2")
-          .evaluate((element) => getComputedStyle(element).color),
-        "rgb(28, 28, 30)",
+          .locator(".rw-slide-canvas text")
+          .first()
+          .getAttribute("fill"),
+        "#1D1D1F",
       );
       assert.equal(
         await page.evaluate(

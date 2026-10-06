@@ -334,7 +334,7 @@ test("PPTX contains eight editable slides, notes and missing-figure placeholders
   assert.equal(slides.length, 8);
   assert.equal(notes.length, 8);
   assert.match(strFromU8(zip[slides[0]]), /<a:t>/);
-  assert.ok(slides.some((s) => strFromU8(zip[s]).includes("原图待导入")));
+  assert.ok(slides.some((s) => strFromU8(zip[s]).includes("原图未提供")));
   assert.ok(notes.some((s) => strFromU8(zip[s]).includes("来源")));
 });
 test("PDF importer extracts actual pages and rejects malformed files", async () => {

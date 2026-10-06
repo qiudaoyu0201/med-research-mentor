@@ -1,45 +1,20 @@
 import PptxGenJS from "pptxgenjs";
 import { mkdir } from "node:fs/promises";
 import { resolve } from "node:path";
-import { loadImage } from "@napi-rs/canvas";
+import { createCanvas, loadImage } from "@napi-rs/canvas";
 import { deckSchema } from "./schemas.ts";
+import { slideLayout } from "../shared/slide-layout.ts";
 import type { DeckOutline, PaperBundle, TaskRun } from "../shared/types.ts";
 import { safeId } from "./storage.ts";
+import { cropPixels } from "../shared/image-region.ts";
 export async function exportDeck(
   outline: DeckOutline,
   paper: PaperBundle,
   id: string,
 ) {
-  const deck = deckSchema.parse(outline);
-  const sourceMap = new Map(paper.sources.map((s) => [s.id, s]));
-  for (const slide of deck.slides) {
-    if (
-      !slide.citations.length ||
-      slide.citations.some((id) => !sourceMap.has(id))
-    )
-      throw new Error("每一页必须保留有效来源。");
-    if (slide.imageSource && !sourceMap.has(slide.imageSource))
-      throw new Error("图件来源无效。");
-  }
+  const deck = deckSchema.parse(outline),
+    sourceMap = new Map(paper.sources.map((s) => [s.id, s]));
   const pptx = new PptxGenJS();
-  const imageBoxes = new Map<
-    string,
-    { x: number; y: number; w: number; h: number }
-  >();
-  for (const slide of deck.slides) {
-    const image = slide.imageSource && sourceMap.get(slide.imageSource)?.image;
-    if (!image || imageBoxes.has(image)) continue;
-    const decoded = await loadImage(image);
-    const scale = Math.min(5.05 / decoded.width, 3.7 / decoded.height);
-    const w = decoded.width * scale,
-      h = decoded.height * scale;
-    imageBoxes.set(image, {
-      x: 7.35 + (5.05 - w) / 2,
-      y: 1.75 + (3.7 - h) / 2,
-      w,
-      h,
-    });
-  }
   pptx.layout = "LAYOUT_WIDE";
   pptx.author = "医学科研入门导师";
   pptx.subject = "学习汇报";
@@ -48,8 +23,42 @@ export async function exportDeck(
     headFontFace: "Microsoft YaHei",
     bodyFontFace: "Microsoft YaHei",
   };
-  deck.slides.forEach((s, i) => {
-    const slide = pptx.addSlide();
+  for (const [i, s] of deck.slides.entries()) {
+    if (!s.citations.length || s.citations.some((id) => !sourceMap.has(id)))
+      throw new Error("每一页必须保留有效来源。");
+    let image = s.imageSource ? sourceMap.get(s.imageSource)?.image : undefined;
+    if (s.imageSource && !sourceMap.has(s.imageSource))
+      throw new Error("图件来源无效。");
+    let size = s.imageSource ? { width: 1600, height: 1000 } : undefined;
+    if (image) {
+      let decoded = await loadImage(image);
+      if (s.imageCrop) {
+        const bounds = cropPixels(s.imageCrop, decoded.width, decoded.height),
+          canvas = createCanvas(bounds.width, bounds.height);
+        canvas
+          .getContext("2d")
+          .drawImage(
+            decoded,
+            bounds.left,
+            bounds.top,
+            canvas.width,
+            canvas.height,
+            0,
+            0,
+            canvas.width,
+            canvas.height,
+          );
+        image = canvas.toDataURL("image/png");
+        decoded = await loadImage(image);
+      }
+      size = { width: decoded.width, height: decoded.height };
+    }
+    const layout = slideLayout(
+        s,
+        s.citations.map((id) => sourceMap.get(id)!),
+        size,
+      ),
+      slide = pptx.addSlide();
     slide.background = { color: "F5F5F7" };
     slide.addShape(pptx.ShapeType.rect, {
       x: 0.55,
@@ -59,76 +68,37 @@ export async function exportDeck(
       fill: { color: "007AFF" },
       line: { color: "007AFF" },
     });
-    slide.addText(s.title, {
-      x: 0.85,
-      y: 0.55,
-      w: 11.6,
-      h: 0.9,
-      fontSize: 28,
-      bold: true,
-      color: "1D1D1F",
-      breakLine: false,
-      margin: 0,
-      fit: "resize",
-    });
-    const image = s.imageSource
-      ? sourceMap.get(s.imageSource)?.image
-      : undefined;
-    const width = s.imageSource ? 6.0 : 11.6;
-    s.bullets.forEach((text, j) =>
-      slide.addText(text, {
-        x: 0.9,
-        y: 1.85 + j * 0.83,
-        w: width,
-        h: 0.67,
-        fontSize: 20,
-        color: "303039",
+    for (const b of layout.text) {
+      slide.addText(b.lines.join("\n"), {
+        x: b.x,
+        y: b.y,
+        w: b.w,
+        h: b.h,
+        fontSize: b.fontSize,
+        bold: b.bold,
+        color: b.color,
         margin: 0,
-        fit: "resize",
         breakLine: false,
-      }),
-    );
-    if (s.imageSource) {
-      if (image)
-        slide.addImage({
-          data: image,
-          ...imageBoxes.get(image)!,
-        });
-      else
-        slide.addText("原图待导入\n未生成或补造论文图件", {
-          x: 7.35,
-          y: 1.85,
-          w: 5.05,
-          h: 3.6,
-          fontSize: 20,
-          color: "73737C",
-          align: "center",
-          valign: "middle",
-          fill: { color: "E8E8ED" },
-          margin: 0.3,
-        });
+        lineSpacingMultiple: 1.18,
+        valign: "top",
+        fontFace: "Microsoft YaHei",
+      });
     }
-    const sourceText = s.citations
-      .map((id) => {
-        const source = sourceMap.get(id)!;
-        return `${source.title} · ${source.locator}`;
-      })
-      .join("；");
-    slide.addText(sourceText, {
-      x: 0.9,
-      y: 6.35,
-      w: 11.2,
-      h: 0.65,
-      fontSize: 10,
-      color: "65656F",
-      margin: 0,
-      fit: "resize",
-    });
+    if (image && layout.image) slide.addImage({ data: image, ...layout.image });
+    else if (layout.image)
+      slide.addText("原图未提供", {
+        ...layout.image,
+        fontSize: 20,
+        color: "73737C",
+        align: "center",
+        valign: "middle",
+        margin: 0,
+      });
     slide.addText(`${i + 1} / ${deck.slides.length}`, {
       x: 12.1,
-      y: 6.75,
+      y: 7.02,
       w: 0.7,
-      h: 0.3,
+      h: 0.22,
       fontSize: 10,
       color: "65656F",
       margin: 0,
@@ -139,9 +109,11 @@ export async function exportDeck(
           const x = sourceMap.get(id)!;
           return `${x.title} | ${x.locator} | ${x.url || "本机上传资料"}`;
         })
-        .join("\n")}`,
+        .join(
+          "\n",
+        )}${s.imageSource ? `\n配图：${sourceMap.get(s.imageSource)!.locator}` : ""}${s.imageCrop ? `\n图件为原图局部，区域：${JSON.stringify(s.imageCrop)}` : ""}`,
     );
-  });
+  }
   await mkdir("exports", { recursive: true });
   const path = resolve("exports", `${safeId(id)}.pptx`);
   await pptx.writeFile({ fileName: path });
@@ -150,5 +122,12 @@ export async function exportDeck(
 export function exportNotes(run: TaskRun) {
   if (!run.result || run.status !== "completed")
     throw new Error("只有已完成的最终内容可以导出。");
-  return `# ${run.result.title}\n\n模式：${run.input.mode === "live" ? "实时" : "固定示例"}\n\n${run.result.sections.map((s) => `## ${s.title}\n\n${s.text}\n\n来源类型：${s.kind}；依据：${s.citations.join("、")}`).join("\n\n")}\n\n待核验：${run.review?.limitations.join("；") || "未记录"}\n\n版本：${JSON.stringify(run.skillVersions)}\n`;
+  const sources = run.materials?.at(-1)?.sources ?? [];
+  const used = [
+    ...new Set(run.result.sections.flatMap((s) => s.citations)),
+  ].flatMap((id) => {
+    const s = sources.find((s) => s.id === id);
+    return s ? [`${s.title} · ${s.locator}${s.url ? ` · ${s.url}` : ""}`] : [];
+  });
+  return `# ${run.result.title}\n\n${run.result.sections.map((s) => `## ${s.title}\n\n${s.text}`).join("\n\n")}${used.length ? `\n\n## 来源\n\n${used.join("\n\n")}` : ""}\n\n核对范围：${run.review?.limitations.join("；") || "未记录"}\n`;
 }

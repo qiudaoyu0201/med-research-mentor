@@ -1,5 +1,14 @@
 import { z } from "zod";
 import type { Source } from "../shared/types.ts";
+import { validRegion } from "../shared/image-region.ts";
+export const imageRegionSchema = z
+  .object({
+    left: z.number(),
+    top: z.number(),
+    width: z.number(),
+    height: z.number(),
+  })
+  .refine(validRegion, "选区必须位于图像内且不为空。");
 const citations = z.array(z.string()).max(20);
 const selectedSources = z.array(z.string()).max(100);
 export const learningPreferencesSchema = z.object({
@@ -91,6 +100,7 @@ export const slideSchema = z.object({
   notes: z.string().min(1).max(2000),
   citations,
   imageSource: z.string().optional(),
+  imageCrop: imageRegionSchema.optional(),
 });
 export const deckSchema = z.object({
   slides: z.array(slideSchema).min(1).max(16),
@@ -107,7 +117,7 @@ export function groundedTeachingSchema(
 ) {
   const ids = z.array(z.enum(sources.map((s) => s.id))).max(20);
   const sections = unitSchema.shape.sections.element.extend({ citations: ids });
-  const slides = slideSchema.extend({
+  const slides = slideSchema.omit({ imageCrop: true }).extend({
     citations: ids,
     imageSource: z
       .enum([

@@ -41,7 +41,7 @@ export async function localSample() {
     const page = pages[source.id];
     if (!page) continue;
     source.page = page;
-    source.text = parsed.sources[page - 1].text;
+    source.text = parsed.sources.find((s) => s.page === page && !s.image)!.text;
     if (source.figure) {
       const figure = source.figure.startsWith("6") ? "6" : "1";
       const match = new RegExp(`Fig\\.\\s*${figure}\\s*\\|`).exec(source.text);

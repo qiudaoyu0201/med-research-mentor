@@ -12,6 +12,9 @@ import { finished, statusLabel } from "./research-discussion.tsx";
 import { Splitter, type defaultLayout } from "./research-layout.tsx";
 import { ObjectMenu } from "./research-menu.tsx";
 import { ResearchImage } from "./research-image.tsx";
+import { ResearchSlide } from "./research-slide.tsx";
+import { ImageCrop } from "./research-image-crop.tsx";
+import { slideImageKey, preferredSources } from "../shared/image-region.ts";
 
 const done = (v: DeckVersion) =>
   ["completed", "failed", "cancelled", "interrupted"].includes(v.status);
@@ -100,6 +103,17 @@ export function ResearchPpt({
     draft &&
     JSON.stringify(draft) !== JSON.stringify(current.outline.slides[page]);
   const speechChanged = speechDraft !== (current?.outline.speechScript ?? "");
+  const imageKey = draft && slideImageKey(draft);
+  const imageSource = paper?.sources.find((s) => s.id === draft?.imageSource);
+  const imageAsset = imageKey && current?.displayAssets?.[imageKey];
+  const originalImageUrl =
+    imageSource?.image ??
+    (imageSource?.page && paper?.pdfUrl
+      ? `/api/papers/${paper.id}/sources/${imageSource.id}/image`
+      : undefined);
+  const imageUrl = imageAsset
+    ? `/api/display-assets/${imageAsset}`
+    : originalImageUrl;
   useEffect(() => {
     setSpeechEditing(false);
     try {
@@ -287,8 +301,8 @@ export function ResearchPpt({
           speechScript: withSpeech,
           sourceIds: [
             ...paper.sources.filter((s) => s.attachmentId).map((s) => s.id),
-            ...paper.sources
-              .filter((s) => s.kind === "paper" && !s.image)
+            ...preferredSources(paper.sources)
+              .filter((s) => s.kind === "paper")
               .map((s) => s.id),
           ].slice(0, 100),
           question:
@@ -596,79 +610,30 @@ export function ResearchPpt({
                   <button onClick={() => setEditing(true)}>编辑这一页</button>
                   <article
                     className="rw-slide"
-                    aria-label={`第 ${page + 1} 页预览`}
+                    aria-label={"第 " + (page + 1) + " 页预览"}
                   >
-                    <small>
-                      第 {page + 1} / {current.outline.slides.length} 页
-                      {changed ? " · 未保存编辑" : ""}
-                    </small>
-                    <h2>{draft.title}</h2>
-                    <ul>
-                      {draft.bullets.map((b, i) => (
-                        <li key={i}>{b}</li>
-                      ))}
-                    </ul>
-                    {draft.imageSource &&
-                      paper.sources.find((s) => s.id === draft.imageSource)
-                        ?.image && (
-                        <img
-                          src={
-                            current.displayAssets?.[draft.imageSource]
-                              ? `/api/display-assets/${current.displayAssets[draft.imageSource]}`
-                              : paper.sources.find(
-                                  (s) => s.id === draft.imageSource,
-                                )!.image
-                          }
-                          alt="来源图件"
-                        />
-                      )}
-                    {draft.imageSource &&
-                      (() => {
-                        const source = paper.sources.find(
-                          (s) => s.id === draft.imageSource,
-                        );
-                        const asset =
-                          current.displayAssets?.[draft.imageSource];
-                        return source?.image ? (
-                          <ResearchImage
-                            url={
-                              asset
-                                ? `/api/display-assets/${asset}`
-                                : source.image
-                            }
-                            title={source.title}
-                            caption={source.text}
-                            originalMissing={
-                              !asset ||
-                              current.displayAssetQuality?.[
-                                draft.imageSource
-                              ] === "legacy"
-                            }
-                            onPage={
-                              source.page && paper.pdfUrl
-                                ? () => onCitation(source.id)
-                                : undefined
-                            }
-                          />
-                        ) : null;
-                      })()}
-                    {draft.imageSource &&
-                      current.displayAssetQuality?.[draft.imageSource] ===
-                        "page" && (
-                        <p className="hint">
-                          图件来自原论文整页，细节可打开大图或原页查看。汇报需要突出单图时，可添加清晰单图后另存版本。
-                        </p>
-                      )}
-                    {draft.imageSource &&
-                      (!current.displayAssets?.[draft.imageSource] ||
-                        current.displayAssetQuality?.[draft.imageSource] ===
-                          "legacy") && (
-                        <p>
-                          此保存版本沿用旧图件，原件缺失时请补充清晰图片；有原始
-                          PDF 时，保存新版本可重新生成显示图。
-                        </p>
-                      )}
+                    {changed && <small>未保存编辑</small>}
+                    <ResearchSlide
+                      slide={draft}
+                      paper={paper}
+                      url={imageUrl}
+                      crop={imageAsset ? undefined : draft.imageCrop}
+                      page={page + 1}
+                      total={current.outline.slides.length}
+                    />
                   </article>
+                  {imageSource && imageUrl && (
+                    <ResearchImage
+                      url={imageUrl}
+                      title={imageSource.title}
+                      caption=""
+                      onPage={
+                        imageSource.page && paper.pdfUrl
+                          ? () => onCitation(imageSource.id)
+                          : undefined
+                      }
+                    />
+                  )}
                   <div className="rw-evidence">
                     {draft.citations.map((id) => (
                       <button
@@ -927,6 +892,49 @@ export function ResearchPpt({
                         }
                       />
                     </label>
+                    <details>
+                      <summary>配图与裁剪</summary>
+                      <label>
+                        这一页的图件
+                        <select
+                          aria-label="幻灯片配图"
+                          value={draft.imageSource ?? ""}
+                          onChange={(e) =>
+                            changeDraft({
+                              ...draft,
+                              imageSource: e.target.value || undefined,
+                              imageCrop: undefined,
+                              citations: [
+                                ...new Set([
+                                  ...draft.citations,
+                                  ...(e.target.value ? [e.target.value] : []),
+                                ]),
+                              ],
+                            })
+                          }
+                        >
+                          <option value="">不配图</option>
+                          {paper.sources
+                            .filter((s) => s.image || (s.page && paper.pdfUrl))
+                            .map((s) => (
+                              <option key={s.id} value={s.id}>
+                                {s.title}
+                                {s.page ? " · PDF " + s.page : ""}
+                              </option>
+                            ))}
+                        </select>
+                      </label>
+                      {imageSource && originalImageUrl && (
+                        <ImageCrop
+                          key={imageSource.id}
+                          url={originalImageUrl}
+                          value={draft.imageCrop}
+                          onChange={(imageCrop) =>
+                            changeDraft({ ...draft, imageCrop })
+                          }
+                        />
+                      )}
+                    </details>
                     {changed && (
                       <button
                         onClick={() => {
@@ -943,7 +951,10 @@ export function ResearchPpt({
                       disabled={
                         busy ||
                         active.length > 0 ||
-                        !changed ||
+                        (!changed &&
+                          !["failed", "cancelled", "interrupted"].includes(
+                            current.status,
+                          )) ||
                         !draft.title.trim() ||
                         !draft.notes.trim() ||
                         draft.bullets.length > 5 ||

@@ -981,6 +981,40 @@
   max-height: none;
   max-width: 100%;
 }
+.rw .rw-slide {
+  padding: 0;
+  overflow: hidden;
+  min-height: 0;
+}
+.rw-slide-canvas {
+  display: block;
+  width: 100%;
+  aspect-ratio: 16 / 9;
+}
+.rw .rw-slide > small {
+  display: block;
+  padding: 8px 12px;
+}
+.rw-image-crop-surface {
+  position: relative;
+  touch-action: none;
+  cursor: crosshair;
+  user-select: none;
+}
+.rw-image-crop-surface img {
+  display: block;
+  width: 100%;
+  height: auto;
+}
+.rw-image-crop-selection {
+  position: absolute;
+  border: 2px solid #007aff;
+  background: #007aff18;
+  pointer-events: none;
+}
+.rw-image-crop {
+  margin: 12px 0;
+}
 .rw .rw-ppt-preview {
   padding: 12px 20px;
 }

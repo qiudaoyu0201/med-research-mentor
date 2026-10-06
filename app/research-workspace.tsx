@@ -136,6 +136,12 @@ export function ResearchWorkspace() {
   const [papers, setPapers] = useState<PaperBundle[]>([]);
   const [conversations, setConversations] = useState<ConversationState[]>([]);
   const [conversation, setConversation] = useState<ConversationState>();
+  useEffect(() => {
+    if (conversation)
+      try {
+        sessionStorage.setItem("research-current-chat", conversation.id);
+      } catch {}
+  }, [conversation?.id]);
   const [turns, setTurns] = useState<ResearchTurn[]>([]);
   const [paper, setPaper] = useState<PaperBundle>();
   useEffect(() => {
@@ -296,13 +302,17 @@ export function ResearchWorkspace() {
     void refresh()
       .then(async (value) => {
         if (closed) return;
+        let preferredId = value.index.lastConversationId;
+        try {
+          const local = sessionStorage.getItem("research-current-chat");
+          if (local && value.conversations.some((c) => c.id === local))
+            preferredId = local;
+        } catch {}
         if (
-          value.index.lastConversationId &&
-          value.conversations.some(
-            (c) => c.id === value.index.lastConversationId,
-          )
+          preferredId &&
+          value.conversations.some((c) => c.id === preferredId)
         )
-          await openConversation(value.index.lastConversationId, value);
+          await openConversation(preferredId, value);
         else {
           const bound = value.papers.find(
             (p) => p.id === value.index.currentPaperId,
@@ -538,6 +548,9 @@ export function ResearchWorkspace() {
     }
   }
   function blank(owner: string | null = null, bound?: PaperBundle) {
+    try {
+      sessionStorage.removeItem("research-current-chat");
+    } catch {}
     ++revision.current;
     setConversation(undefined);
     setTurns([]);

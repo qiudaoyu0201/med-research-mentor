@@ -1,8 +1,9 @@
 import { createHash } from "node:crypto";
 import type { Source, PaperBundle } from "../shared/types.ts";
+import { preferredSources } from "../shared/image-region.ts";
 export const digest = (value: unknown) =>
   createHash("sha256").update(JSON.stringify(value)).digest("hex");
-export const selectionVersion = "generic-evidence-v3-ppt-methods";
+export const selectionVersion = "generic-evidence-v4-page-coverage";
 export function figureNumber(text: string) {
   const match = /(?:Figure|Fig\.?|图)\s*([\d一二两三四五六七八九十]+)/i.exec(
     text,
@@ -41,7 +42,7 @@ export function defaultPaperSources(
   modules: string[],
 ) {
   const number = figureNumber(question);
-  const images = paper.sources.filter(
+  const images = preferredSources(paper.sources).filter(
     (s) =>
       s.kind === "paper" && s.image && (!number || matchesFigure(s, number)),
   );
@@ -66,16 +67,36 @@ export function defaultPaperSources(
     ];
   }
   if (modules.includes("ppt"))
-    return paper.sources.filter((s) => s.kind === "paper" && !s.image);
-  return paper.sources
-    .filter((s) => s.kind === "paper" && !s.image && s.section !== "methods")
-    .slice(0, 4);
+    return preferredSources(paper.sources).filter((s) => s.kind === "paper");
+  return paper.sources.filter((s) => s.kind === "paper" && !s.image);
 }
 export function selectEvidence(
   sources: Source[],
   question: string,
   modules: string[],
 ) {
+  const genericPages = sources.filter(
+    (s) => !s.image && /^PDF 第 \d+ 页$/.test(s.title),
+  );
+  if (
+    genericPages.length &&
+    sources.reduce((n, s) => n + s.text.length, 0) > 20_000
+  ) {
+    const terms = evidenceTerms(question);
+    const ranked = [...sources].sort(
+      (a, b) => pageScore(b, terms, modules) - pageScore(a, terms, modules),
+    );
+    const selected = ranked
+      .filter(
+        (s) =>
+          !s.image ||
+          !targetFigure(question) ||
+          matchesFigure(s, targetFigure(question)!),
+      )
+      .slice(0, 18);
+    materialPacket(selected, question);
+    return selected;
+  }
   try {
     materialPacket(sources);
     return sources;
@@ -120,17 +141,106 @@ export function selectEvidence(
     throw new Error("目标段落超过材料额度，请选择更短的原文范围。");
   return selected;
 }
-export function materialPacket(sources: Source[]) {
+const targetFigure = (question: string) => figureNumber(question);
+function evidenceTerms(question: string) {
+  return [
+    ...new Set(
+      question.toLowerCase().match(/[a-z][a-z0-9-]{2,}|[\u4e00-\u9fff]{2,}/g) ??
+        [],
+    ),
+  ];
+}
+function pageScore(s: Source, terms: string[], modules: string[]) {
+  const t = s.text.toLowerCase();
+  return (
+    (s.image ? 120 : 0) +
+    (s.page === 1 ? 55 : 0) +
+    (/methods|materials|statistical analysis|研究方法|统计分析/i.test(t)
+      ? modules.includes("method") || modules.includes("ppt")
+        ? 80
+        : 35
+      : 0) +
+    (/results|结果/i.test(t) ? 45 : 0) +
+    (s.section === "methods" ? 60 : 0) +
+    terms.reduce((n, w) => n + (t.includes(w) ? 15 : 0), 0)
+  );
+}
+export function materialPacket(sources: Source[], question = "") {
+  const rawLength = [
+    ...new Map(sources.map((s) => [digest(s.text), s.text])).values(),
+  ].reduce((n, t) => n + t.length, 0);
+  const pageExcerpts =
+    rawLength > 20_000 && sources.some((s) => /^PDF 第 \d+ 页$/.test(s.title));
+  const quota = Math.floor(
+    19_000 / Math.max(1, new Set(sources.map((s) => digest(s.text))).size),
+  );
+  const terms = evidenceTerms(question);
   const blocks = new Map<string, { hash: string; text: string }>();
-  const references = sources.map(({ text, image, ...source }) => {
+  const references = sources.map(({ text, image, ...metadata }) => {
+    // In excerpt mode the block is the actual visible evidence. Repeating full
+    // captions in metadata defeats the input bound and hides coverage limits.
+    const source = pageExcerpts
+      ? { ...metadata, caption: undefined }
+      : metadata;
     const hash = digest(text);
-    blocks.set(hash, { hash, text });
-    return { ...source, blockHash: hash };
+    if (!pageExcerpts || text.length <= quota) {
+      blocks.set(hash, { hash, text });
+      return { ...source, blockHash: hash };
+    }
+    const chunks: { start: number; end: number; score: number }[] = [];
+    for (let start = 0; start < text.length; start += 600) {
+      const end = Math.min(text.length, start + 600),
+        part = text.slice(start, end).toLowerCase();
+      chunks.push({
+        start,
+        end,
+        score:
+          (start === 0 ? 8 : 0) +
+          (/methods|materials|statistical analysis|研究方法|统计分析/i.test(
+            part,
+          )
+            ? 12
+            : 0) +
+          (/results|结果/i.test(part) ? 5 : 0) +
+          terms.reduce((n, w) => n + (part.includes(w) ? 10 : 0), 0),
+      });
+    }
+    let remaining = quota;
+    const slices = chunks
+      .sort((a, b) => b.score - a.score || a.start - b.start)
+      .flatMap((c) => {
+        if (remaining < 100) return [];
+        const end = Math.min(c.end, c.start + remaining);
+        remaining -= end - c.start;
+        return [{ start: c.start, end }];
+      })
+      .sort((a, b) => a.start - b.start);
+    const excerpt = slices
+      .map(
+        (c) => `[提取字符 ${c.start}–${c.end}]\n${text.slice(c.start, c.end)}`,
+      )
+      .join("\n\n");
+    blocks.set(hash, { hash, text: excerpt });
+    return {
+      ...source,
+      blockHash: hash,
+      visibleRanges: slices,
+      fullText: false,
+    };
   });
   const length = [...blocks.values()].reduce((n, b) => n + b.text.length, 0);
-  if (length > 20_000)
+  if (length > (pageExcerpts ? 22_000 : 20_000))
     throw new Error("相关原文超过 20,000 字符，请缩小到目标段落或图件。");
-  return { blocks: [...blocks.values()], references };
+  return {
+    blocks: [...blocks.values()],
+    references,
+    ...(pageExcerpts
+      ? {
+          coverage:
+            "按问题选择的原文片段，visibleRanges 为实际提供范围，不代表全文阅读。",
+        }
+      : {}),
+  };
 }
 // Fixed local Figure 1 evidence: retain exact extracted text and locations rather than summaries.
 export function figureOneEvidence(sources: Source[]) {

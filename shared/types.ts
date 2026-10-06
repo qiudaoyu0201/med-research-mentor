@@ -45,6 +45,7 @@ export interface Source {
   imagePurpose?: "page" | "figure" | "attachment";
   imageWidth?: number;
   imageHeight?: number;
+  imageRegion?: import("./image-region.ts").ImageRegion;
   attachmentId?: string;
   paperId?: string;
   paperVersion?: string;
@@ -143,6 +144,7 @@ export interface Slide {
   notes: string;
   citations: string[];
   imageSource?: string;
+  imageCrop?: import("./image-region.ts").ImageRegion;
 }
 export interface DeckOutline {
   slides: Slide[];
@@ -152,7 +154,7 @@ export interface DeckVersion {
   operation?: "speech";
   learningIntent?: LearningIntent;
   displayAssets?: Record<string, string>;
-  displayAssetQuality?: Record<string, "page" | "original" | "legacy">;
+  displayAssetQuality?: Record<string, "page" | "original" | "legacy" | "crop">;
   displayName?: string;
   id: string;
   conversationId: string;

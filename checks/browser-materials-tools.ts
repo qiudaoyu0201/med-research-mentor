@@ -233,6 +233,7 @@ try {
     paperId: "xu-2018",
     panel: null,
   });
+  await page.evaluate(() => sessionStorage.removeItem("research-current-chat"));
   await page.reload();
   await page.getByRole("button", { name: "PPT 汇报", exact: true }).click();
   await page.getByLabel("第 1 页预览").waitFor();
@@ -403,6 +404,7 @@ try {
     paperId: scan.id,
     panel: "sources",
   });
+  await page.evaluate(() => sessionStorage.removeItem("research-current-chat"));
   await page.reload();
   await page.getByRole("button", { name: "资料", exact: true }).click();
   await page.getByText("补充原文", { exact: true }).click();
