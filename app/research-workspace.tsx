@@ -1,5 +1,6 @@
 import { useResearchLayout, Splitter } from "./research-layout.tsx";
 import { ResearchPpt } from "./research-ppt.tsx";
+import { ResearchPlanPanel } from "./research-plan.tsx";
 import { ResearchSettings } from "./research-settings.tsx";
 import { PersonalRecordsPanel } from "./learning-records.tsx";
 import { useEffect, useRef, useState } from "react";
@@ -123,9 +124,10 @@ export function ResearchWorkspace() {
       returnPosition.current = undefined;
     });
   }
-  const [mode, setMode] = useState<"research" | "ppt">("research"),
+  const [mode, setMode] = useState<"research" | "ppt" | "plan">("research"),
     [settings, setSettings] = useState(false),
     [records, setRecords] = useState(false);
+  const [planTitle, setPlanTitle] = useState("新医学课题");
   const recordsDialog = useRef<HTMLDialogElement>(null);
   useEffect(() => {
     if (records) recordsDialog.current?.showModal();
@@ -834,6 +836,10 @@ export function ResearchWorkspace() {
           setMode("ppt");
           setMobile(false);
         }}
+        onPlan={() => {
+          setMode("plan");
+          setMobile(false);
+        }}
         onSettings={() => {
           setSettings(true);
           setMobile(false);
@@ -887,12 +893,24 @@ export function ResearchWorkspace() {
             <ResearchIcon name="sidebar" />
           </button>
           <div className="rw-breadcrumb">
-            <span>{mode === "research" ? "论文研究" : "PPT 汇报"}</span>
-            <strong title={paper?.title ?? currentName}>{currentName}</strong>
+            <span>
+              {mode === "research"
+                ? "论文研究"
+                : mode === "plan"
+                  ? "研究方案"
+                  : "PPT 汇报"}
+            </span>
+            <strong
+              title={
+                mode === "plan" ? planTitle : (paper?.title ?? currentName)
+              }
+            >
+              {mode === "plan" ? planTitle : currentName}
+            </strong>
           </div>
           <button
             aria-expanded={!!panel}
-            disabled={loading}
+            disabled={loading || mode === "plan"}
             onClick={() => {
               if (panel) closeReading();
               else {
@@ -965,6 +983,7 @@ export function ResearchWorkspace() {
                 },
               },
               { label: "PPT 汇报", run: () => setMode("ppt") },
+              { label: "研究方案", run: () => setMode("plan") },
               {
                 label: "更多问题",
                 children: [
@@ -994,7 +1013,19 @@ export function ResearchWorkspace() {
             ]}
           />
         </header>
-        {mode === "ppt" ? (
+        {mode === "plan" ? (
+          <ResearchPlanPanel
+            papers={papers}
+            conversation={conversation}
+            initialQuestion={
+              selection?.focus?.excerpt ??
+              selection?.sourceAnchor?.excerpt ??
+              question
+            }
+            onResearch={() => setMode("research")}
+            onTitle={setPlanTitle}
+          />
+        ) : mode === "ppt" ? (
           <ResearchPpt
             key={conversation?.id ?? paper?.id ?? "empty"}
             paper={paper}

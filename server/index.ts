@@ -41,6 +41,8 @@ import { Attachments } from "./attachments.ts";
 import { attachmentLimits } from "../shared/attachments.ts";
 import { taskKey } from "./scheduler.ts";
 import { ReadingGuides } from "./reading-guides.ts";
+import { ResearchPlans } from "./research-plans.ts";
+import { researchId } from "./research-plan-schemas.ts";
 
 const app = express(),
   port = Number(process.env.PORT || 4317),
@@ -132,6 +134,89 @@ const assistant = new AssistantService(
 const readingGuides = new ReadingGuides(provider, assistant.scheduler);
 await readingGuides.restore();
 await assistant.restore();
+const researchPlans = new ResearchPlans(
+  provider,
+  paperById,
+  assistant.scheduler,
+);
+await researchPlans.restore();
+app.get("/api/research-plans", (_req, res) => res.json(researchPlans.all()));
+app.post("/api/research-plans", async (req, res) =>
+  res.status(201).json(await researchPlans.create(req.body)),
+);
+app.get("/api/research-plans/:id", (req, res) =>
+  res.json(researchPlans.get(req.params.id)),
+);
+app.put("/api/research-plans/:id/topic", async (req, res) => {
+  const body = z
+    .object({ expectedTopicVersion: researchId, topic: z.unknown() })
+    .strict()
+    .parse(req.body);
+  res.json(
+    await researchPlans.updateTopic(
+      req.params.id,
+      body.expectedTopicVersion,
+      body.topic,
+    ),
+  );
+});
+app.post("/api/research-plans/:id/versions", async (req, res) =>
+  res.json(await researchPlans.saveVersion(req.params.id, req.body)),
+);
+app.post("/api/research-plans/:id/restore", async (req, res) => {
+  const body = z
+    .object({
+      versionId: researchId,
+      expectedVersion: researchId.nullable(),
+      expectedTopicVersion: researchId,
+    })
+    .strict()
+    .parse(req.body);
+  res.json(
+    await researchPlans.restoreVersion(
+      req.params.id,
+      body.versionId,
+      body.expectedVersion,
+      body.expectedTopicVersion,
+    ),
+  );
+});
+app.get("/api/research-plans/:id/jobs", (req, res) =>
+  res.json(researchPlans.planJobs(req.params.id)),
+);
+app.post("/api/research-plans/:id/jobs", async (req, res) =>
+  res.status(202).json(await researchPlans.start(req.params.id, req.body)),
+);
+app.get("/api/research-plan-jobs/:id", (req, res) =>
+  res.json(researchPlans.job(req.params.id)),
+);
+app.post("/api/research-plan-jobs/:id/cancel", async (req, res) =>
+  res.json(await researchPlans.cancel(req.params.id)),
+);
+app.post("/api/research-plan-jobs/:id/resume-review", async (req, res) =>
+  res.json(await researchPlans.resumeReview(req.params.id)),
+);
+app.patch("/api/research-plans/:id", async (req, res) => {
+  const body = z.object({ archived: z.boolean() }).strict().parse(req.body);
+  res.json(await researchPlans.archive(req.params.id, body.archived));
+});
+app.delete("/api/research-plans/:id", async (req, res) => {
+  await researchPlans.delete(req.params.id);
+  res.json({ ok: true });
+});
+app.get("/api/research-plans/:id/exports/:versionId", (req, res) => {
+  const markdown = researchPlans.exportMarkdown(
+    req.params.id,
+    researchId.parse(req.params.versionId),
+  );
+  res
+    .type("text/markdown; charset=utf-8")
+    .setHeader(
+      "Content-Disposition",
+      `attachment; filename="research-plan-${req.params.versionId}.md"`,
+    )
+    .send(markdown);
+});
 const imports = new PaperImports();
 const projects = new Projects();
 await projects.restore();
@@ -982,7 +1067,7 @@ app.use(
     res: express.Response,
     _next: express.NextFunction,
   ) => {
-    res.status(error instanceof z.ZodError ? 400 : 400).json({
+    res.status(error.status === 409 ? 409 : 400).json({
       error:
         error instanceof z.ZodError
           ? "输入格式或长度不符合要求"
@@ -996,6 +1081,7 @@ const server = app.listen(port, "127.0.0.1", () =>
   console.log(`医学科研入门导师：http://127.0.0.1:${port}`),
 );
 async function shutdown() {
+  await researchPlans.cancelAll();
   readingGuides.cancelAll();
   replayController?.abort();
   await Promise.all([

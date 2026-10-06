@@ -17,6 +17,7 @@ export function ResearchNavigation({
   onProject,
   onHome,
   onPpt,
+  onPlan,
   onSettings,
   onRecords,
   mode,
@@ -40,9 +41,10 @@ export function ResearchNavigation({
   onProject: (id: string | null) => void;
   onHome: () => void;
   onPpt: () => void;
+  onPlan: () => void;
   onSettings: () => void;
   onRecords: () => void;
-  mode: "research" | "ppt";
+  mode: "research" | "ppt" | "plan";
   onImport: () => void;
   onCreateProject: () => void;
   onEditProject: (id: string) => void;
@@ -100,6 +102,22 @@ export function ResearchNavigation({
           >
             <ResearchIcon name="book" />
             <span>论文研究</span>
+          </button>
+          <button
+            aria-label="研究方案"
+            aria-current={mode === "plan" ? "page" : undefined}
+            onClick={onPlan}
+          >
+            <ResearchIcon name="book" />
+            <span>研究方案</span>
+          </button>
+          <button
+            aria-label="PPT 汇报"
+            aria-current={mode === "ppt" ? "page" : undefined}
+            onClick={onPpt}
+          >
+            <ResearchIcon name="slides" />
+            <span>PPT 汇报</span>
           </button>
         </nav>
         <button
@@ -243,15 +261,6 @@ export function ResearchNavigation({
           <button aria-label="个人记录" title="个人记录" onClick={onRecords}>
             <ResearchIcon name="person" />
             <span>个人记录</span>
-          </button>
-          <button
-            aria-label="PPT 汇报"
-            title="PPT 汇报"
-            aria-current={mode === "ppt" ? "page" : undefined}
-            onClick={onPpt}
-          >
-            <ResearchIcon name="slides" />
-            <span>PPT 汇报</span>
           </button>
         </footer>
       </aside>
