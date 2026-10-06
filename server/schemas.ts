@@ -2,6 +2,37 @@ import { z } from "zod";
 import type { Source } from "../shared/types.ts";
 const citations = z.array(z.string()).max(20);
 const selectedSources = z.array(z.string()).max(100);
+export const learningPreferencesSchema = z.object({
+  verbosity: z.enum(["brief", "standard", "deep"]),
+  focus: z.enum([
+    "balanced",
+    "foundations",
+    "research-reasoning",
+    "methods-figures",
+    "mechanism",
+  ]),
+});
+export const learningRequestSchema = learningPreferencesSchema
+  .partial()
+  .extend({
+    goal: z
+      .enum(["understand", "transfer", "discuss-research", "report"])
+      .optional(),
+    preferenceScope: z.enum(["turn", "conversation"]).optional(),
+  })
+  .strict();
+export const preferencesSchema = z
+  .object({
+    profileId: z.enum(["beginner", "methods", "reasoning"]).optional(),
+    explanationDepth: z
+      .enum(["brief", "standard", "deep", "foundations", "mechanism"])
+      .optional(),
+    learningPreferences: learningPreferencesSchema
+      .partial()
+      .strict()
+      .optional(),
+  })
+  .strict();
 export const unitSchema = z.object({
   title: z.string().min(1).max(160),
   question: z.string().max(2000),
@@ -131,6 +162,7 @@ export const conversationSchema = z.object({
   profileId: z.enum(["beginner", "methods", "reasoning"]).optional(),
 });
 export const messageSchema = z.object({
+  learningIntent: learningRequestSchema.optional(),
   slideCount: z.number().int().min(1).max(16).optional(),
   clientMessageId: recordId,
   question: z.string().trim().min(1).max(2000),

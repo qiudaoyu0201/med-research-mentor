@@ -13,8 +13,10 @@ import {
   deckSchema,
   conversationSchema,
   messageSchema,
+  preferencesSchema,
 } from "./schemas.ts";
-import { CodexProvider } from "./provider.ts";
+import { legacyDepth, legacyPreferences } from "../shared/learning-intent.ts";
+import { createProvider } from "./model-config.ts";
 import {
   TaskManager,
   materialSources,
@@ -42,7 +44,7 @@ import { ReadingGuides } from "./reading-guides.ts";
 
 const app = express(),
   port = Number(process.env.PORT || 4317),
-  provider = new CodexProvider(),
+  provider = createProvider(),
   manager = new TaskManager(provider);
 let replayController: AbortController | undefined;
 const loadedSample = withFoundationSources(await localSample());
@@ -830,20 +832,25 @@ app.patch("/api/deck-versions/:id/name", async (req, res) => {
   );
 });
 app.patch("/api/conversations/:id/preferences", async (req, res) => {
-  const body = z
-    .object({
-      profileId: z.enum(profiles.map((p) => p.id)).optional(),
-      explanationDepth: z
-        .enum(["brief", "standard", "deep", "foundations", "mechanism"])
-        .optional(),
-    })
-    .parse(req.body);
+  const body = preferencesSchema.parse(req.body);
   res.json(
-    await assistant.conversations.update(req.params.id, (state) => ({
-      ...state,
-      ...body,
-      preferenceRevision: (state.preferenceRevision ?? 0) + 1,
-    })),
+    await assistant.conversations.update(req.params.id, (state) => {
+      const learningPreferences = {
+        ...(state.learningPreferences ??
+          legacyPreferences(state.explanationDepth)),
+        ...(body.explanationDepth
+          ? legacyPreferences(body.explanationDepth)
+          : {}),
+        ...body.learningPreferences,
+      };
+      return {
+        ...state,
+        ...(body.profileId ? { profileId: body.profileId } : {}),
+        learningPreferences,
+        explanationDepth: legacyDepth(learningPreferences),
+        preferenceRevision: (state.preferenceRevision ?? 0) + 1,
+      };
+    }),
   );
 });
 app.get("/api/deck-versions/:id", (req, res) =>

@@ -55,6 +55,12 @@ export interface WorkspaceIndex {
   currentProjectId?: string | null;
 }
 export interface ReadingStart {
+  coverage?: {
+    sourceIds: string[];
+    truncatedSourceIds: string[];
+    availableSources: number;
+    fullText: false;
+  };
   autoGenerate?: boolean;
   paperId: string;
   sourceVersion: string;

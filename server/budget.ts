@@ -13,9 +13,14 @@ export function normalizeUsage(raw: any): TokenUsage {
     return null;
   };
   return {
-    input: number("inputTokens", "input_tokens"),
-    output: number("outputTokens", "output_tokens"),
-    cachedInput: number("cachedInputTokens", "cached_input_tokens"),
+    input: number("inputTokens", "input_tokens", "prompt_tokens"),
+    output: number("outputTokens", "output_tokens", "completion_tokens"),
+    cachedInput:
+      number("cachedInputTokens", "cached_input_tokens") ??
+      (typeof value.prompt_tokens_details?.cached_tokens === "number" &&
+      value.prompt_tokens_details.cached_tokens >= 0
+        ? value.prompt_tokens_details.cached_tokens
+        : null),
     total: number("totalTokens", "total_tokens"),
   };
 }
@@ -72,6 +77,7 @@ export class BudgetLedger {
     )
       throw new Error("已达到请求或阶段生成上限。");
     const attempt: Attempt = {
+      providerId: provider.id,
       id: randomUUID(),
       turnId: this.turnId,
       groupId: options.groupId ?? null,
@@ -89,6 +95,7 @@ export class BudgetLedger {
       tokens: normalizeUsage(null),
     };
     this.reserving = true;
+    this.state.billingMode = provider.billingMode ?? "chatgpt";
     this.state.attempts.push(attempt);
     try {
       await this.persist(); // Persist the reservation before sending anything to the provider.

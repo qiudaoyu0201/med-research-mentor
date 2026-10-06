@@ -59,6 +59,8 @@ function harness() {
           checkedSources: input.sources.references.map((s: any) => s.id),
           limitations: [],
         };
+      else if (input.explanation)
+        output = { understood: ["比较训练与对照"], breakpoints: [] };
       else if (input.sources && !input.question)
         output = {
           summary: `研究对象：${input.title}`,
@@ -322,14 +324,14 @@ test("unrelated or unreadable images block only dependent questions; single-imag
   );
   await h.assistant.wait(second.id);
   assert.equal(second.status, "completed", second.error);
-  assert.equal(h.inputs.length - calls, 3); // check, teach, ground
+  assert.equal(h.inputs.length - calls, 4); // attachment check, teach, novice, ground
   assert.deepEqual(h.conversations.get(chat.id).recentTurnIds, [
     first.id,
     second.id,
   ]);
   assert.ok(second.budget.attempts.length <= 7);
 });
-test("natural explanation depth persists per chat and uses the full previous answer; explicit quotation takes priority", async () => {
+test("natural explanation depth applies to the turn and uses the full previous answer; explicit quotation takes priority", async () => {
   const h = harness(),
     chat = await h.conversations.mainForPaper(paper.id);
   async function send(question: string, extra = {}) {
@@ -343,7 +345,7 @@ test("natural explanation depth persists per chat and uses the full previous ans
     assert.equal(t.status, "completed", t.error);
     return h.manager.runs.get(t.runId!)!;
   }
-  const first = await send("一句话解释对照组");
+  const first = await send("结合论文解释对照组");
   for (const [q, depth] of [
     ["再简单点", "brief"],
     ["详细点", "deep"],
@@ -360,7 +362,7 @@ test("natural explanation depth persists per chat and uses the full previous ans
     focus: { runId: first.id, sectionIndex: 0, excerpt: "比较训练" },
   });
   assert.equal(focused.input.focusedText, "比较训练");
-  assert.equal(h.conversations.get(chat.id).explanationDepth, "brief");
+  assert.equal(h.conversations.get(chat.id).explanationDepth, undefined);
   const other = await h.conversations.mainForPaper("study-b");
   assert.equal(other.explanationDepth, undefined);
 });
@@ -490,12 +492,17 @@ test("queued cancellation preserves attachment records and concurrent preference
   await h.conversations.update(chat.id, (state) => ({
     ...state,
     explanationDepth: "mechanism",
+    learningPreferences: { verbosity: "deep", focus: "research-reasoning" },
     preferenceRevision: 1,
   }));
   resume();
   await h.assistant.wait(turn.id);
   assert.equal(turn.status, "completed", turn.error);
   assert.equal(h.conversations.get(chat.id).explanationDepth, "mechanism");
+  assert.deepEqual(h.conversations.get(chat.id).learningPreferences, {
+    verbosity: "deep",
+    focus: "research-reasoning",
+  });
 });
 test("PDF anchors preserve selected whitespace and validate against the actual paper/page, while invented text remains rejected", () => {
   const pdf = { ...paper, pdfUrl: "/api/papers/study-a/pdf" };

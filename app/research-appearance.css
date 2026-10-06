@@ -748,7 +748,7 @@
 .rw .rw-settings > .rp-modal-heading,
 .rw .rw-management .rp-modal-heading {
   position: sticky;
-  top: -24px;
+  top: 0;
   z-index: 1;
   background: var(--rw-surface);
   padding: 12px 0;

@@ -8,6 +8,8 @@ import { save, list } from "./storage.ts";
 import { digest } from "./materials.ts";
 
 type Guide = ReadingStart & { id: string; budget: BudgetLedger["state"] };
+const guideRules =
+  "根据给出的真实论文摘录整理中文阅读起点。先回应研究对象、问题、关键方法及可见结果，缺失部分不补造。summary 简短具体，sourceIds 只能用支持概述的摘录 ID；最多三个问题，具体涉及本研究的对象、方法或比较，避免所有论文通用的套话。无用能力声明和重复限制删去。只返回 JSON。";
 export class ReadingGuides {
   records = new Map<string, Guide>();
   private controllers = new Map<string, AbortController>();
@@ -29,6 +31,11 @@ export class ReadingGuides {
   }
   private key(paper: PaperBundle) {
     return digest({
+      contract: "reading-guide-v2-coverage",
+      provider: this.provider.id ?? this.provider.model,
+      model: this.provider.model,
+      settings: this.provider.settings ?? {},
+      rules: digest(guideRules),
       id: paper.id,
       version: paper.version,
       sources: paper.sources
@@ -74,6 +81,18 @@ export class ReadingGuides {
       id,
       budget: ledger.state,
       status: "queued",
+      coverage: {
+        sourceIds: sources.map((s) => s.id),
+        truncatedSourceIds: paper.sources
+          .filter(
+            (s) => sources.some((p) => p.id === s.id) && s.text.length > 1800,
+          )
+          .map((s) => s.id),
+        availableSources: paper.sources.filter(
+          (s) => s.kind === "paper" && s.text.trim(),
+        ).length,
+        fullText: false,
+      },
     };
     const controller = new AbortController();
     this.records.set(id, guide);
@@ -95,8 +114,7 @@ export class ReadingGuides {
               .max(10),
             questions: z.array(z.string().min(1).max(200)).min(1).max(3),
           });
-          const instructions =
-            "根据给出的真实论文摘录整理中文阅读起点。先回应研究对象、问题、关键方法及可见结果，缺失部分不补造。summary 简短具体，sourceIds 只能用支持概述的摘录 ID；最多三个问题，具体涉及本研究的对象、方法或比较，避免所有论文通用的套话。无用能力声明和重复限制删去。只返回 JSON。";
+          const instructions = guideRules;
           const result = await ledger.call(
             this.provider,
             "reading-guide",

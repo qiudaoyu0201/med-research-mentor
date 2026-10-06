@@ -9,6 +9,7 @@ import {
   type ObjectAction,
 } from "./research-menu.tsx";
 import { ResearchImage } from "./research-image.tsx";
+import { focusLabels, verbosityLabels } from "../shared/learning-intent.ts";
 
 export interface ResearchSelection {
   label: string;
@@ -141,6 +142,16 @@ export function ResearchDiscussion({
                 <div className="rw-start-excerpt">
                   <small>{start.label}</small>
                   <p>{start.summary}</p>
+                  {start.coverage && (
+                    <small>
+                      依据 {start.coverage.sourceIds.length} /{" "}
+                      {start.coverage.availableSources} 个正文片段整理
+                      {start.coverage.truncatedSourceIds.length
+                        ? "，长片段已截取"
+                        : ""}
+                      ；可继续查阅全文。
+                    </small>
+                  )}
                   {(
                     start.sourceIds ?? (start.sourceId ? [start.sourceId] : [])
                   ).map((id) => (
@@ -219,6 +230,8 @@ export function ResearchDiscussion({
                     "详细点",
                     "从基础讲",
                     "重点解释机制",
+                    "重点讲研究思路",
+                    "重点讲方法与图表",
                   ].map((text) => ({
                     label: text,
                     run: () => onSuggest(`${text}，继续解释上一轮完整问题。`),
@@ -283,6 +296,15 @@ export function ResearchDiscussion({
             </div>
             <ObjectMenu objectKey={turn.id} label="回答操作" actions={actions}>
               <div className="rw-answer">
+                {turn.learningIntent && (
+                  <small>
+                    {verbosityLabels[turn.learningIntent.verbosity]} ·{" "}
+                    {focusLabels[turn.learningIntent.focus]}
+                    {turn.learningIntent.preferenceScope === "turn"
+                      ? " · 本轮"
+                      : " · 聊天偏好"}
+                  </small>
+                )}
                 {!complete && (
                   <small>
                     {statusLabel[

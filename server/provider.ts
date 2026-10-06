@@ -5,6 +5,14 @@ import { resolve } from "node:path";
 import { EventEmitter } from "node:events";
 import { z } from "zod";
 export interface Provider {
+  id?: string;
+  billingMode?: "chatgpt" | "api";
+  capabilities?: {
+    images: boolean;
+    structuredOutput: "native-schema" | "local-validation";
+    cancellation: "interrupt" | "abort-request";
+    maxInputChars: number;
+  };
   model: string;
   settings?: { effort: string; imageMode: string; transport: string };
   generate<T>(
@@ -137,6 +145,14 @@ export class CodexClient {
   }
 }
 export class CodexProvider implements Provider {
+  id = "codex-chatgpt";
+  billingMode = "chatgpt" as const;
+  capabilities = {
+    images: true,
+    structuredOutput: "native-schema" as const,
+    cancellation: "interrupt" as const,
+    maxInputChars: 100_000,
+  };
   model = "gpt-6.1-sol";
   settings = {
     effort: "low",
@@ -150,6 +166,8 @@ export class CodexProvider implements Provider {
       const account = await client.rpc("account/read", { refreshToken: false });
       const models = await client.rpc("model/list", { limit: 100 });
       return {
+        provider: this.id,
+        capabilities: this.capabilities,
         authenticated: account.account?.type === "chatgpt",
         authType: account.account?.type || "none",
         models: models.data?.map((m: any) => ({

@@ -1,7 +1,7 @@
 {
   "id": "medical-novice-simulator",
   "title": "模拟新手",
-  "version": "1.2.0",
+  "version": "1.3.0",
   "dependencies": [],
   "origin": "project-original",
   "referenceRecord": "docs/参考来源与复用记录.md"

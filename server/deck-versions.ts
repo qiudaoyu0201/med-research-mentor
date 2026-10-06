@@ -5,6 +5,7 @@ import type {
   PaperBundle,
   Slide,
   TaskRun,
+  LearningIntent,
 } from "../shared/types.ts";
 import { defaultDeck, sample } from "../examples/bundle.ts";
 import { save, list, read } from "./storage.ts";
@@ -137,6 +138,7 @@ export class DeckVersions {
       sourceHash: digest(sources),
       createdAt: new Date().toISOString(),
       runId: run?.id,
+      learningIntent: run?.input.learningIntent,
       origin: run?.input.mode === "live" ? "live" : "example",
       status: "completed",
       outline,
@@ -157,7 +159,11 @@ export class DeckVersions {
     parentId: string,
     conversationId: string,
     input: { slideIndex: number; question: string; slide?: Slide },
-    external?: { ledger: BudgetLedger; signal: AbortSignal },
+    external?: {
+      ledger: BudgetLedger;
+      signal: AbortSignal;
+      learningIntent?: LearningIntent;
+    },
   ) {
     const parent = this.get(parentId, conversationId);
     if (parent.status !== "completed")
@@ -172,6 +178,7 @@ export class DeckVersions {
       ...structuredClone(parent),
       id: randomUUID(),
       parentId,
+      learningIntent: external?.learningIntent ?? parent.learningIntent,
       restoredFrom: undefined,
       slideIndex: input.slideIndex,
       request: input.question,
@@ -284,6 +291,10 @@ export class DeckVersions {
         data: unknown,
         outputSchema: import("zod").z.ZodType<T>,
       ) => {
+        data = {
+          ...(data as object),
+          learningIntent: version.learningIntent ?? null,
+        };
         const record: DeckVersion["roles"][number] = {
           role,
           instructions,

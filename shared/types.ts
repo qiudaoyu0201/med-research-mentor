@@ -2,6 +2,32 @@ export type Module = "paper" | "method" | "figure" | "ppt";
 export type ExplanationDepth =
   "brief" | "standard" | "deep" | "foundations" | "mechanism";
 export type Mode = "example" | "live";
+export type LearningVerbosity = "brief" | "standard" | "deep";
+export type LearningFocus =
+  | "balanced"
+  | "foundations"
+  | "research-reasoning"
+  | "methods-figures"
+  | "mechanism";
+export type LearningGoal =
+  "understand" | "transfer" | "discuss-research" | "report";
+export interface LearningPreferences {
+  verbosity: LearningVerbosity;
+  focus: LearningFocus;
+}
+export interface LearningIntent extends LearningPreferences {
+  version: "1";
+  goal: LearningGoal;
+  scope: {
+    paperId: string | null;
+    sourceVersion: string | null;
+    sourceIds: string[];
+    selection: string | null;
+    artifactVersion: string | null;
+  };
+  backgroundRef: string;
+  preferenceScope: "turn" | "conversation";
+}
 export type SourceKind = "paper" | "foundation" | "interpretation";
 export interface Source {
   id: string;
@@ -122,6 +148,7 @@ export interface DeckOutline {
   slides: Slide[];
 }
 export interface DeckVersion {
+  learningIntent?: LearningIntent;
   displayAssets?: Record<string, string>;
   displayAssetQuality?: Record<string, "page" | "original" | "legacy">;
   displayName?: string;
@@ -184,9 +211,10 @@ export interface TaskInput {
   groupId?: string;
   missingFoundations?: { id: string; title: string }[];
   workflow?: "direct";
-  checks?: { readability: boolean };
+  checks?: { readability: boolean; reason?: string };
   focusedText?: string;
   depth?: ExplanationDepth;
+  learningIntent?: LearningIntent;
 }
 export type RunStatus =
   | "queued"
@@ -242,6 +270,7 @@ export interface TokenUsage {
   total: number | null;
 }
 export interface Attempt {
+  providerId?: string;
   id: string;
   turnId: string;
   groupId: string | null;
@@ -267,7 +296,7 @@ export interface BudgetState {
   deadline: string;
   attempts: Attempt[];
   revisions: string[];
-  billingMode: "chatgpt";
+  billingMode: "chatgpt" | "api";
   amount: null;
 }
 export type AssistantAction =
@@ -287,6 +316,10 @@ export interface AssistantPlan {
   estimatedCalls: number;
 }
 export interface AssistantMessage {
+  learningIntent?: Partial<LearningPreferences> & {
+    goal?: LearningGoal;
+    preferenceScope?: "turn" | "conversation";
+  };
   slideCount?: number;
   clientMessageId: string;
   question: string;
@@ -306,6 +339,7 @@ export interface AssistantMessage {
   deckEdit?: { versionId: string; slideIndex: number };
 }
 export interface ConversationState {
+  learningPreferences?: LearningPreferences;
   explanationDepth?: ExplanationDepth;
   preferenceRevision?: number;
   mainChat?: boolean;
@@ -364,6 +398,7 @@ export interface AssistantReply {
   deckVersionId?: string;
 }
 export interface AssistantTurn {
+  learningIntent?: LearningIntent;
   id: string;
   conversationId: string;
   message: AssistantMessage;

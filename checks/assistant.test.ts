@@ -81,6 +81,106 @@ const method: AssistantMessage = {
   mode: "live",
 };
 const lesson = { unit: exampleUnits.qpcr, deck: null };
+test("shared intent reaches all roles; foundational and focused core learning cannot disable novice checks", async () => {
+  const h = harness([lesson, novice, review, lesson, novice, review]);
+  const state = await h.conversations.create();
+  await h.conversations.update(state.id, (s) => ({
+    ...s,
+    learningPreferences: { verbosity: "brief", focus: "research-reasoning" },
+  }));
+  const first = await h.assistant.submit(state.id, {
+    ...method,
+    depth: "deep",
+    learningIntent: { verbosity: "brief" },
+    readabilityCheck: false,
+  });
+  await h.assistant.wait(first.id);
+  assert.equal(first.status, "completed", first.error);
+  const run = h.manager.runs.get(first.runId!)!;
+  assert.deepEqual(
+    run.roles.map((r) => r.role),
+    ["teaching", "novice", "grounding"],
+  );
+  for (const role of run.roles)
+    assert.deepEqual((role.input as any).learningIntent, first.learningIntent);
+  const student = run.roles[1].input as any;
+  assert.equal(student.learningIntent.focus, "research-reasoning");
+  assert.equal(student.learningIntent.verbosity, "brief");
+  assert.equal(student.sources, undefined);
+  assert.equal(student.review, undefined);
+  assert.equal(student.previous, undefined);
+  const section = first.reply!.content!.sections[0];
+  const second = await h.assistant.submit(state.id, {
+    ...method,
+    clientMessageId: "foundation-focus",
+    question: "从基础讲，我还是不懂",
+    focus: {
+      runId: run.id,
+      sectionIndex: 0,
+      excerpt: section.text.slice(0, 12),
+    },
+    readabilityCheck: false,
+  });
+  await h.assistant.wait(second.id);
+  assert.equal(second.status, "completed", second.error);
+  assert.equal(second.learningIntent?.focus, "foundations");
+  assert.equal(second.budget.attempts.length, 3);
+  assert.deepEqual(h.conversations.get(state.id).learningPreferences, {
+    verbosity: "brief",
+    focus: "research-reasoning",
+  });
+});
+
+test("future language stores chat preferences while a simple turn preserves them and paper rebinding updates scope", async () => {
+  const h = harness([
+    lesson,
+    novice,
+    review,
+    lesson,
+    novice,
+    review,
+    lesson,
+    novice,
+    review,
+  ]);
+  const state = await h.conversations.create();
+  const persistent = await h.assistant.submit(state.id, {
+    ...method,
+    question: "以后都详细点，重点讲研究思路，PCR 原理是什么？",
+  });
+  await h.assistant.wait(persistent.id);
+  assert.equal(persistent.status, "completed", persistent.error);
+  assert.deepEqual(h.conversations.get(state.id).learningPreferences, {
+    verbosity: "deep",
+    focus: "research-reasoning",
+  });
+  const current = await h.assistant.submit(state.id, {
+    ...method,
+    clientMessageId: "brief-only",
+    question: "这一段简单点解释 PCR",
+  });
+  await h.assistant.wait(current.id);
+  assert.equal(current.status, "completed", current.error);
+  assert.equal(current.learningIntent?.verbosity, "brief");
+  assert.equal(current.learningIntent?.focus, "research-reasoning");
+  assert.equal(
+    h.conversations.get(state.id).learningPreferences?.verbosity,
+    "deep",
+  );
+  const bound = await h.assistant.submit(state.id, {
+    ...method,
+    clientMessageId: "bound",
+    paperId: sample.id,
+  });
+  await h.assistant.wait(bound.id);
+  assert.equal(bound.status, "completed", bound.error);
+  assert.equal(bound.learningIntent?.scope.paperId, sample.id);
+  assert.equal(bound.learningIntent?.scope.sourceVersion, sample.version);
+  assert.deepEqual(
+    bound.learningIntent?.scope.sourceIds,
+    bound.plan?.sourceIds,
+  );
+});
 test("the next explanation carries explicit user feedback without turning teaching into mastery", async () => {
   const h = harness([lesson, novice, review, lesson, novice, review]);
   let state = await h.conversations.create();

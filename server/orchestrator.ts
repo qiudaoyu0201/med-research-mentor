@@ -27,6 +27,7 @@ import { BudgetLedger } from "./budget.ts";
 import { materialPacket, digest, selectionVersion } from "./materials.ts";
 import { foundationCatalog } from "./foundations.ts";
 import type { ResultCache } from "./cache.ts";
+import { legacyPreferences } from "../shared/learning-intent.ts";
 
 export function visibleInput(
   input: TaskInput,
@@ -39,6 +40,7 @@ export function visibleInput(
   return {
     profile,
     question: input.question,
+    learningIntent: input.learningIntent ?? null,
     explanation: unit,
     visibleFigures: sources
       .filter((s) => s.figure)
@@ -276,6 +278,25 @@ export class TaskManager {
       throw new Error("已有学习任务运行中，请先取消或等待完成。");
     this.starting = true;
     try {
+      input = {
+        ...input,
+        learningIntent: input.learningIntent ?? {
+          ...legacyPreferences(input.depth),
+          version: "1",
+          goal: (input.modules ?? [input.module]).includes("ppt")
+            ? "report"
+            : "understand",
+          scope: {
+            paperId: paper.id,
+            sourceVersion: paper.version,
+            sourceIds: input.sourceIds,
+            selection: input.focusedText ?? null,
+            artifactVersion: null,
+          },
+          backgroundRef: input.profileId,
+          preferenceScope: "turn",
+        },
+      };
       if (input.mode === "example" && input.paperId !== "xu-2018")
         throw new Error("上传论文需要实时模式，示例不会替代新论文的回答。");
       const profile = profiles.find((p) => p.id === input.profileId);
@@ -362,6 +383,7 @@ export class TaskManager {
             ? { assistant: (await assistantRules()).version }
             : {}),
           providerSettings: digest(this.provider.settings ?? {}),
+          providerIdentity: this.provider.id ?? this.provider.model,
         },
         this.provider.model,
       );
@@ -515,6 +537,7 @@ export class TaskManager {
             question: run.input.question,
             focusedText: run.input.focusedText ?? null,
             depth: run.input.depth ?? "standard",
+            learningIntent: run.input.learningIntent ?? null,
             previous: run.input.previous ?? null,
             contextSummary: run.input.contextSummary ?? "",
             sources: materialPacket(sources),
@@ -574,6 +597,7 @@ export class TaskManager {
           openQuestions: run.input.openQuestions ?? [],
           focusedText: run.input.focusedText ?? null,
           depth: run.input.depth ?? "standard",
+          learningIntent: run.input.learningIntent ?? null,
         };
         await set("teaching");
         let generated = await call(
@@ -608,6 +632,7 @@ export class TaskManager {
             draft: generated.unit,
             deck: generated.deck,
             feedback,
+            learningIntent: run.input.learningIntent ?? null,
           },
           groundedReviewSchema(sources),
         );
@@ -744,6 +769,7 @@ export class TaskManager {
               deck: generated.deck,
               feedback,
               previousIssues: review.issues,
+              learningIntent: run.input.learningIntent ?? null,
             },
             groundedReviewSchema(sources),
           );

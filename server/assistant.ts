@@ -39,7 +39,12 @@ import {
   attachmentSource,
   type ResearchAttachment,
 } from "../shared/attachments.ts";
-import { requestedDepth } from "./depth.ts";
+import {
+  requestedDepth,
+  requestedPreferences,
+  resolveLearningIntent,
+} from "./depth.ts";
+import { legacyDepth } from "../shared/learning-intent.ts";
 import { validateAnchor } from "../shared/workspace.ts";
 
 const terminal = new Set([
@@ -611,8 +616,15 @@ export class AssistantService {
       state.sourceVersion = paper.version;
       state.profileId = message.profileId ?? state.profileId;
       const depthRequest = requestedDepth(message.question, message.depth);
-      state.explanationDepth =
-        depthRequest ?? state.explanationDepth ?? "standard";
+      const intent = resolveLearningIntent(message, state);
+      turn.learningIntent = intent;
+      if (intent.preferenceScope === "conversation") {
+        state.learningPreferences = {
+          verbosity: intent.verbosity,
+          focus: intent.focus,
+        };
+        state.explanationDepth = legacyDepth(state.learningPreferences);
+      }
       if (!profiles.some((p) => p.id === state.profileId))
         throw new Error("新手画像不存在");
       const pageRequest =
@@ -652,6 +664,9 @@ export class AssistantService {
       if (edit) {
         if (!this.decks) throw new Error("汇报版本服务不可用。");
         const parent = this.decks.get(edit.versionId, state.id);
+        intent.goal = "report";
+        intent.scope.artifactVersion = parent.id;
+        intent.scope.sourceIds = parent.sourceIds;
         if (
           parent.paperId !== paper.id ||
           parent.sourceVersion !== paper.version
@@ -663,7 +678,7 @@ export class AssistantService {
           parent.id,
           state.id,
           { slideIndex: edit.slideIndex, question: message.question },
-          { ledger, signal },
+          { ledger, signal, learningIntent: intent },
         );
         const version = await this.decks.wait(started.id);
         signal.throwIfAborted();
@@ -709,7 +724,8 @@ export class AssistantService {
         !message.module &&
         !message.sourceIds &&
         (/^(为什么|这|那|继续|还是|上一)/.test(message.question) ||
-          Boolean(depthRequest)) &&
+          Boolean(depthRequest) ||
+          Object.keys(requestedPreferences(message)).length > 0) &&
         !/PCR|流式|Figure|图\s*\d|PPT|汇报/i.test(message.question);
       let focusedText: string | undefined;
       let focusedSources: string[] | undefined;
@@ -760,18 +776,40 @@ export class AssistantService {
           message.question,
         ) ||
         (message.module && message.module !== "method");
+      const coreLearning =
+        intent.goal !== "understand" ||
+        intent.focus !== "balanced" ||
+        /PCR|qPCR|流式|测量|原理|机制|归一化|实验单位|统计|设计|迁移|为什么|如何|怎样|排除|专业细节|仍不理解|还是不懂/i.test(
+          message.question,
+        );
+      const backgroundDefinition =
+        /一句话|通俗|简单解释|简短说明/.test(message.question) &&
+        /什么(?:是|叫)|是什么意思|定义|概念|解释(?:一下)?(?:对照(?:组)?|假设|样本|变量|术语)/.test(
+          message.question,
+        );
+      const wordingOnly =
+        Boolean(message.focus) &&
+        !coreLearning &&
+        /换个通俗说法|仅压缩|只.*(?:压缩|润色)|润色已核对/.test(
+          message.question,
+        );
       const direct =
         !legacy &&
         message.mode === "live" &&
         !message.exportRunId &&
         !message.readabilityCheck &&
+        !coreLearning &&
         !explicitFacts &&
         !focusedPaper &&
         !admitted.length &&
         !state.pending &&
-        (Boolean(focusedText) ||
-          /一句话|通俗|简单解释|简短说明/.test(message.question) ||
-          (Boolean(depthRequest) && last?.input.workflow === "direct")) &&
+        (wordingOnly ||
+          backgroundDefinition ||
+          (Boolean(depthRequest) &&
+            /^(?:再|更)?(?:简单[点些]|详细[点些]|简短[点些]|通俗[点些]|展开[点些])[。！？?!]?$/.test(
+              message.question.trim(),
+            ) &&
+            last?.input.workflow === "direct")) &&
         !(message.sourceIds ?? []).some((id) =>
           paper.sources.some((s) => s.id === id && s.kind === "paper"),
         );
@@ -830,6 +868,7 @@ export class AssistantService {
           rules.text,
           {
             question: message.question,
+            learningIntent: intent,
             pending: state.pending ?? null,
             paper: { id: paper.id, title: paper.title, scope: paper.scope },
             sources: paper.sources.map(
@@ -943,6 +982,9 @@ export class AssistantService {
         }
       }
       turn.plan = plan;
+      intent.scope.sourceIds = plan.sourceIds;
+      intent.scope.selection = focusedText ?? intent.scope.selection;
+      if (plan.modules.includes("ppt")) intent.goal = "report";
       if (plan.clarification) {
         turn.status = "clarification";
         state.pending = {
@@ -1007,11 +1049,17 @@ export class AssistantService {
               sourceIds: plan.sourceIds,
               ...(direct ? { workflow: "direct" as const } : {}),
               ...(focusedText ? { focusedText } : {}),
-              depth: state.explanationDepth,
+              depth: legacyDepth(intent),
+              learningIntent: intent,
               checks: {
                 readability:
-                  message.readabilityCheck ??
-                  !(message.focus || admitted.length || depthRequest),
+                  !direct &&
+                  (!wordingOnly || message.readabilityCheck === true),
+                reason: direct
+                  ? "简短独立背景解释，未核验论文事实"
+                  : wordingOnly && message.readabilityCheck !== true
+                    ? "仅改写当前已交付选区，保留来源核验"
+                    : "核心教学按当前目标试读并核验；选区、附件和程度调整不省略检查",
               },
               ...(missingFoundations.length ? { missingFoundations } : {}),
               taughtConcepts: state.taughtConcepts
@@ -1226,6 +1274,7 @@ export class AssistantService {
         ? {
             profileId: current.profileId,
             explanationDepth: current.explanationDepth,
+            learningPreferences: current.learningPreferences,
             preferenceRevision: current.preferenceRevision,
           }
         : {}),

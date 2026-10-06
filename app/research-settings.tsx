@@ -2,6 +2,11 @@ import { useEffect, useRef, useState } from "react";
 import type { ConversationState, Profile } from "../shared/types.ts";
 import { researchApi } from "./research-api.ts";
 import type { ResearchFont, ResearchTheme } from "./research-theme.ts";
+import {
+  focusLabels,
+  verbosityLabels,
+  legacyPreferences,
+} from "../shared/learning-intent.ts";
 export function ResearchSettings({
   conversation,
   onState,
@@ -32,10 +37,15 @@ export function ResearchSettings({
     [model, setModel] = useState<{
       model: string;
       authenticated: boolean;
+      configured?: boolean;
+      note?: string;
       error?: string;
     }>();
   const [error, setError] = useState(""),
     [working, setWorking] = useState(false);
+  const learning =
+    conversation?.learningPreferences ??
+    legacyPreferences(conversation?.explanationDepth);
   useEffect(() => {
     dialog.current?.showModal();
     let closed = false;
@@ -142,18 +152,31 @@ export function ResearchSettings({
         <select
           aria-label="讲解程度"
           disabled={working}
-          value={conversation?.explanationDepth ?? "standard"}
+          value={learning.verbosity}
           onChange={(e) =>
-            void preference({ explanationDepth: e.target.value })
+            void preference({
+              learningPreferences: { verbosity: e.target.value },
+            })
           }
         >
-          {Object.entries({
-            brief: "简单点",
-            standard: "常规讲解",
-            deep: "详细点",
-            foundations: "从基础讲",
-            mechanism: "重点解释机制",
-          }).map(([v, text]) => (
+          {Object.entries(verbosityLabels).map(([v, text]) => (
+            <option key={v} value={v}>
+              {text}
+            </option>
+          ))}
+        </select>
+      </label>
+      <label>
+        学习重点
+        <select
+          aria-label="学习重点"
+          disabled={working}
+          value={learning.focus}
+          onChange={(e) =>
+            void preference({ learningPreferences: { focus: e.target.value } })
+          }
+        >
+          {Object.entries(focusLabels).map(([v, text]) => (
             <option key={v} value={v}>
               {text}
             </option>
@@ -173,7 +196,12 @@ export function ResearchSettings({
       {model && (
         <p role="status">
           {model.model} ·{" "}
-          {model.authenticated ? "已登录" : (model.error ?? "未连接")}
+          {model.authenticated
+            ? "已登录"
+            : model.configured
+              ? "已配置，待实际验证"
+              : (model.error ?? "未连接")}
+          {model.note && <small>{model.note}</small>}
         </p>
       )}
       {error && <p role="alert">{error}</p>}

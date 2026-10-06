@@ -304,7 +304,7 @@ try {
   await page.getByRole("button", { name: "设置", exact: true }).click();
   await Promise.all([
     page.waitForResponse((r) => r.url().endsWith("/preferences") && r.ok()),
-    page.getByLabel("讲解程度", { exact: true }).selectOption("foundations"),
+    page.getByLabel("学习重点", { exact: true }).selectOption("foundations"),
   ]);
   assert.equal(
     (

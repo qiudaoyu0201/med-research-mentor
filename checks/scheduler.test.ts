@@ -99,7 +99,7 @@ function harness() {
   const send = (id: string, label: string) =>
     assistant.submit(id, {
       clientMessageId: label,
-      question: `一句话解释${label}`,
+      question: `一句话解释概念${label}`,
       mode: "live",
     });
   async function chat(id: string) {
@@ -140,11 +140,11 @@ test("two chats run, a third waits and can cancel without a call; cancellation r
   assert.equal(tc.budget.attempts.length, 0);
   await h.assistant.cancel(tc.id);
   assert.equal(tc.status, "cancelled");
-  assert.equal(h.inputs.has("一句话解释C"), false);
+  assert.equal(h.inputs.has("一句话解释概念C"), false);
   await h.assistant.cancel(ta.id);
-  await until(() => h.inputs.has("一句话解释D"));
-  h.releases.get("一句话解释B")!();
-  h.releases.get("一句话解释D")!();
+  await until(() => h.inputs.has("一句话解释概念D"));
+  h.releases.get("一句话解释概念B")!();
+  h.releases.get("一句话解释概念D")!();
   await Promise.all([h.assistant.wait(tb.id), h.assistant.wait(td.id)]);
   assert.equal(tb.status, "completed", tb.error);
   assert.equal(td.status, "completed", td.error);
@@ -168,14 +168,14 @@ test("same chat runs in order and inherits the completed answer without losing q
   }));
   assert.equal(second.status, "queued");
   assert.equal(third.status, "queued");
-  h.releases.get("一句话解释first")!();
+  h.releases.get("一句话解释概念first")!();
   await h.assistant.wait(first.id);
-  await until(() => h.inputs.has("一句话解释second"));
-  assert.match(h.inputs.get("一句话解释second").contextSummary, /first/);
-  h.releases.get("一句话解释second")!();
+  await until(() => h.inputs.has("一句话解释概念second"));
+  assert.match(h.inputs.get("一句话解释概念second").contextSummary, /first/);
+  h.releases.get("一句话解释概念second")!();
   await h.assistant.wait(second.id);
-  await until(() => h.inputs.has("一句话解释third"));
-  h.releases.get("一句话解释third")!();
+  await until(() => h.inputs.has("一句话解释概念third"));
+  h.releases.get("一句话解释概念third")!();
   await h.assistant.wait(third.id);
   const state = h.conversations.get(a.id);
   assert.deepEqual(state.recentTurnIds, [first.id, second.id, third.id]);
@@ -191,7 +191,7 @@ test("queued source versions are immutable and reject changed material before an
     second = await h.send(a.id, "second");
   await until(() => h.inputs.size === 1);
   h.papers.get("a")!.version = "changed";
-  h.releases.get("一句话解释first")!();
+  h.releases.get("一句话解释概念first")!();
   await h.assistant.wait(first.id);
   await h.assistant.wait(second.id);
   assert.equal(second.status, "failed");
@@ -201,7 +201,7 @@ test("queued source versions are immutable and reject changed material before an
     h.assistant.submit(a.id, {
       clientMessageId: "wrong",
       mode: "live",
-      question: "一句话解释",
+      question: "一句话解释概念",
       paperId: "b",
     }),
     /不匹配/,
@@ -225,15 +225,15 @@ test("PPT edits share the two slots and serialize with the owning paper chat", a
   assert.equal(edit.status, "queued");
   assert.equal(h.inputs.has("deck-review"), false);
   const tc = await h.send(c.id, "C");
-  h.releases.get("一句话解释A")!();
+  h.releases.get("一句话解释概念A")!();
   await h.assistant.wait(ta.id);
   await until(() => h.inputs.has("deck-review"));
   assert.equal(tc.status, "queued");
   await h.decks.cancel(edit.id);
   assert.equal(h.decks.get(edit.id).status, "cancelled");
-  await until(() => h.inputs.has("一句话解释C"));
-  h.releases.get("一句话解释B")!();
-  h.releases.get("一句话解释C")!();
+  await until(() => h.inputs.has("一句话解释概念C"));
+  h.releases.get("一句话解释概念B")!();
+  h.releases.get("一句话解释概念C")!();
   await Promise.all([h.assistant.wait(tb.id), h.assistant.wait(tc.id)]);
   assert.equal(h.max(), 2);
 });
@@ -336,7 +336,7 @@ test("PDF parsing uses a separate single slot while model tasks remain available
   await until(() => running === 1);
   release();
   await second;
-  h.releases.get("一句话解释A")!();
+  h.releases.get("一句话解释概念A")!();
   await h.assistant.wait(turn.id);
   assert.equal(max, 1);
   assert.equal(turn.status, "completed", turn.error);
