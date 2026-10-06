@@ -618,7 +618,6 @@ export class DeckVersions {
     targetId: string,
     conversationId: string,
   ) {
-    if (this.busy) throw new Error("请先停止或等待修改完成。");
     const current = this.get(currentId, conversationId),
       target = this.get(targetId, conversationId);
     const paper = await this.sources(target);

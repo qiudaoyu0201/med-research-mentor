@@ -63,6 +63,10 @@ export function ResearchPpt({
   const [editing, setEditing] = useState(false);
   const [withSpeech, setWithSpeech] = useState(false),
     [speechDraft, setSpeechDraft] = useState("");
+  const [cancelling, setCancelling] = useState<string[]>([]),
+    [cancelledTurns, setCancelledTurns] = useState<string[]>([]),
+    [notice, setNotice] = useState("");
+  const cancelLocks = useRef(new Set<string>());
   const actionLock = useRef(false);
   useEffect(() => {
     try {
@@ -83,6 +87,7 @@ export function ResearchPpt({
   const generating = turns.filter(
     (t) =>
       !finished(t) &&
+      !cancelledTurns.includes(t.id) &&
       (t.message.module === "ppt" || t.plan?.modules.includes("ppt")),
   );
   const changed =
@@ -212,6 +217,7 @@ export function ResearchPpt({
     actionLock.current = true;
     setBusy(true);
     setError("");
+    setNotice("");
     try {
       await task();
     } catch (err) {
@@ -288,6 +294,36 @@ export function ResearchPpt({
       previousStatus.current.set(version.id, version.status);
     });
   }
+  async function cancel(id: string, kind: "turn" | "version") {
+    if (cancelLocks.current.has(id)) return;
+    cancelLocks.current.add(id);
+    setCancelling((old) => [...old, id]);
+    setError("");
+    setNotice("");
+    try {
+      const result = await researchApi<{
+        turn?: AssistantTurn;
+        version?: DeckVersion;
+      }>(
+        `/api/${kind === "turn" ? "turns" : "deck-versions"}/${id}/cancel`,
+        {},
+      );
+      if (!alive.current) return;
+      if (result.version)
+        setVersions((old) =>
+          old.map((v) => (v.id === id ? result.version! : v)),
+        );
+      if (result.turn && finished(result.turn))
+        setCancelledTurns((old) => [...old, id]);
+      setNotice("任务已结束，已保存内容和未保存编辑保留，可以继续其他操作。");
+    } catch (err) {
+      if (alive.current) setError((err as Error).message);
+    } finally {
+      cancelLocks.current.delete(id);
+      if (alive.current)
+        setCancelling((old) => old.filter((value) => value !== id));
+    }
+  }
   return (
     <section className="rw-ppt" aria-label="PPT 工作区">
       <header className="rw-ppt-header">
@@ -360,13 +396,10 @@ export function ResearchPpt({
             <p role="status" key={t.id}>
               {statusLabel[t.status]} · {t.message.question.slice(0, 55)}{" "}
               <button
-                onClick={() =>
-                  void researchApi(`/api/turns/${t.id}/cancel`, {}).catch(
-                    (err) => setError(err.message),
-                  )
-                }
+                disabled={cancelling.includes(t.id)}
+                onClick={() => void cancel(t.id, "turn")}
               >
-                {t.status === "queued" ? "取消等待" : "停止生成"}
+                {cancelling.includes(t.id) ? "正在取消…" : "取消生成"}
               </button>
             </p>
           ))}
@@ -378,17 +411,18 @@ export function ResearchPpt({
                   : "正在生成或核对演讲稿"
                 : `${v.status === "queued" ? "等待修改" : "正在修改并核对"} · 第 ${(v.slideIndex ?? 0) + 1} 页`}{" "}
               <button
-                onClick={() =>
-                  void researchApi(
-                    `/api/deck-versions/${v.id}/cancel`,
-                    {},
-                  ).catch((err) => setError(err.message))
-                }
+                disabled={cancelling.includes(v.id)}
+                onClick={() => void cancel(v.id, "version")}
               >
-                {v.operation === "speech" ? "停止演讲稿任务" : "停止修改"}
+                {cancelling.includes(v.id)
+                  ? "正在取消…"
+                  : v.operation === "speech"
+                    ? "取消演讲稿任务"
+                    : "取消修改"}
               </button>
             </p>
           ))}
+          {notice && <p role="status">{notice}</p>}
           {error && (
             <p className="rw-error" role="alert">
               {error}
@@ -652,25 +686,47 @@ export function ResearchPpt({
                           : "补写演讲稿"}
                       </button>
                       {speechChanged && (
-                        <button
-                          disabled={
-                            busy ||
-                            active.length > 0 ||
-                            !speechDraft.trim() ||
-                            Boolean(changed)
-                          }
-                          onClick={() => void speech(true)}
-                        >
-                          保存演讲稿
-                        </button>
+                        <>
+                          <button
+                            disabled={
+                              busy ||
+                              active.length > 0 ||
+                              !speechDraft.trim() ||
+                              Boolean(changed)
+                            }
+                            onClick={() => void speech(true)}
+                          >
+                            保存演讲稿
+                          </button>
+                          <button
+                            onClick={() => {
+                              setSpeechDraft(
+                                current.outline.speechScript ?? "",
+                              );
+                              localStorage.removeItem(
+                                `research-speech-draft:${current.id}`,
+                              );
+                            }}
+                          >
+                            放弃演讲稿修改
+                          </button>
+                        </>
                       )}
                       {current.outline.speechScript && !speechChanged && (
-                        <a
-                          href={`/api/deck-versions/${current.id}/speech?conversationId=${current.conversationId}`}
-                          download
-                        >
-                          下载演讲稿
-                        </a>
+                        <>
+                          <a
+                            href={`/api/deck-versions/${current.id}/speech?conversationId=${current.conversationId}`}
+                            download
+                          >
+                            导出演讲稿（Markdown）
+                          </a>
+                          <a
+                            href={`/api/deck-versions/${current.id}/speech?conversationId=${current.conversationId}&format=txt`}
+                            download
+                          >
+                            导出演讲稿（TXT）
+                          </a>
+                        </>
                       )}
                     </div>
                   </details>

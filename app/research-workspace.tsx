@@ -1082,9 +1082,20 @@ export function ResearchWorkspace() {
                   ).catch((err) => setError(err.message))
                 }
                 onCancel={(turn) =>
-                  void researchApi(`/api/turns/${turn.id}/cancel`, {}).catch(
-                    (err) => setError(err.message),
+                  researchApi<{ turn?: ResearchTurn }>(
+                    `/api/turns/${turn.id}/cancel`,
+                    {},
                   )
+                    .then((result) => {
+                      if (result.turn)
+                        setTurns((old) =>
+                          old.map((value) =>
+                            value.id === turn.id ? result.turn! : value,
+                          ),
+                        );
+                      setNotice("本次回答已结束，可以继续提问。");
+                    })
+                    .catch((err) => setError(err.message))
                 }
                 onRetry={(turn) => {
                   draft(turn.message.question);

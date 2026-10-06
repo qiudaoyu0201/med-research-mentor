@@ -573,7 +573,7 @@ app.get("/api/turns/:id", (req, res) => {
 });
 app.post("/api/turns/:id/cancel", async (req, res) => {
   await assistant.cancel(req.params.id);
-  res.json({ ok: true });
+  res.json({ ok: true, turn: assistant.turns.get(req.params.id) });
 });
 app.get("/api/bootstrap", async (_req, res) =>
   res.json({
@@ -959,7 +959,7 @@ app.post("/api/deck-versions/:id/edit", async (req, res) => {
 });
 app.post("/api/deck-versions/:id/cancel", async (req, res) => {
   await deckVersions.cancel(req.params.id);
-  res.json({ ok: true });
+  res.json({ ok: true, version: deckVersions.get(req.params.id) });
 });
 app.post("/api/deck-versions/:id/speech", async (req, res) => {
   if (replayController) throw new Error("开发回放运行中，请先取消或等待。");
@@ -978,25 +978,24 @@ app.post("/api/deck-versions/:id/speech", async (req, res) => {
     .parse(req.body);
   assistant.conversations.get(body.conversationId);
   readingGuides.cancelAll();
-  res
-    .status(202)
-    .json(
-      await deckVersions.start(req.params.id, body.conversationId, {
-        ...body,
-        operation: "speech",
-      }),
-    );
+  res.status(202).json(
+    await deckVersions.start(req.params.id, body.conversationId, {
+      ...body,
+      operation: "speech",
+    }),
+  );
 });
 app.get("/api/deck-versions/:id/speech", async (req, res) => {
+  const format = z.enum(["md", "txt"]).parse(req.query.format ?? "md");
   const text = await deckVersions.speech(
     req.params.id,
     safeId(String(req.query.conversationId)),
   );
   res.setHeader(
     "Content-Disposition",
-    'attachment; filename="speech-script.md"',
+    `attachment; filename="speech-script.${format}"`,
   );
-  res.type("text/markdown").send(text);
+  res.type(format === "txt" ? "text/plain" : "text/markdown").send(text);
 });
 app.post("/api/deck-versions/:id/restore", async (req, res) => {
   const body = z
@@ -1015,19 +1014,19 @@ app.post("/api/deck-versions/:id/restore", async (req, res) => {
 });
 app.post("/api/deck-versions/:id/export", async (req, res) => {
   const body = z.object({ conversationId: z.string() }).parse(req.body);
-  recordsIdle(body.conversationId);
-  const state = assistant.conversations.get(body.conversationId);
+  assistant.conversations.get(body.conversationId);
   const artifact = await deckVersions.export(
     req.params.id,
     body.conversationId,
   );
-  state.latestDeckVersionId = req.params.id;
-  state.artifacts.push({
-    id: artifact.id,
-    kind: "pptx",
-    sourceHash: deckVersions.get(req.params.id).sourceHash,
+  await assistant.conversations.update(body.conversationId, (state) => {
+    state.artifacts.push({
+      id: artifact.id,
+      kind: "pptx",
+      sourceHash: deckVersions.get(req.params.id).sourceHash,
+    });
+    return state;
   });
-  await assistant.conversations.put(state, state.version);
   res.json(artifact);
 });
 app.post("/api/deck-versions/:id/select", async (req, res) => {

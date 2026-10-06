@@ -78,6 +78,14 @@ try {
   report.assertions.push(
     "无 PDF 一次点击创建并提交生成；非必填设置默认折叠，展开后可保存；并列入口可达",
   );
+  await page
+    .getByLabel("对象、资源和限制", { exact: true })
+    .fill("这次不保存的条件");
+  await page.getByRole("button", { name: "取消条件修改", exact: true }).click();
+  assert.equal(
+    await page.getByLabel("对象、资源和限制", { exact: true }).inputValue(),
+    p.topic.conditions,
+  );
   const seed = await api(`/api/research-plans/${p.id}/versions`, {
     expectedVersion: null,
     expectedTopicVersion: p.topic.version,
@@ -148,6 +156,49 @@ try {
   );
   assert.equal((await api(`/api/research-plans/${p.id}`)).versions.length, 3);
   report.assertions.push("真实 API 保存、精确版本导出、恢复追加版本与核对失效");
+  await page.getByLabel("章节 1 内容", { exact: true }).fill("这次放弃的改稿");
+  await page
+    .getByRole("button", { name: "放弃未保存修改", exact: true })
+    .click();
+  assert.equal(
+    await page.getByLabel("章节 1 内容", { exact: true }).inputValue(),
+    "用户原稿，拟比较测量对象。",
+  );
+  const queued = {
+    id: "cancel-plan-fixture",
+    planId: p.id,
+    status: "queued",
+    phase: "generation",
+    capability: { model: "fixed-fixture", scope: "工程夹具，不调用模型" },
+    budget: { attempts: [], limit: 2 },
+  };
+  let fixtureJobs: any[] = [queued];
+  await page.route(`**/api/research-plans/${p.id}/jobs`, (route) =>
+    route.request().method() === "GET"
+      ? route.fulfill({ json: fixtureJobs })
+      : route.continue(),
+  );
+  await page.route(
+    "**/api/research-plan-jobs/cancel-plan-fixture/cancel",
+    (route) => {
+      fixtureJobs = [{ ...queued, status: "cancelled" }];
+      return route.fulfill({ json: fixtureJobs[0] });
+    },
+  );
+  await page.getByRole("button", { name: "取消方案任务", exact: true }).click();
+  await page
+    .getByRole("button", { name: "取消方案任务", exact: true })
+    .waitFor({ state: "hidden" });
+  assert.equal(
+    await page
+      .getByRole("button", { name: "按建议改稿并核对", exact: true })
+      .isEnabled(),
+    true,
+  );
+  await page.unroute(`**/api/research-plans/${p.id}/jobs`);
+  report.assertions.push(
+    "未保存条件和改稿可放弃；方案任务取消后原稿保留，下一次生成入口恢复",
+  );
   await page
     .getByLabel("方案本轮建议", { exact: true })
     .fill("优先设计理由，不扩写背景");

@@ -195,15 +195,15 @@ try {
   );
   await page.getByRole("button", { name: "返回讨论", exact: true }).click();
   await page.getByRole("button", { name: "发送 ↑", exact: true }).click();
-  await page.getByRole("button", { name: "停止回答", exact: true }).waitFor();
+  await page.getByRole("button", { name: "取消回答", exact: true }).waitFor();
   assert.equal(payload.paperId, imported.id);
   assert.equal(payload.sourceAnchor.sourceVersion, imported.version);
   assert.ok(imported.sources[0].text.includes(payload.sourceAnchor.excerpt));
   assert.equal(payload.sourceAnchor.excerpt.length, 70);
   assert.equal(payload.focus, undefined);
   assert.equal(payload.module, undefined);
-  await page.getByRole("button", { name: "停止回答", exact: true }).click();
-  await page.getByText("已停止", { exact: true }).waitFor();
+  await page.getByRole("button", { name: "取消回答", exact: true }).click();
+  await page.getByText("已取消", { exact: true }).waitFor();
   await page.unroute("**/api/conversations/*/messages");
   await page.unroute("**/api/conversations/*/turns");
   report.assertions.push(

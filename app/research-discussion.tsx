@@ -34,7 +34,7 @@ export const statusLabel: Record<string, string> = {
   rechecking: "复核修改",
   completed: "已完成",
   failed: "请求失败",
-  cancelled: "已停止",
+  cancelled: "已取消",
   interrupted: "请求已中断",
   clarification: "需要补充信息",
 };
@@ -115,7 +115,7 @@ export function ResearchDiscussion({
     kind: "favorite" | "feedback",
     feedback?: "confused" | "understood",
   ) => void;
-  onCancel: (turn: ResearchTurn) => void;
+  onCancel: (turn: ResearchTurn) => Promise<unknown>;
   onAttachmentRetry: (turn: ResearchTurn, id: string, purpose?: string) => void;
   onRetry: (turn: ResearchTurn) => void;
   savedIds: string[];
@@ -128,6 +128,19 @@ export function ResearchDiscussion({
     text: string;
   }>();
   const messages = useRef<HTMLDivElement>(null);
+  const [cancelling, setCancelling] = useState<string[]>([]);
+  const cancelLocks = useRef(new Set<string>());
+  async function cancel(turn: ResearchTurn) {
+    if (cancelLocks.current.has(turn.id)) return;
+    cancelLocks.current.add(turn.id);
+    setCancelling((old) => [...old, turn.id]);
+    try {
+      await onCancel(turn);
+    } finally {
+      cancelLocks.current.delete(turn.id);
+      setCancelling((old) => old.filter((id) => id !== turn.id));
+    }
+  }
   const scrollKey = `research-chat-scroll:${paper?.id ?? conversationId ?? "idea"}`;
   useEffect(() => {
     setSelectedSentence(undefined);
@@ -352,8 +365,15 @@ export function ResearchDiscussion({
                   </small>
                 )}
                 {!finished(turn) && (
-                  <button onClick={() => onCancel(turn)}>
-                    {turn.status === "queued" ? "取消等待" : "停止回答"}
+                  <button
+                    disabled={cancelling.includes(turn.id)}
+                    onClick={() => void cancel(turn)}
+                  >
+                    {cancelling.includes(turn.id)
+                      ? "正在取消…"
+                      : turn.status === "queued"
+                        ? "取消等待"
+                        : "取消回答"}
                   </button>
                 )}
                 {[

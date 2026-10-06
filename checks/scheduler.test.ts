@@ -6,6 +6,8 @@ import { TaskManager } from "../server/orchestrator.ts";
 import { DeckVersions } from "../server/deck-versions.ts";
 import { PaperImports } from "../server/paper-imports.ts";
 import { sample } from "../examples/bundle.ts";
+import { digest } from "../server/materials.ts";
+import { withFoundationSources } from "../server/foundations.ts";
 import type { Provider } from "../server/provider.ts";
 import type { PaperBundle } from "../shared/types.ts";
 import { save, read, list } from "../server/storage.ts";
@@ -236,6 +238,52 @@ test("PPT edits share the two slots and serialize with the owning paper chat", a
   h.releases.get("一句话解释概念C")!();
   await Promise.all([h.assistant.wait(tb.id), h.assistant.wait(tc.id)]);
   assert.equal(h.max(), 2);
+});
+
+test("cancel a queued speech job without a call; saved deck operations remain available during other paper edits", async () => {
+  const h = harness(),
+    owner = await h.chat(sample.id),
+    other = await h.chat("other-paper");
+  const base = await h.decks.seed(owner.id, sample.id);
+  const otherBase = {
+    ...structuredClone(base),
+    id: "other-saved-deck",
+    conversationId: other.id,
+    paperId: "other-paper",
+    sourceHash: digest(
+      withFoundationSources(h.papers.get("other-paper")!).sources.filter((s) =>
+        base.sourceIds.includes(s.id),
+      ),
+    ),
+  };
+  h.decks.versions.set(otherBase.id, otherBase);
+  const answer = await h.send(owner.id, "owner-busy");
+  await until(() => h.inputs.has("一句话解释概念owner-busy"));
+  const queued = await h.decks.start(base.id, owner.id, {
+    operation: "speech",
+    question: "补写演讲稿",
+  });
+  assert.equal(queued.status, "queued");
+  await h.decks.cancel(queued.id);
+  assert.equal(h.decks.get(queued.id).status, "cancelled");
+  assert.equal(h.decks.get(queued.id).budget?.attempts.length, 0);
+  const otherEdit = await h.decks.start(otherBase.id, other.id, {
+    slideIndex: 0,
+    question: "保存页面",
+    slide: otherBase.outline.slides[0],
+  });
+  await until(() => h.inputs.has("deck-review"));
+  assert.equal(h.decks.busy, true);
+  const restored = await h.decks.restoreVersion(base.id, base.id, owner.id);
+  assert.equal(restored.status, "completed");
+  assert.deepEqual(restored.outline, base.outline);
+  await h.assistant.cancel(answer.id);
+  await h.decks.cancel(otherEdit.id);
+  const next = await h.send(owner.id, "after-cancel");
+  await until(() => h.inputs.has("一句话解释概念after-cancel"));
+  h.releases.get("一句话解释概念after-cancel")!();
+  await h.assistant.wait(next.id);
+  assert.equal(next.status, "completed", next.error);
 });
 
 test("main chat migrates the newest historical discussion once and remains stable after other histories are used", async () => {

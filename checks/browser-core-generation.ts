@@ -28,6 +28,9 @@ try {
   let versions = [seed],
     message: any,
     speechBody: any;
+  let turns: any[] = [],
+    speechCancel = false,
+    cancelGeneration = false;
   const speechText =
     "# 开场\n介绍研究问题。\n\n# 第 1 页\n解释问题与依据。\n\n# 转场\n接下来讨论方法。\n\n# 结尾\n谢谢，欢迎讨论。";
   await page.route("**/api/deck-versions?*", (route) =>
@@ -39,10 +42,22 @@ try {
     }),
   );
   await page.route("**/api/conversations/*/turns", (route) =>
-    route.fulfill({ json: [] }),
+    route.fulfill({ json: turns }),
   );
   await page.route("**/api/conversations/*/messages", (route) => {
     message = route.request().postDataJSON();
+    if (cancelGeneration) {
+      const turn = {
+        id: "queued-ppt-fixture",
+        conversationId: chat.id,
+        status: "queued",
+        message,
+        budget: { attempts: [] },
+        createdAt: new Date().toISOString(),
+      };
+      turns = [turn];
+      return route.fulfill({ json: turn });
+    }
     return route.fulfill({
       json: {
         id: "fixture-ppt-message",
@@ -76,12 +91,30 @@ try {
       },
     };
     versions = [...versions, child];
-    setTimeout(() => {
-      versions = versions.map((v) =>
-        v.id === child.id ? { ...v, status: "completed" } : v,
-      );
-    }, 250);
+    if (!speechCancel)
+      setTimeout(() => {
+        versions = versions.map((v) =>
+          v.id === child.id ? { ...v, status: "completed" } : v,
+        );
+      }, 250);
     return route.fulfill({ json: child });
+  });
+  await page.route("**/api/deck-versions/*/cancel", (route) => {
+    const id = route.request().url().split("/").at(-2);
+    versions = versions.map((version) =>
+      version.id === id ? { ...version, status: "cancelled" } : version,
+    );
+    return route.fulfill({
+      json: {
+        ok: true,
+        version: versions.find((version) => version.id === id),
+      },
+    });
+  });
+  await page.route("**/api/turns/*/cancel", (route) => {
+    const turn = { ...turns[0], status: "cancelled" };
+    turns = [turn];
+    return route.fulfill({ json: { ok: true, turn } });
   });
   await page.route("**/api/deck-versions/*/speech?*", (route) =>
     route.fulfill({
@@ -160,11 +193,14 @@ try {
     false,
   );
   await page.getByRole("button", { name: "保存演讲稿", exact: true }).click();
-  await page.locator('a[href*="/speech?"]').waitFor({ state: "attached" });
+  await page
+    .locator('a[href*="/speech?"]')
+    .first()
+    .waitFor({ state: "attached" });
   await page.getByText("完整演讲稿", { exact: true }).click();
   assert.equal(speechBody.speechScript, edited);
   const url = await page
-    .getByRole("link", { name: "下载演讲稿", exact: true })
+    .getByRole("link", { name: "导出演讲稿（Markdown）", exact: true })
     .getAttribute("href");
   assert.equal(
     await page.evaluate(async (href) => (await fetch(href!)).text(), url),
@@ -172,6 +208,64 @@ try {
   );
   report.assertions.push(
     "已有 PPT 补稿、编辑草稿刷新恢复、未保存时禁止覆盖、保存和独立下载路径可用；模型响应为固定夹具",
+  );
+  const txtUrl = await page
+    .getByRole("link", { name: "导出演讲稿（TXT）", exact: true })
+    .getAttribute("href");
+  assert.ok(txtUrl?.includes("format=txt"));
+  await page
+    .getByLabel("完整演讲稿正文", { exact: true })
+    .fill(edited + "\n不再保留的修改");
+  await page
+    .getByRole("button", { name: "放弃演讲稿修改", exact: true })
+    .click();
+  assert.equal(
+    await page.getByLabel("完整演讲稿正文", { exact: true }).inputValue(),
+    edited,
+  );
+  assert.equal(
+    await page
+      .getByRole("button", { name: "重新生成演讲稿", exact: true })
+      .isEnabled(),
+    true,
+  );
+  speechCancel = true;
+  await page
+    .getByRole("button", { name: "重新生成演讲稿", exact: true })
+    .click();
+  await page
+    .getByRole("button", { name: "取消演讲稿任务", exact: true })
+    .click();
+  await page
+    .getByRole("button", { name: "取消演讲稿任务", exact: true })
+    .waitFor({ state: "hidden" });
+  assert.equal(versions.at(-1).status, "cancelled");
+  assert.equal(
+    await page.getByLabel("完整演讲稿正文", { exact: true }).inputValue(),
+    edited,
+  );
+  assert.equal(
+    await page
+      .getByRole("button", { name: "重新生成演讲稿", exact: true })
+      .isEnabled(),
+    true,
+  );
+  cancelGeneration = true;
+  await page.getByText("生成新汇报", { exact: true }).click();
+  await page.getByRole("button", { name: "生成汇报", exact: true }).click();
+  await page.getByRole("button", { name: "取消生成", exact: true }).click();
+  await page
+    .getByRole("button", { name: "取消生成", exact: true })
+    .waitFor({ state: "hidden" });
+  assert.equal(turns[0].status, "cancelled");
+  assert.equal(
+    await page
+      .getByRole("button", { name: "生成汇报", exact: true })
+      .isEnabled(),
+    true,
+  );
+  report.assertions.push(
+    "排队生成与演讲稿任务可取消；取消后原稿保留、生成按钮恢复；放弃改稿可解除未保存阻塞，TXT/Markdown 导出入口可达",
   );
   for (const theme of ["light", "dark"] as const) {
     await page.emulateMedia({ colorScheme: theme, reducedMotion: "reduce" });

@@ -18,7 +18,7 @@ const statusLabels: Record<PlanJob["status"], string> = {
   reviewing: "草稿已保存，正在核对",
   completed: "本次任务完成",
   failed: "任务失败，已有草稿保留",
-  cancelled: "已停止",
+  cancelled: "已取消，保存内容保留",
   interrupted: "服务中断，未自动重发",
   conflict: "条件或版本变化，结果保留为候选",
 };
@@ -97,6 +97,8 @@ export function ResearchPlanPanel({
     undefined,
   );
   const actionLock = useRef(false);
+  const cancelLock = useRef(false);
+  const [cancelling, setCancelling] = useState(false);
   const active = jobs.find((j) => !planJobDone(j));
   const latestJob = jobs.at(-1);
   const current = plan?.versions.find((v) => v.id === plan.currentVersion);
@@ -617,6 +619,16 @@ export function ResearchPlanPanel({
           >
             {plan ? "保存课题条件" : "生成方案"}
           </button>
+          {plan && topicChanged && (
+            <button
+              onClick={() => {
+                updateTopic(topicFrom(plan));
+                setError("");
+              }}
+            >
+              取消条件修改
+            </button>
+          )}
         </details>
         {plan && (
           <>
@@ -705,20 +717,33 @@ export function ResearchPlanPanel({
                 )}
                 {active && (
                   <button
-                    disabled={working}
+                    disabled={cancelling}
                     onClick={() =>
-                      void action(async () => {
-                        const j = await researchApi<PlanJob>(
-                          `/api/research-plan-jobs/${active.id}/cancel`,
-                          {},
-                        );
-                        setJobs((old) =>
-                          old.map((x) => (x.id === j.id ? j : x)),
-                        );
-                      })
+                      void (async () => {
+                        if (cancelLock.current) return;
+                        cancelLock.current = true;
+                        setCancelling(true);
+                        try {
+                          const j = await researchApi<PlanJob>(
+                            `/api/research-plan-jobs/${active.id}/cancel`,
+                            {},
+                          );
+                          setJobs((old) =>
+                            old.map((x) => (x.id === j.id ? j : x)),
+                          );
+                          setNotice(
+                            "已取消本次任务，保存内容和手稿保留，可以继续其他操作。",
+                          );
+                        } catch (e) {
+                          setError((e as Error).message);
+                        } finally {
+                          cancelLock.current = false;
+                          setCancelling(false);
+                        }
+                      })()
                     }
                   >
-                    停止方案任务
+                    {cancelling ? "正在取消…" : "取消方案任务"}
                   </button>
                 )}
               </div>
@@ -1017,6 +1042,34 @@ export function ResearchPlanPanel({
                   >
                     保存手动修改
                   </button>
+                  {dirty && (
+                    <button
+                      onClick={() => {
+                        const value = current
+                          ? {
+                              version: current.id,
+                              content: structuredClone(current.content),
+                            }
+                          : undefined;
+                        setDraft(value);
+                        draftRef.current = value;
+                        if (selected) {
+                          if (value)
+                            localWrite(
+                              `research-plan-draft:${selected}`,
+                              value,
+                            );
+                          else
+                            localStorage.removeItem(
+                              `research-plan-draft:${selected}`,
+                            );
+                        }
+                        setError("");
+                      }}
+                    >
+                      放弃未保存修改
+                    </button>
+                  )}
                 </div>
               </>
             )}

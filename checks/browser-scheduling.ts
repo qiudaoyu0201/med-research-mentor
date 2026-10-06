@@ -104,7 +104,7 @@ try {
     assert.ok(turn);
     turn.status = "cancelled";
     drain();
-    await route.fulfill({ json: { ok: true } });
+    await route.fulfill({ json: { ok: true, turn } });
   });
   await page.goto(base);
   async function select(index: number) {
@@ -131,7 +131,7 @@ try {
   }
   await select(0);
   await send("A 的第一个问题");
-  await page.getByRole("button", { name: "停止回答", exact: true }).waitFor();
+  await page.getByRole("button", { name: "取消回答", exact: true }).waitFor();
   assert.equal(
     await page.getByRole("button", { name: "开始新讨论", exact: true }).count(),
     0,
@@ -142,13 +142,13 @@ try {
   await select(1);
   assert.equal(await page.getByLabel("向科研助手提问").inputValue(), "");
   await send("B 的问题");
-  await page.getByRole("button", { name: "停止回答", exact: true }).waitFor();
+  await page.getByRole("button", { name: "取消回答", exact: true }).waitFor();
   await select(2);
   await send("C 的问题");
   await page.getByRole("button", { name: "取消等待", exact: true }).waitFor();
   assert.equal(turns.filter((t) => t.status === "running").length, 2);
   await page.getByRole("button", { name: "取消等待", exact: true }).click();
-  await page.getByText("已停止", { exact: true }).waitFor();
+  await page.getByText("已取消", { exact: true }).waitFor();
   await select(0);
   assert.equal(
     await page.getByLabel("向科研助手提问").inputValue(),
