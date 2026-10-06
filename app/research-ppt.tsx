@@ -63,6 +63,7 @@ export function ResearchPpt({
   const [editing, setEditing] = useState(false);
   const [withSpeech, setWithSpeech] = useState(false),
     [speechDraft, setSpeechDraft] = useState("");
+  const [speechEditing, setSpeechEditing] = useState(false);
   const [cancelling, setCancelling] = useState<string[]>([]),
     [cancelledTurns, setCancelledTurns] = useState<string[]>([]),
     [notice, setNotice] = useState("");
@@ -96,6 +97,7 @@ export function ResearchPpt({
     JSON.stringify(draft) !== JSON.stringify(current.outline.slides[page]);
   const speechChanged = speechDraft !== (current?.outline.speechScript ?? "");
   useEffect(() => {
+    setSpeechEditing(false);
     try {
       setSpeechDraft(
         localStorage.getItem(`research-speech-draft:${current?.id}`) ??
@@ -656,25 +658,38 @@ export function ResearchPpt({
                       根据已保存的 PPT
                       页面生成，包含开场、逐页讲述、转场和结尾。
                     </p>
-                    {(current.outline.speechScript || speechDraft) && (
-                      <label>
-                        演讲稿正文
-                        <textarea
-                          aria-label="完整演讲稿正文"
-                          rows={12}
-                          maxLength={24000}
-                          value={speechDraft}
-                          onChange={(e) => {
-                            setSpeechDraft(e.target.value);
-                            localStorage.setItem(
-                              `research-speech-draft:${current.id}`,
-                              e.target.value,
-                            );
-                          }}
-                        />
-                      </label>
-                    )}
+                    {(current.outline.speechScript || speechDraft) &&
+                      !speechEditing && (
+                        <div aria-label="完整演讲稿预览">
+                          <p className="rw-ppt-notes">{speechDraft}</p>
+                          {speechChanged && <small>正在预览未保存修改。</small>}
+                        </div>
+                      )}
+                    {(current.outline.speechScript || speechDraft) &&
+                      speechEditing && (
+                        <label>
+                          演讲稿正文
+                          <textarea
+                            aria-label="完整演讲稿正文"
+                            rows={12}
+                            maxLength={24000}
+                            value={speechDraft}
+                            onChange={(e) => {
+                              setSpeechDraft(e.target.value);
+                              localStorage.setItem(
+                                `research-speech-draft:${current.id}`,
+                                e.target.value,
+                              );
+                            }}
+                          />
+                        </label>
+                      )}
                     <div className="rw-actions">
+                      {(current.outline.speechScript || speechDraft) && (
+                        <button onClick={() => setSpeechEditing((old) => !old)}>
+                          {speechEditing ? "返回讲稿阅读" : "编辑演讲稿"}
+                        </button>
+                      )}
                       <button
                         disabled={
                           busy ||

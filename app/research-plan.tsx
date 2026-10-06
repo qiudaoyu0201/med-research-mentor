@@ -643,7 +643,11 @@ export function ResearchPlanPanel({
                 课题条件已变化。当前保存稿使用旧条件，请改稿后重新核对。
               </p>
             )}
-            <div className="rplan-card">
+            <details
+              className="rplan-card rplan-revise"
+              open={!current || !!active}
+            >
+              <summary>{current ? "调整方案" : "起草方案"}</summary>
               <details>
                 <summary>生成选项（可选）</summary>
                 <div className="rplan-fields">
@@ -818,7 +822,7 @@ export function ResearchPlanPanel({
                     )}
                 </div>
               )}
-            </div>
+            </details>
             {current && (
               <div className="rplan-actions">
                 <details>

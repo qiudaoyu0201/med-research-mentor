@@ -116,6 +116,7 @@ try {
     0,
   );
   assert.equal(await page.locator(".rplan-review").getAttribute("open"), null);
+  assert.equal(await page.locator(".rplan-revise").getAttribute("open"), null);
   await preview.getByText("补充条件与依据", { exact: true }).click();
   await preview
     .getByText("待确认：设备和指标待确认", { exact: true })
@@ -149,7 +150,11 @@ try {
   );
   assert.equal(
     await page
-      .getByRole("button", { name: "按建议改稿并核对", exact: true })
+      .getByRole("button", {
+        name: "按建议改稿并核对",
+        exact: true,
+        includeHidden: true,
+      })
       .isEnabled(),
     false,
   );
@@ -239,7 +244,11 @@ try {
     .waitFor({ state: "hidden" });
   assert.equal(
     await page
-      .getByRole("button", { name: "按建议改稿并核对", exact: true })
+      .getByRole("button", {
+        name: "按建议改稿并核对",
+        exact: true,
+        includeHidden: true,
+      })
       .isEnabled(),
     true,
   );
@@ -247,6 +256,7 @@ try {
   report.assertions.push(
     "未保存条件和改稿可放弃；方案任务取消后原稿保留，下一次生成入口恢复",
   );
+  await page.getByText("调整方案", { exact: true }).click();
   await page
     .getByLabel("方案本轮建议", { exact: true })
     .fill("优先设计理由，不扩写背景");

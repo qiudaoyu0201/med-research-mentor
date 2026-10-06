@@ -313,6 +313,31 @@
   gap: 4px;
   margin-top: 6px;
 }
+.rw .rw-answer-sources {
+  margin-top: 18px;
+}
+.rw .rw-evidence:empty {
+  display: none;
+}
+.rw .rw-pdf-local-actions > button {
+  padding: 7px 10px;
+  border: 1px solid color-mix(in srgb, var(--rw-accent) 22%, var(--rw-line));
+  border-radius: 10px;
+  background: color-mix(in srgb, var(--rw-accent) 7%, var(--rw-surface));
+}
+.rw .rw-answer-sources > details {
+  margin-top: 8px;
+  color: var(--rw-secondary);
+  font-size: 14px;
+}
+.rw .rw-answer-sources > details button {
+  margin: 6px 8px 0 0;
+}
+.rw .rw-source-guide {
+  color: var(--rw-secondary);
+  font-size: 14px;
+  line-height: 1.65;
+}
 .rw .rw-evidence button {
   border: 0;
   font-size: 13px;

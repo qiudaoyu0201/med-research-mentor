@@ -166,11 +166,21 @@ try {
   await page.getByText("完整演讲稿", { exact: true }).click();
   await page.getByRole("button", { name: "补写演讲稿", exact: true }).click();
   await page
-    .getByLabel("完整演讲稿正文", { exact: true })
+    .getByLabel("完整演讲稿预览", { exact: true })
     .waitFor({ state: "attached" });
   // The saved report changed, so reopen the existing disclosure in the newly mounted preview.
-  if (!(await page.getByLabel("完整演讲稿正文", { exact: true }).isVisible()))
+  if (!(await page.getByLabel("完整演讲稿预览", { exact: true }).isVisible()))
     await page.getByText("完整演讲稿", { exact: true }).click();
+  assert.equal(
+    await page.getByLabel("完整演讲稿正文", { exact: true }).count(),
+    0,
+  );
+  assert.ok(
+    (await page.getByLabel("完整演讲稿预览").textContent())?.includes(
+      speechText,
+    ),
+  );
+  await page.getByRole("button", { name: "编辑演讲稿", exact: true }).click();
   assert.equal(speechBody.conversationId, chat.id);
   assert.equal(
     await page.getByLabel("完整演讲稿正文", { exact: true }).inputValue(),
@@ -178,10 +188,15 @@ try {
   );
   const edited = speechText + "\n用户修改的结尾。";
   await page.getByLabel("完整演讲稿正文", { exact: true }).fill(edited);
+  await page.getByRole("button", { name: "返回讲稿阅读", exact: true }).click();
+  assert.ok(
+    (await page.getByLabel("完整演讲稿预览").textContent())?.includes(edited),
+  );
   await page.reload();
   await page.getByRole("button", { name: "PPT 汇报", exact: true }).click();
   await page.getByLabel("第 1 页预览").waitFor();
   await page.getByText("完整演讲稿", { exact: true }).click();
+  await page.getByRole("button", { name: "编辑演讲稿", exact: true }).click();
   assert.equal(
     await page.getByLabel("完整演讲稿正文", { exact: true }).inputValue(),
     edited,
@@ -213,6 +228,7 @@ try {
     .getByRole("link", { name: "导出演讲稿（TXT）", exact: true })
     .getAttribute("href");
   assert.ok(txtUrl?.includes("format=txt"));
+  await page.getByRole("button", { name: "编辑演讲稿", exact: true }).click();
   await page
     .getByLabel("完整演讲稿正文", { exact: true })
     .fill(edited + "\n不再保留的修改");

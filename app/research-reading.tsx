@@ -271,15 +271,19 @@ export function ResearchReading({
     document.addEventListener("selectionchange", clear);
     return () => document.removeEventListener("selectionchange", clear);
   }, []);
-  function chooseExcerpt(element: HTMLElement, source: Source) {
-    const text = selectedText(element, source.text);
-    setSelected(text ? { id: source.id, text } : undefined);
-  }
   const sources =
     paper?.sources.filter(
-      (s) => s.kind === "paper" && (!paper.pdfUrl || s.id === sourceId),
+      (s) =>
+        s.kind === "paper" &&
+        (!paper.pdfUrl || (s.attachmentId && s.id === sourceId)),
     ) ?? [];
-  if (extraSource && !sources.some((s) => s.id === extraSource.id))
+  if (
+    extraSource &&
+    (!paper?.pdfUrl ||
+      extraSource.kind !== "paper" ||
+      extraSource.attachmentId) &&
+    !sources.some((s) => s.id === extraSource.id)
+  )
     sources.unshift(extraSource);
   useEffect(() => {
     setSelected(undefined);
@@ -476,14 +480,19 @@ export function ResearchReading({
               <p>当前没有可用原文。可以先讨论研究想法，再补充论文。</p>
             )}
             {paper?.pdfUrl && (
-              <ResearchPdf
-                key={paper.id}
-                paper={paper}
-                sourceId={sourceId}
-                locatorRevision={locatorRevision}
-                onSource={onSource}
-                onFocus={onFocus}
-              />
+              <>
+                <p className="rw-source-guide">
+                  在 PDF 原页选中文字，可以继续解释或引用提问。
+                </p>
+                <ResearchPdf
+                  key={paper.id}
+                  paper={paper}
+                  sourceId={sourceId}
+                  locatorRevision={locatorRevision}
+                  onSource={onSource}
+                  onFocus={onFocus}
+                />
+              </>
             )}
             {paper && !paper.pdfUrl && (
               <p role="status">仅有摘录，缺少原始 PDF。可从导航导入原文件。</p>
@@ -527,97 +536,79 @@ export function ResearchReading({
                     </button>
                   </>
                 )}
-                <p
-                  className="rw-selectable"
-                  onMouseUp={(e) => {
-                    const text = selectedText(e.currentTarget, source.text);
-                    setSelected(text ? { id: source.id, text } : undefined);
-                  }}
-                  onKeyUp={(e) => {
-                    const text = selectedText(e.currentTarget, source.text);
-                    setSelected(text ? { id: source.id, text } : undefined);
-                  }}
-                  onTouchEnd={(e) => {
-                    const element = e.currentTarget;
-                    setTimeout(() => {
-                      const text = selectedText(element, source.text);
+                <details>
+                  <summary>查看来源文字</summary>
+                  <p
+                    className="rw-selectable"
+                    onMouseUp={(e) => {
+                      const text = selectedText(e.currentTarget, source.text);
                       setSelected(text ? { id: source.id, text } : undefined);
-                    }, 100);
-                  }}
-                >
-                  {source.text.includes("\uFFFD")
-                    ? "文本提取异常，请查看原始 PDF。"
-                    : source.text.length > 2000 && paper?.pdfUrl
-                      ? "当前摘录较长，请对照上方原始 PDF；完整图注可在下方展开。"
+                    }}
+                    onKeyUp={(e) => {
+                      const text = selectedText(e.currentTarget, source.text);
+                      setSelected(text ? { id: source.id, text } : undefined);
+                    }}
+                    onTouchEnd={(e) => {
+                      const element = e.currentTarget;
+                      setTimeout(() => {
+                        const text = selectedText(element, source.text);
+                        setSelected(text ? { id: source.id, text } : undefined);
+                      }, 100);
+                    }}
+                  >
+                    {source.text.includes("\uFFFD")
+                      ? "文本提取异常，请查看原始 PDF。"
                       : source.text ||
                         "此页未提取到正文，请查看 PDF 或补充文字。"}
-                </p>
-                {source.text.length > 2000 &&
-                  !source.text.includes("\uFFFD") && (
-                    <details>
-                      <summary>完整图注／来源摘录</summary>
-                      <p
-                        className="rw-selectable"
-                        onMouseUp={(e) =>
-                          chooseExcerpt(e.currentTarget, source)
-                        }
-                        onKeyUp={(e) => chooseExcerpt(e.currentTarget, source)}
-                        onTouchEnd={(e) => {
-                          const element = e.currentTarget;
-                          setTimeout(() => chooseExcerpt(element, source), 100);
-                        }}
-                      >
-                        {source.text}
-                      </p>
-                    </details>
-                  )}
-                {source.kind === "paper" &&
-                  paper?.sources.some((s) => s.id === source.id) &&
-                  source.text.trim() && (
-                    <div className="rw-actions">
-                      {selected?.id === source.id && (
-                        <SelectionActions
-                          text={selected.text}
-                          explain={() => {
-                            onSource(source.id);
-                            ask(source, selected.text);
-                          }}
-                          cite={() =>
-                            onFocus(
-                              {
-                                label: selected.text,
-                                sourceAnchor: {
-                                  paperId: paper!.id,
-                                  sourceVersion: paper!.version,
-                                  sourceId: source.id,
-                                  excerpt: selected.text,
-                                  page: source.page,
+                  </p>
+                  {source.kind === "paper" &&
+                    paper?.sources.some((s) => s.id === source.id) &&
+                    source.text.trim() && (
+                      <div className="rw-actions">
+                        {selected?.id === source.id && (
+                          <SelectionActions
+                            text={selected.text}
+                            explain={() => {
+                              onSource(source.id);
+                              ask(source, selected.text);
+                            }}
+                            cite={() =>
+                              onFocus(
+                                {
+                                  label: selected.text,
+                                  sourceAnchor: {
+                                    paperId: paper!.id,
+                                    sourceVersion: paper!.version,
+                                    sourceId: source.id,
+                                    excerpt: selected.text,
+                                    page: source.page,
+                                  },
                                 },
-                              },
-                              "",
-                            )
-                          }
-                          source={() => onSource(source.id)}
-                        />
-                      )}
-                      {!paper?.pdfUrl && (
-                        <button
-                          disabled={busy}
-                          onClick={() => {
-                            onSource(source.id);
-                            ask(source, source.text.slice(0, 1600));
-                          }}
-                        >
-                          对这段原文提问
-                        </button>
-                      )}
-                    </div>
+                                "",
+                              )
+                            }
+                            source={() => onSource(source.id)}
+                          />
+                        )}
+                        {!paper?.pdfUrl && (
+                          <button
+                            disabled={busy}
+                            onClick={() => {
+                              onSource(source.id);
+                              ask(source, source.text.slice(0, 1600));
+                            }}
+                          >
+                            对这段原文提问
+                          </button>
+                        )}
+                      </div>
+                    )}
+                  {source.url && (
+                    <a href={source.url} target="_blank" rel="noreferrer">
+                      打开来源 ↗
+                    </a>
                   )}
-                {source.url && (
-                  <a href={source.url} target="_blank" rel="noreferrer">
-                    打开来源 ↗
-                  </a>
-                )}
+                </details>
               </article>
             ))}
           </>

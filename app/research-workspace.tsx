@@ -151,7 +151,7 @@ export function ResearchWorkspace() {
   const [panel, setPanel] = useState<"sources" | "notes" | null>(null);
   const pptSourcesDialog = useRef<HTMLDialogElement>(null);
   useEffect(() => {
-    if (mode === "ppt" && panel) pptSourcesDialog.current?.showModal();
+    if (mode !== "research" && panel) pptSourcesDialog.current?.showModal();
   }, [mode, panel]);
   const [sourceId, setSourceId] = useState<string>();
   const [sourceRevision, setSourceRevision] = useState(0);
@@ -787,8 +787,14 @@ export function ResearchWorkspace() {
   }
   const readingPanel = panel ? (
     <ResearchReading
-      overlay={mode === "ppt"}
-      returnLabel={mode === "ppt" ? "返回 PPT 汇报" : "返回讨论"}
+      overlay={mode !== "research"}
+      returnLabel={
+        mode === "ppt"
+          ? "返回 PPT 汇报"
+          : mode === "plan"
+            ? "返回研究方案"
+            : "返回讨论"
+      }
       key={paper?.id ?? "idea"}
       paper={paper}
       name={currentName}
@@ -827,7 +833,7 @@ export function ResearchWorkspace() {
       onBack={() => setWide(false)}
       onSource={(id) => citation(id)}
       onFocus={(next, text) => {
-        if (mode === "ppt") {
+        if (mode !== "research") {
           closeReading();
           setMode("research");
         }
@@ -912,6 +918,7 @@ export function ResearchWorkspace() {
           setMobile(false);
         }}
         onPlan={() => {
+          setPanel(null);
           setMode("plan");
           setMobile(false);
         }}
@@ -1064,7 +1071,13 @@ export function ResearchWorkspace() {
                   setMode("ppt");
                 },
               },
-              { label: "研究方案", run: () => setMode("plan") },
+              {
+                label: "研究方案",
+                run: () => {
+                  setPanel(null);
+                  setMode("plan");
+                },
+              },
               {
                 label: "更多问题",
                 children: [
@@ -1464,11 +1477,11 @@ export function ResearchWorkspace() {
           </div>
         )}
       </main>
-      {mode === "ppt" && panel && (
+      {mode !== "research" && panel && (
         <dialog
           ref={pptSourcesDialog}
           className="rw-ppt-sources-dialog"
-          aria-label="PPT 来源与笔记"
+          aria-label={mode === "ppt" ? "PPT 来源与笔记" : "研究方案资料与笔记"}
           onCancel={(event) => {
             event.preventDefault();
             closeReading();

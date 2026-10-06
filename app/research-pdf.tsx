@@ -9,6 +9,13 @@ import type { PaperBundle, Source } from "../shared/types.ts";
 import type { ResearchSelection } from "./research-discussion.tsx";
 import "./research-pdf.css";
 import { SelectionActions } from "./research-menu.tsx";
+import {
+  cropFromPoints,
+  cropPixels,
+  type CropPoint,
+  type PdfCrop,
+} from "./research-pdf-crop.ts";
+import { ResearchImage } from "./research-image.tsx";
 export function ResearchPdf({
   paper,
   sourceId,
@@ -65,6 +72,87 @@ export function ResearchPdf({
     scroll = useRef<HTMLDivElement>(null),
     canvas = useRef<HTMLCanvasElement>(null),
     text = useRef<HTMLDivElement>(null);
+  const cropKey = `research-pdf-crop:${JSON.stringify([paper.id, paper.version, page, sourceId ?? "page"])}`;
+  const [cropping, setCropping] = useState(false),
+    [crop, setCrop] = useState<PdfCrop>(),
+    [cropDraft, setCropDraft] = useState<PdfCrop>(),
+    [cropUrl, setCropUrl] = useState(""),
+    [showCrop, setShowCrop] = useState(false),
+    [cropError, setCropError] = useState("");
+  const cropStart = useRef<CropPoint | undefined>(undefined);
+  useEffect(() => {
+    setCropping(false);
+    setCropDraft(undefined);
+    cropStart.current = undefined;
+    setCropUrl("");
+    setCropError("");
+    try {
+      const saved: PdfCrop = JSON.parse(
+        localStorage.getItem(cropKey) ?? "null",
+      );
+      const valid = cropPixels(saved, 1000, 1000) ? saved : undefined;
+      setCrop(valid);
+      setShowCrop(!!valid);
+    } catch {
+      setCrop(undefined);
+      setShowCrop(false);
+    }
+  }, [cropKey]);
+  useEffect(() => {
+    if (!pdf || !crop) return;
+    let closed = false,
+      rendering: RenderTask | undefined;
+    setCropUrl("");
+    setCropError("");
+    void pdf
+      .getPage(page)
+      .then(async (pdfPage) => {
+        if (closed) return;
+        const base = pdfPage.getViewport({ scale: 1 });
+        const scale = Math.min(
+          8,
+          Math.min(width * 2, 1600) / (base.width * crop.width),
+          Math.sqrt(
+            4_000_000 / (base.width * crop.width * base.height * crop.height),
+          ),
+        );
+        const viewport = pdfPage.getViewport({ scale });
+        const pixels = cropPixels(crop, viewport.width, viewport.height);
+        if (!pixels) throw new Error("局部范围无效，请重新框选。");
+        const target = document.createElement("canvas");
+        target.width = pixels.width;
+        target.height = pixels.height;
+        rendering = pdfPage.render({
+          canvas: target,
+          viewport,
+          transform: [1, 0, 0, 1, -pixels.left, -pixels.top],
+        });
+        await rendering.promise;
+        if (!closed) setCropUrl(target.toDataURL("image/png"));
+      })
+      .catch((err) => {
+        if (!closed) setCropError(err.message);
+      });
+    return () => {
+      closed = true;
+      rendering?.cancel();
+    };
+  }, [pdf, page, crop, width]);
+  function cropPoint(event: import("react").PointerEvent<HTMLDivElement>) {
+    const box = event.currentTarget.getBoundingClientRect();
+    return {
+      x: (event.clientX - box.left) / box.width,
+      y: (event.clientY - box.top) / box.height,
+    };
+  }
+  function beginCrop() {
+    setShowCrop(false);
+    setCropping(true);
+    setCropDraft(undefined);
+    cropStart.current = undefined;
+    window.getSelection()?.removeAllRanges();
+    setQuote(undefined);
+  }
   useEffect(() => {
     if (!ready || !scroll.current) return;
     try {
@@ -233,7 +321,20 @@ export function ResearchPdf({
     setQuote(source ? { source, text: chosen } : undefined);
   }
   return (
-    <section className="rw-pdf" ref={wrap} aria-label="PDF 文字阅读">
+    <section
+      className="rw-pdf"
+      ref={wrap}
+      aria-label="PDF 文字阅读"
+      onKeyDownCapture={(event) => {
+        if (event.key === "Escape" && cropping) {
+          event.preventDefault();
+          event.stopPropagation();
+          setCropping(false);
+          setCropDraft(undefined);
+          cropStart.current = undefined;
+        }
+      }}
+    >
       <div className="rw-pdf-controls">
         <label>
           页码
@@ -284,6 +385,53 @@ export function ResearchPdf({
         </a>
         {!ready && <small role="status">正在显示 PDF…</small>}
       </div>
+      <div className="rw-pdf-local-actions">
+        <button
+          disabled={!ready}
+          onClick={
+            cropping
+              ? () => {
+                  setCropping(false);
+                  setCropDraft(undefined);
+                  cropStart.current = undefined;
+                }
+              : beginCrop
+          }
+        >
+          {cropping ? "取消框选" : "框选局部"}
+        </button>
+        {crop && (
+          <button
+            onClick={() => {
+              setCropping(false);
+              setShowCrop((old) => !old);
+            }}
+          >
+            {showCrop ? "查看整页" : "查看已选局部"}
+          </button>
+        )}
+        {cropping && <small>拖动框选图或段落，松开即可查看；Esc 取消。</small>}
+      </div>
+      {showCrop && crop && (
+        <div
+          className="rw-pdf-crop-preview"
+          aria-label={`PDF 第 ${page} 页局部`}
+        >
+          <small>第 {page} 页 · 已选局部</small>
+          {cropUrl ? (
+            <>
+              <img src={cropUrl} alt={`PDF 第 ${page} 页已选局部`} />
+              <ResearchImage
+                url={cropUrl}
+                title={`第 ${page} 页局部`}
+                onPage={() => setShowCrop(false)}
+              />
+            </>
+          ) : (
+            <p role="status">{cropError || "正在显示局部…"}</p>
+          )}
+        </div>
+      )}
       {quote && (
         <SelectionActions
           text={quote.text}
@@ -341,6 +489,7 @@ export function ResearchPdf({
       <div
         ref={scroll}
         className="rw-pdf-scroll"
+        hidden={showCrop}
         onScroll={(e) => {
           if (!ready) return;
           try {
@@ -363,6 +512,62 @@ export function ResearchPdf({
             onKeyUp={select}
             onTouchEnd={() => setTimeout(select, 100)}
           />
+          {cropping && ready && (
+            <div
+              className="rw-pdf-crop-layer"
+              aria-label="框选图或段落区域"
+              onPointerDown={(event) => {
+                if (event.button !== 0) return;
+                event.preventDefault();
+                event.currentTarget.setPointerCapture(event.pointerId);
+                cropStart.current = cropPoint(event);
+                setCropDraft(undefined);
+              }}
+              onPointerMove={(event) => {
+                if (cropStart.current)
+                  setCropDraft(
+                    cropFromPoints(cropStart.current, cropPoint(event)),
+                  );
+              }}
+              onPointerCancel={() => {
+                cropStart.current = undefined;
+                setCropDraft(undefined);
+              }}
+              onPointerUp={(event) => {
+                if (!cropStart.current) return;
+                const next = cropFromPoints(
+                  cropStart.current,
+                  cropPoint(event),
+                );
+                cropStart.current = undefined;
+                setCropDraft(undefined);
+                const box = event.currentTarget.getBoundingClientRect();
+                if (
+                  next.width * box.width < 12 ||
+                  next.height * box.height < 12
+                )
+                  return;
+                setCrop(next);
+                setShowCrop(true);
+                setCropping(false);
+                try {
+                  localStorage.setItem(cropKey, JSON.stringify(next));
+                } catch {}
+              }}
+            >
+              {cropDraft && (
+                <div
+                  className="rw-pdf-crop-box"
+                  style={{
+                    left: `${cropDraft.left * 100}%`,
+                    top: `${cropDraft.top * 100}%`,
+                    width: `${cropDraft.width * 100}%`,
+                    height: `${cropDraft.height * 100}%`,
+                  }}
+                />
+              )}
+            </div>
+          )}
         </div>
       </div>
     </section>

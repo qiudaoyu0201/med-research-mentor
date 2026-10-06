@@ -120,7 +120,7 @@ export function ResearchImage({
             )}
           </div>
           {caption && (
-            <details open>
+            <details>
               <summary>完整图注／图片说明</summary>
               <p>{caption}</p>
             </details>

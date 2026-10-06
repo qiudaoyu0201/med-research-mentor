@@ -45,13 +45,14 @@ function citationGroups(
 ) {
   const groups = new Map<
     string,
-    { label: string; entries: { id: string; source?: Source }[] }
+    { entries: { id: string; source?: Source }[] }
   >();
   for (const id of new Set(ids)) {
     const source =
       paper?.sources.find((s) => s.id === id) ??
       materials.find((s) => s.id === id);
-    const samePage = source?.kind === "paper" && source.page;
+    const samePage =
+      source?.kind === "paper" && !source.attachmentId && source.page;
     const key = samePage
       ? JSON.stringify([
           source.paperId ?? paper?.id ?? id,
@@ -59,21 +60,93 @@ function citationGroups(
           source.page,
         ])
       : id;
-    const label =
-      source?.kind === "paper"
-        ? source.page
-          ? `PDF ${source.page}`
-          : source.figure
-            ? `图 ${source.figure}`
-            : "论文来源"
-        : source?.attachmentId
-          ? "上传图片"
-          : "补充来源";
-    const group = groups.get(key) ?? { label, entries: [] };
+    const group = groups.get(key) ?? { entries: [] };
     group.entries.push({ id, source });
     groups.set(key, group);
   }
   return [...groups.entries()];
+}
+function AnswerSources({
+  ids,
+  paper,
+  materials,
+  onCitation,
+}: {
+  ids: string[];
+  paper?: PaperBundle;
+  materials: Source[];
+  onCitation: (id: string, source?: Source) => void;
+}) {
+  const groups = citationGroups(ids, paper, materials);
+  const original = groups.filter(([, group]) =>
+    group.entries.some(
+      (e) => e.source?.kind === "paper" && !e.source.attachmentId,
+    ),
+  );
+  const supplements = groups.filter((group) => !original.includes(group));
+  const first =
+    original[0]?.[1].entries[0] ??
+    (paper?.pdfUrl
+      ? {
+          id: paper.sources.find((s) => s.kind === "paper")?.id ?? "",
+          source: paper.sources.find((s) => s.kind === "paper"),
+        }
+      : undefined);
+  if (!first && !supplements.length) return null;
+  return (
+    <div className="rw-answer-sources">
+      {first && (
+        <div className="rw-evidence">
+          <ObjectMenu
+            objectKey={ids.join(":")}
+            label="选择原文位置"
+            actions={
+              original.length > 1
+                ? original.map(([, group]) => ({
+                    label: group.entries[0].source?.page
+                      ? `第 ${group.entries[0].source.page} 页`
+                      : (group.entries[0].source?.title ?? "原文"),
+                    run: () =>
+                      onCitation(group.entries[0].id, group.entries[0].source),
+                  }))
+                : []
+            }
+          >
+            <button
+              type="button"
+              className="rw-citation-chip"
+              onClick={() => onCitation(first.id, first.source)}
+            >
+              {paper?.pdfUrl ? "查看 PDF 原文" : "查看原文"}{" "}
+              <span aria-hidden="true">↗</span>
+            </button>
+          </ObjectMenu>
+          <small>
+            {paper?.pdfUrl
+              ? "可选中文字继续提问，或框选图和段落查看局部。"
+              : "展开来源文字后，可选中段落继续提问。"}
+          </small>
+        </div>
+      )}
+      {supplements.length > 0 && (
+        <details>
+          <summary>补充来源</summary>
+          {supplements
+            .flatMap(([, group]) => group.entries)
+            .map((entry) => (
+              <button
+                type="button"
+                key={entry.id}
+                className="rw-citation-chip"
+                onClick={() => onCitation(entry.id, entry.source)}
+              >
+                {entry.source?.title ?? "查看来源"}
+              </button>
+            ))}
+        </details>
+      )}
+    </div>
+  );
 }
 export function ResearchDiscussion({
   turns,
@@ -202,13 +275,15 @@ export function ResearchDiscussion({
                       ；可继续查阅全文。
                     </small>
                   )}
-                  {(
-                    start.sourceIds ?? (start.sourceId ? [start.sourceId] : [])
-                  ).map((id) => (
-                    <button key={id} onClick={() => onCitation(id)}>
-                      查看原文依据
-                    </button>
-                  ))}
+                  <AnswerSources
+                    ids={
+                      start.sourceIds ??
+                      (start.sourceId ? [start.sourceId] : [])
+                    }
+                    paper={paper}
+                    materials={[]}
+                    onCitation={onCitation}
+                  />
                 </div>
               )}
               {start?.status !== "completed" &&
@@ -462,47 +537,6 @@ export function ResearchDiscussion({
                                 }
                               />
                             )}
-                          {citationGroups(
-                            section.citations,
-                            paper,
-                            turn.run?.materials?.at(-1)?.sources ?? [],
-                          ).map(([key, group]) => {
-                            const first = group.entries[0];
-                            const chip = (
-                              <button
-                                type="button"
-                                className="rw-citation-chip"
-                                title={group.entries
-                                  .map((e) =>
-                                    e.source
-                                      ? `${e.source.title} · ${e.source.locator}`
-                                      : e.id,
-                                  )
-                                  .join("\n")}
-                                onClick={() =>
-                                  onCitation(first.id, first.source)
-                                }
-                              >
-                                {group.label} <span aria-hidden="true">↗</span>
-                              </button>
-                            );
-                            return group.entries.length === 1 ? (
-                              <span key={key}>{chip}</span>
-                            ) : (
-                              <div className="rw-citation-group" key={key}>
-                                <ObjectMenu
-                                  objectKey={key}
-                                  label={`查看${group.label}的${group.entries.length}个来源片段`}
-                                  actions={group.entries.map((e) => ({
-                                    label: `${e.source?.title ?? "来源片段"} · ${e.source?.locator ?? e.id}`,
-                                    run: () => onCitation(e.id, e.source),
-                                  }))}
-                                >
-                                  {chip}
-                                </ObjectMenu>
-                              </div>
-                            );
-                          })}
                         </div>
                       </section>
                     ))}
@@ -515,34 +549,8 @@ export function ResearchDiscussion({
                           ?.at(-1)
                           ?.sources.find((s) => s.id === id);
                       if (!source?.image) return null;
-                      if (paper?.pdfUrl && source.page)
-                        return (
-                          <ObjectMenu
-                            key={id}
-                            objectKey={`${paper.id}:${id}`}
-                            label={`${source.title}图件操作`}
-                            actions={[
-                              {
-                                label: "查看图所在原页",
-                                run: () => onCitation(id, source),
-                              },
-                              {
-                                label: "查看图注与来源",
-                                run: () => onCitation(id, source),
-                              },
-                            ]}
-                          >
-                            <button
-                              className="rw-figure-link"
-                              onClick={() => onCitation(id, source)}
-                            >
-                              {source.figure
-                                ? `Figure ${source.figure}`
-                                : source.title}{" "}
-                              · 查看图所在原页（PDF {source.page}）
-                            </button>
-                          </ObjectMenu>
-                        );
+                      if (paper?.pdfUrl && source.page && !source.attachmentId)
+                        return null;
                       if (
                         !source.displayImage &&
                         source.imagePurpose !== "figure"
@@ -564,6 +572,12 @@ export function ResearchDiscussion({
                         />
                       );
                     })}
+                    <AnswerSources
+                      ids={unit.sections.flatMap((s) => s.citations)}
+                      paper={paper}
+                      materials={turn.run?.materials?.at(-1)?.sources ?? []}
+                      onCitation={onCitation}
+                    />
                     {unit.terms.length > 0 && (
                       <details>
                         <summary>术语说明 · {unit.terms.length}</summary>
