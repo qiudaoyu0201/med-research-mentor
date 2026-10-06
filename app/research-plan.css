@@ -109,6 +109,38 @@
   padding-top: 12px;
   border-top: 1px solid var(--rw-line);
 }
+.rplan-preview-heading {
+  display: flex;
+  align-items: flex-start;
+  flex-wrap: wrap;
+  gap: 12px;
+}
+.rplan-preview-heading h2 {
+  flex: 1;
+  min-width: min(240px, 100%);
+  line-height: 1.6;
+}
+.rplan-preview-heading button {
+  flex-shrink: 0;
+}
+.rplan-preview h3 {
+  font-size: 17px;
+  margin: 8px 0 12px;
+  line-height: 1.6;
+}
+.rplan-preview .rplan-rationale {
+  font-size: 15px;
+  color: var(--rw-secondary);
+}
+.rplan-preview > details {
+  border-top: 1px solid var(--rw-line);
+  padding-top: 12px;
+  margin-top: 20px;
+}
+.rplan-preview > .rplan-actions {
+  margin-top: 18px;
+  margin-bottom: 0;
+}
 .rplan :is(p, article) {
   line-height: 1.8;
   overflow-wrap: anywhere;

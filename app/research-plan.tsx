@@ -93,6 +93,10 @@ export function ResearchPlanPanel({
     [error, setError] = useState(""),
     [notice, setNotice] = useState("");
   const [historical, setHistorical] = useState("");
+  const [editing, setEditing] = useState(false);
+  useEffect(() => {
+    setEditing(false);
+  }, [selected, historical]);
   const pending = useRef<{ planId: string; body: unknown } | undefined>(
     undefined,
   );
@@ -284,6 +288,7 @@ export function ResearchPlanPanel({
     install(value, true);
     setHistorical("");
     await listPlans();
+    setEditing(false);
     setNotice("已保存新版本，原稿保留；本版本尚未核对。");
   }
   async function start(
@@ -316,6 +321,7 @@ export function ResearchPlanPanel({
   const topicChanged =
     !!plan && JSON.stringify(topic) !== JSON.stringify(topicFrom(plan));
   const readOnly = !!historical;
+  const preview = readOnly ? shown?.content : draft?.content;
   return (
     <section className="rplan" aria-label="研究方案专区">
       <aside className="rplan-list">
@@ -900,193 +906,261 @@ export function ResearchPlanPanel({
                     </button>
                   </div>
                 )}
-                <div className="rplan-card">
-                  <label>
-                    方案标题
-                    <input
-                      aria-label="方案标题"
-                      maxLength={200}
-                      value={draft.content.title}
-                      onChange={(e) =>
-                        edit({ ...draft.content, title: e.target.value })
-                      }
-                    />
-                  </label>
-                  {draft.content.sections.map((s, i) => (
-                    <details key={s.id} open className="rplan-section">
-                      <summary>
-                        {s.title} ·{" "}
-                        {s.author === "assistant"
-                          ? "助手起草"
-                          : s.author === "mixed"
-                            ? "共同修改"
-                            : s.author === "user"
-                              ? "用户撰写"
-                              : "归属未知"}
-                      </summary>
-                      <label>
-                        章节标题
-                        <input
-                          aria-label={`章节 ${i + 1} 标题`}
-                          maxLength={160}
-                          value={s.title}
-                          onChange={(e) =>
-                            edit({
-                              ...draft.content,
-                              sections: draft.content.sections.map((x) =>
-                                x.id === s.id
-                                  ? { ...x, title: e.target.value }
-                                  : x,
-                              ),
-                            })
-                          }
-                        />
-                      </label>
-                      <label>
-                        拟做什么
-                        <textarea
-                          aria-label={`章节 ${i + 1} 内容`}
-                          rows={6}
-                          maxLength={6000}
-                          value={s.text}
-                          onChange={(e) =>
-                            edit({
-                              ...draft.content,
-                              sections: draft.content.sections.map((x) =>
-                                x.id === s.id
-                                  ? { ...x, text: e.target.value }
-                                  : x,
-                              ),
-                            })
-                          }
-                        />
-                      </label>
-                      <label>
-                        设计理由
-                        <textarea
-                          aria-label={`章节 ${i + 1} 理由`}
-                          rows={3}
-                          maxLength={3000}
-                          value={s.rationale}
-                          onChange={(e) =>
-                            edit({
-                              ...draft.content,
-                              sections: draft.content.sections.map((x) =>
-                                x.id === s.id
-                                  ? { ...x, rationale: e.target.value }
-                                  : x,
-                              ),
-                            })
-                          }
-                        />
-                      </label>
-                      <label>
-                        内容类别
-                        <select
-                          aria-label={`章节 ${i + 1} 类别`}
-                          value={s.kind}
-                          onChange={(e) =>
-                            edit({
-                              ...draft.content,
-                              sections: draft.content.sections.map((x) =>
-                                x.id === s.id
-                                  ? {
-                                      ...x,
-                                      kind: e.target.value as typeof s.kind,
-                                    }
-                                  : x,
-                              ),
-                            })
-                          }
-                        >
-                          <option value="proposal">设计提议</option>
-                          <option value="hypothesis">待验证假设</option>
-                          <option value="source-fact">有来源的事实</option>
-                          <option value="possible-result">可能结果</option>
-                        </select>
-                      </label>
-                      <p className="hint">
-                        待确认：{s.unknowns.join("；") || "无新增项"}
-                      </p>
-                      {s.sourceRefs.map((id) => {
-                        const r = shown?.topic.sources.find((r) => r.id === id);
-                        return (
-                          r && (
-                            <details key={id}>
-                              <summary>
-                                依据：{r.title} · {r.locator}
-                              </summary>
-                              <p>{r.excerpt}</p>
-                              <small>
-                                {r.paperId}@{r.sourceVersion}
-                              </small>
-                            </details>
-                          )
-                        );
-                      })}
-                    </details>
-                  ))}
-                  <details open>
-                    <summary>假设、关键问题与范围</summary>
-                    {[
-                      ...draft.content.assumptions,
-                      ...draft.content.questions,
-                      ...draft.content.limitations,
-                    ].map((s, i) => (
-                      <p key={i}>{s}</p>
-                    ))}
-                  </details>
-                  <button
-                    disabled={working || !dirty || topicChanged}
-                    onClick={() => void action(saveDraft)}
-                  >
-                    保存手动修改
-                  </button>
-                  {dirty && (
-                    <button
-                      onClick={() => {
-                        const value = current
-                          ? {
-                              version: current.id,
-                              content: structuredClone(current.content),
-                            }
-                          : undefined;
-                        setDraft(value);
-                        draftRef.current = value;
-                        if (selected) {
-                          if (value)
-                            localWrite(
-                              `research-plan-draft:${selected}`,
-                              value,
-                            );
-                          else
-                            localStorage.removeItem(
-                              `research-plan-draft:${selected}`,
-                            );
+                {editing && (
+                  <div className="rplan-card">
+                    <div className="rplan-actions">
+                      <button onClick={() => setEditing(false)}>
+                        返回阅读
+                      </button>
+                      {dirty && <small>未保存修改会保留在本机。</small>}
+                    </div>
+                    <label>
+                      方案标题
+                      <input
+                        aria-label="方案标题"
+                        maxLength={200}
+                        value={draft.content.title}
+                        onChange={(e) =>
+                          edit({ ...draft.content, title: e.target.value })
                         }
-                        setError("");
-                      }}
+                      />
+                    </label>
+                    {draft.content.sections.map((s, i) => (
+                      <details key={s.id} open className="rplan-section">
+                        <summary>
+                          {s.title} ·{" "}
+                          {s.author === "assistant"
+                            ? "助手起草"
+                            : s.author === "mixed"
+                              ? "共同修改"
+                              : s.author === "user"
+                                ? "用户撰写"
+                                : "归属未知"}
+                        </summary>
+                        <label>
+                          章节标题
+                          <input
+                            aria-label={`章节 ${i + 1} 标题`}
+                            maxLength={160}
+                            value={s.title}
+                            onChange={(e) =>
+                              edit({
+                                ...draft.content,
+                                sections: draft.content.sections.map((x) =>
+                                  x.id === s.id
+                                    ? { ...x, title: e.target.value }
+                                    : x,
+                                ),
+                              })
+                            }
+                          />
+                        </label>
+                        <label>
+                          拟做什么
+                          <textarea
+                            aria-label={`章节 ${i + 1} 内容`}
+                            rows={6}
+                            maxLength={6000}
+                            value={s.text}
+                            onChange={(e) =>
+                              edit({
+                                ...draft.content,
+                                sections: draft.content.sections.map((x) =>
+                                  x.id === s.id
+                                    ? { ...x, text: e.target.value }
+                                    : x,
+                                ),
+                              })
+                            }
+                          />
+                        </label>
+                        <label>
+                          设计理由
+                          <textarea
+                            aria-label={`章节 ${i + 1} 理由`}
+                            rows={3}
+                            maxLength={3000}
+                            value={s.rationale}
+                            onChange={(e) =>
+                              edit({
+                                ...draft.content,
+                                sections: draft.content.sections.map((x) =>
+                                  x.id === s.id
+                                    ? { ...x, rationale: e.target.value }
+                                    : x,
+                                ),
+                              })
+                            }
+                          />
+                        </label>
+                        <label>
+                          内容类别
+                          <select
+                            aria-label={`章节 ${i + 1} 类别`}
+                            value={s.kind}
+                            onChange={(e) =>
+                              edit({
+                                ...draft.content,
+                                sections: draft.content.sections.map((x) =>
+                                  x.id === s.id
+                                    ? {
+                                        ...x,
+                                        kind: e.target.value as typeof s.kind,
+                                      }
+                                    : x,
+                                ),
+                              })
+                            }
+                          >
+                            <option value="proposal">设计提议</option>
+                            <option value="hypothesis">待验证假设</option>
+                            <option value="source-fact">有来源的事实</option>
+                            <option value="possible-result">可能结果</option>
+                          </select>
+                        </label>
+                        <p className="hint">
+                          待确认：{s.unknowns.join("；") || "无新增项"}
+                        </p>
+                        {s.sourceRefs.map((id) => {
+                          const r = shown?.topic.sources.find(
+                            (r) => r.id === id,
+                          );
+                          return (
+                            r && (
+                              <details key={id}>
+                                <summary>
+                                  依据：{r.title} · {r.locator}
+                                </summary>
+                                <p>{r.excerpt}</p>
+                                <small>
+                                  {r.paperId}@{r.sourceVersion}
+                                </small>
+                              </details>
+                            )
+                          );
+                        })}
+                      </details>
+                    ))}
+                    <details open>
+                      <summary>假设、关键问题与范围</summary>
+                      {[
+                        ...draft.content.assumptions,
+                        ...draft.content.questions,
+                        ...draft.content.limitations,
+                      ].map((s, i) => (
+                        <p key={i}>{s}</p>
+                      ))}
+                    </details>
+                    <button
+                      disabled={working || !dirty || topicChanged}
+                      onClick={() => void action(saveDraft)}
                     >
-                      放弃未保存修改
+                      保存手动修改
                     </button>
-                  )}
-                </div>
+                    {dirty && (
+                      <button
+                        onClick={() => {
+                          const value = current
+                            ? {
+                                version: current.id,
+                                content: structuredClone(current.content),
+                              }
+                            : undefined;
+                          setDraft(value);
+                          draftRef.current = value;
+                          if (selected) {
+                            if (value)
+                              localWrite(
+                                `research-plan-draft:${selected}`,
+                                value,
+                              );
+                            else
+                              localStorage.removeItem(
+                                `research-plan-draft:${selected}`,
+                              );
+                          }
+                          setError("");
+                        }}
+                      >
+                        放弃未保存修改
+                      </button>
+                    )}
+                  </div>
+                )}
               </>
             )}
-            {readOnly && shown && (
-              <article className="rplan-card">
-                <h2>{shown.content.title}</h2>
-                {shown.content.sections.map((s) => (
-                  <section key={s.id}>
+            {preview && (readOnly || !editing) && (
+              <article
+                className="rplan-card rplan-preview"
+                aria-label="方案阅读"
+              >
+                <div className="rplan-preview-heading">
+                  <h2>{preview.title}</h2>
+                  {!readOnly && (
+                    <button onClick={() => setEditing(true)}>编辑方案</button>
+                  )}
+                </div>
+                {!readOnly && dirty && (
+                  <p className="hint">
+                    正在预览未保存修改；导出仍使用保存版本。
+                  </p>
+                )}
+                {preview.sections.map((s) => (
+                  <section key={s.id} className="rplan-section">
                     <h3>{s.title}</h3>
                     <p>{s.text}</p>
-                    <p>设计理由：{s.rationale}</p>
+                    {s.rationale && (
+                      <p className="rplan-rationale">设计理由：{s.rationale}</p>
+                    )}
+                    {(s.unknowns.length > 0 || s.sourceRefs.length > 0) && (
+                      <details>
+                        <summary>补充条件与依据</summary>
+                        {s.unknowns.length > 0 && (
+                          <p>待确认：{s.unknowns.join("；")}</p>
+                        )}
+                        {s.sourceRefs.map((id) => {
+                          const source = shown?.topic.sources.find(
+                            (r) => r.id === id,
+                          );
+                          return (
+                            source && (
+                              <details key={id}>
+                                <summary>
+                                  {source.title} · {source.locator}
+                                </summary>
+                                <p>{source.excerpt}</p>
+                              </details>
+                            )
+                          );
+                        })}
+                      </details>
+                    )}
                   </section>
                 ))}
+                <details>
+                  <summary>假设、关键问题与范围</summary>
+                  {[
+                    ...preview.assumptions,
+                    ...preview.questions,
+                    ...preview.limitations,
+                  ].map((text, i) => (
+                    <p key={i}>{text}</p>
+                  ))}
+                </details>
+                {!readOnly && dirty && (
+                  <div className="rplan-actions">
+                    <button
+                      disabled={working || topicChanged}
+                      onClick={() => void action(saveDraft)}
+                    >
+                      保存手动修改
+                    </button>
+                  </div>
+                )}
               </article>
             )}
             {shown && (
-              <details open className="rplan-card">
+              <details className="rplan-card rplan-review">
                 <summary>
                   此保存版的轻量核对 ·{" "}
                   {shown.review

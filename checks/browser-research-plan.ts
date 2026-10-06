@@ -107,13 +107,42 @@ try {
       limitations: ["没有样本依据，不给固定 n。"],
     },
   });
-  await page.getByLabel("章节 1 内容", { exact: true }).waitFor();
+  const preview = page.getByRole("article", { name: "方案阅读", exact: true });
+  await preview
+    .getByText("用户原稿，拟比较测量对象。", { exact: true })
+    .waitFor();
+  assert.equal(
+    await page.getByLabel("章节 1 内容", { exact: true }).count(),
+    0,
+  );
+  assert.equal(await page.locator(".rplan-review").getAttribute("open"), null);
+  await preview.getByText("补充条件与依据", { exact: true }).click();
+  await preview
+    .getByText("待确认：设备和指标待确认", { exact: true })
+    .waitFor();
+  await preview.getByRole("button", { name: "编辑方案", exact: true }).click();
   await page
     .getByLabel("章节 1 内容", { exact: true })
     .fill("手动修改后的内容，仍为计划。");
+  await page.getByRole("button", { name: "返回阅读", exact: true }).click();
+  await preview
+    .getByText("手动修改后的内容，仍为计划。", { exact: true })
+    .waitFor();
+  assert.equal(
+    await page.getByLabel("章节 1 内容", { exact: true }).count(),
+    0,
+  );
+  const beforeSave = await page.request.get(
+    base + `/api/research-plans/${p.id}/exports/${seed.currentVersion}`,
+  );
+  assert.match(await beforeSave.text(), /用户原稿/);
+  assert.doesNotMatch(await beforeSave.text(), /手动修改后的内容/);
   await page.reload();
   await page.getByRole("button", { name: "研究方案", exact: true }).click();
-  await page.getByLabel("章节 1 内容", { exact: true }).waitFor();
+  await preview
+    .getByText("手动修改后的内容，仍为计划。", { exact: true })
+    .waitFor();
+  await preview.getByRole("button", { name: "编辑方案", exact: true }).click();
   assert.equal(
     await page.getByLabel("章节 1 内容", { exact: true }).inputValue(),
     "手动修改后的内容，仍为计划。",
@@ -124,11 +153,20 @@ try {
       .isEnabled(),
     false,
   );
-  report.assertions.push("未保存手稿刷新恢复；未保存时生成不覆盖手稿");
+  report.assertions.push(
+    "默认阅读正文与设计理由，条件和核对按需查看；编辑返回阅读及刷新保留手稿，导出仍绑定保存稿",
+  );
   await page.getByRole("button", { name: "保存手动修改", exact: true }).click();
   await page
     .getByText("已保存新版本，原稿保留；本版本尚未核对。", { exact: true })
     .waitFor();
+  await preview
+    .getByText("手动修改后的内容，仍为计划。", { exact: true })
+    .waitFor();
+  assert.equal(
+    await page.getByLabel("章节 1 内容", { exact: true }).count(),
+    0,
+  );
   const saved = await api(`/api/research-plans/${p.id}`);
   assert.equal(saved.versions.length, 2);
   assert.equal(saved.versions[1].review, undefined);
@@ -146,10 +184,20 @@ try {
   await page
     .getByLabel("保存版本", { exact: true })
     .selectOption(seed.currentVersion);
+  await preview
+    .getByText("用户原稿，拟比较测量对象。", { exact: true })
+    .waitFor();
+  assert.equal(
+    await preview
+      .getByRole("button", { name: "编辑方案", exact: true })
+      .count(),
+    0,
+  );
   await page.getByRole("button", { name: "恢复为新版本", exact: true }).click();
   await page
     .getByText("已恢复为新版本，历史核对未复用。", { exact: true })
     .waitFor();
+  await preview.getByRole("button", { name: "编辑方案", exact: true }).click();
   assert.equal(
     await page.getByLabel("章节 1 内容", { exact: true }).inputValue(),
     "用户原稿，拟比较测量对象。",
@@ -225,6 +273,7 @@ try {
     "固定冲突响应下本轮建议与同键重试正确；此步骤不调用模型",
   );
   await page.unroute(`**/api/research-plans/${p.id}/jobs`);
+  await page.getByRole("button", { name: "返回阅读", exact: true }).click();
   for (const theme of ["light", "dark"] as const) {
     await page.emulateMedia({ colorScheme: theme, reducedMotion: "reduce" });
     await page.evaluate(
