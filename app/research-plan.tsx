@@ -7,7 +7,11 @@ import type {
   SourceSelector,
   StudyType,
 } from "../shared/research-plan.ts";
-import { planJobDone, studyTypeLabels } from "../shared/research-plan.ts";
+import {
+  planJobDone,
+  planVersionReady,
+  studyTypeLabels,
+} from "../shared/research-plan.ts";
 import { focusLabels, verbosityLabels } from "../shared/learning-intent.ts";
 import { researchApi } from "./research-api.ts";
 import "./research-plan.css";
@@ -16,8 +20,8 @@ const statusLabels: Record<PlanJob["status"], string> = {
   queued: "等待生成",
   generating: "正在起草",
   reviewing: "草稿已保存，正在核对",
-  completed: "本次任务完成",
-  failed: "任务失败，已有草稿保留",
+  completed: "生成成功",
+  failed: "生成失败",
   cancelled: "已取消，保存内容保留",
   interrupted: "服务中断，未自动重发",
   conflict: "条件或版本变化，结果保留为候选",
@@ -65,6 +69,9 @@ export function ResearchPlanPanel({
     () => localRead<string>("research-plan-selected") ?? null,
   );
   const [plan, setPlan] = useState<ResearchPlan>();
+  const planRef = useRef(plan),
+    cancelledJobs = useRef(new Set<string>());
+  planRef.current = plan;
   useEffect(() => {
     onTitle(plan?.topic.question ?? "新医学课题");
   }, [plan?.topic.question, onTitle]);
@@ -104,6 +111,9 @@ export function ResearchPlanPanel({
   const cancelLock = useRef(false);
   const [cancelling, setCancelling] = useState(false);
   const active = jobs.find((j) => !planJobDone(j));
+  const jobsPending = useRef(false),
+    pollNow = useRef<(() => void) | undefined>(undefined);
+  jobsPending.current = !!active;
   const latestJob = jobs.at(-1);
   const current = plan?.versions.find((v) => v.id === plan.currentVersion);
   const shown = historical
@@ -158,6 +168,7 @@ export function ResearchPlanPanel({
     if (selected) localWrite(`research-plan-draft:${selected}`, value);
   }
   function install(p: ResearchPlan, force = false) {
+    planRef.current = p;
     setPlan(p);
     const version = p.versions.find((v) => v.id === p.currentVersion);
     const old = draftRef.current;
@@ -189,6 +200,7 @@ export function ResearchPlanPanel({
   }, []);
   useEffect(() => {
     let closed = false,
+      polling = false,
       timer: ReturnType<typeof setTimeout>;
     setPlan(undefined);
     setJobs([]);
@@ -219,12 +231,25 @@ export function ResearchPlanPanel({
     localWrite("research-plan-selected", selected);
     let previousCurrent: string | null | undefined;
     async function poll() {
+      if (closed || polling) return;
+      polling = true;
       try {
-        const [p, j] = await Promise.all([
+        const [received, history] = await Promise.all([
           researchApi<ResearchPlan>(`/api/research-plans/${selected}`),
           researchApi<PlanJob[]>(`/api/research-plans/${selected}/jobs`),
         ]);
         if (closed) return;
+        const known = planRef.current;
+        const p =
+          known?.id === received.id && known.updatedAt > received.updatedAt
+            ? known
+            : received;
+        const j = history.map((job) =>
+          cancelledJobs.current.has(job.id)
+            ? { ...job, status: "cancelled" as const }
+            : job,
+        );
+        planRef.current = p;
         setPlan(p);
         setJobs(j);
         setPlans((old) => old.map((x) => (x.id === p.id ? p : x)));
@@ -251,15 +276,33 @@ export function ResearchPlanPanel({
         previousCurrent = p.currentVersion;
       } catch (e) {
         if (!closed) setError((e as Error).message);
+      } finally {
+        polling = false;
       }
-      if (!closed) timer = setTimeout(poll, 1800);
+      if (!closed)
+        timer = setTimeout(
+          poll,
+          document.hidden ? 10000 : jobsPending.current ? 900 : 3000,
+        );
     }
+    const wake = () => {
+      if (document.hidden || polling) return;
+      clearTimeout(timer);
+      void poll();
+    };
+    pollNow.current = wake;
+    document.addEventListener("visibilitychange", wake);
     void poll();
     return () => {
       closed = true;
       clearTimeout(timer);
+      document.removeEventListener("visibilitychange", wake);
+      if (pollNow.current === wake) pollNow.current = undefined;
     };
   }, [selected]);
+  useEffect(() => {
+    if (active) pollNow.current?.();
+  }, [active?.id]);
   async function action(work: () => Promise<void>) {
     if (actionLock.current) return;
     actionLock.current = true;
@@ -738,6 +781,8 @@ export function ResearchPlanPanel({
                             `/api/research-plan-jobs/${active.id}/cancel`,
                             {},
                           );
+                          if (j.status === "cancelled")
+                            cancelledJobs.current.add(j.id);
                           setJobs((old) =>
                             old.map((x) => (x.id === j.id ? j : x)),
                           );
@@ -773,39 +818,7 @@ export function ResearchPlanPanel({
                       {latestJob.budget.limit} 次调用 · 此方案累计 {totalCalls}{" "}
                       次 · {latestJob.capability.model}
                     </small>
-                    <p>{latestJob.capability.scope}</p>
-                    {latestJob.budget.attempts.map((a) => (
-                      <p key={a.id}>
-                        {a.role} · {a.status} · {a.tokens.total ?? "用量未返回"}
-                      </p>
-                    ))}
                   </details>
-                  {planJobDone(latestJob) &&
-                    latestJob.phase === "review" &&
-                    latestJob.status !== "completed" &&
-                    latestJob.resultVersion &&
-                    latestJob.budget.attempts.length < latestJob.budget.limit &&
-                    Date.parse(latestJob.budget.deadline) > Date.now() &&
-                    !latestJob.budget.attempts.some(
-                      (a) => a.status === "unknown" || a.status === "reserved",
-                    ) && (
-                      <button
-                        disabled={working}
-                        onClick={() =>
-                          void action(async () => {
-                            const j = await researchApi<PlanJob>(
-                              `/api/research-plan-jobs/${latestJob.id}/resume-review`,
-                              {},
-                            );
-                            setJobs((old) =>
-                              old.map((x) => (x.id === j.id ? j : x)),
-                            );
-                          })
-                        }
-                      >
-                        按原额度恢复核对
-                      </button>
-                    )}
                   {(latestJob.status === "conflict" ||
                     !latestJob.resultVersion) &&
                     latestJob.candidate && (
@@ -848,13 +861,30 @@ export function ResearchPlanPanel({
                     </select>
                   </label>
                 </details>
-                {shown && (
+                {shown &&
+                planVersionReady(shown) &&
+                jobs.some(
+                  (job) =>
+                    job.id === shown.review?.jobId &&
+                    job.status === "completed",
+                ) ? (
                   <a
                     href={`/api/research-plans/${plan.id}/exports/${shown.id}`}
                   >
                     导出此保存版 Markdown
                   </a>
-                )}
+                ) : shown ? (
+                  <>
+                    <button disabled title="方案需成功完成核对后才能导出">
+                      导出方案
+                    </button>
+                    <small>
+                      {shown.review
+                        ? "核对未通过，暂不可导出"
+                        : "尚未完成核对，暂不可导出"}
+                    </small>
+                  </>
+                ) : null}
                 {readOnly && (
                   <button
                     disabled={working}
@@ -1106,7 +1136,7 @@ export function ResearchPlanPanel({
                 </div>
                 {!readOnly && dirty && (
                   <p className="hint">
-                    正在预览未保存修改；导出仍使用保存版本。
+                    正在预览未保存修改，保存并核对后才能导出修改稿。
                   </p>
                 )}
                 {preview.sections.map((s) => (

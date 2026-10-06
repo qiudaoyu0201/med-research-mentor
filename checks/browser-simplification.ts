@@ -176,7 +176,7 @@ try {
   report.fonts = fontResult.fonts;
   assert.ok(
     fontResult.fonts.some(
-      (f) => f.isCustomFont && f.familyName.includes("Source Han"),
+      (f) => !f.isCustomFont && /Microsoft YaHei|Segoe UI/.test(f.familyName),
     ),
   );
   await cdp.detach();
@@ -499,7 +499,7 @@ try {
     "source-han",
   );
   report.assertions.push(
-    "V1/V2/R3: bundled Source Han Sans actually renders Chinese text; system font selection survives reload; legacy navigation migrates and reset survives reload while retaining drafts, font and theme preferences",
+    "V1/V2/R3: default system font actually renders Chinese text; system and Source Han font choices survive reload; legacy navigation migrates and reset preserves drafts, font and theme preferences",
   );
   for (const width of [1920, 1440, 1366, 1280, 1024, 960, 768, 720]) {
     await page.setViewportSize({ width, height: width === 720 ? 480 : 960 });

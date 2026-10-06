@@ -75,7 +75,8 @@ export function ResearchPpt({
     } catch {}
   }, [viewKey, selected, page]);
   const alive = useRef(true),
-    previousStatus = useRef(new Map<string, string>());
+    previousStatus = useRef(new Map<string, string>()),
+    settledVersions = useRef(new Map<string, DeckVersion>());
   const draftKey = (version: string, index: number) =>
     `research-ppt-draft:${version}:${index}`;
   function changeDraft(slide: Slide) {
@@ -91,6 +92,9 @@ export function ResearchPpt({
       !cancelledTurns.includes(t.id) &&
       (t.message.module === "ppt" || t.plan?.modules.includes("ppt")),
   );
+  const taskPending = useRef(false),
+    refreshNow = useRef<(() => void) | undefined>(undefined);
+  taskPending.current = active.length > 0 || generating.length > 0;
   const changed =
     current &&
     draft &&
@@ -110,15 +114,30 @@ export function ResearchPpt({
   }, [current?.id]);
   useEffect(() => {
     alive.current = true;
-    let closed = false;
+    let closed = false,
+      polling = false,
+      timer: ReturnType<typeof setTimeout> | undefined;
     async function refresh() {
-      if (!conversation || !paper) return;
+      if (closed || polling || !conversation || !paper) return;
+      polling = true;
       try {
-        const values = await researchApi<DeckVersion[]>(
+        const received = await researchApi<DeckVersion[]>(
           `/api/deck-versions?conversationId=${conversation.id}&paperId=${paper.id}`,
         );
         if (closed) return;
-        setVersions(values);
+        const values = received.map((version) =>
+          !done(version) && settledVersions.current.has(version.id)
+            ? settledVersions.current.get(version.id)!
+            : version,
+        );
+        setVersions((known) => [
+          ...values,
+          ...known.filter(
+            (version) =>
+              !done(version) &&
+              !values.some((value) => value.id === version.id),
+          ),
+        ]);
         const failed = values.find(
           (v) =>
             ["failed", "interrupted"].includes(v.status) &&
@@ -175,16 +194,34 @@ export function ResearchPpt({
         previousStatus.current = new Map(values.map((v) => [v.id, v.status]));
       } catch (err) {
         if (!closed) setError((err as Error).message);
+      } finally {
+        polling = false;
+        if (!closed)
+          timer = setTimeout(
+            () => void refresh(),
+            document.hidden ? 10000 : taskPending.current ? 900 : 3000,
+          );
       }
     }
+    const wake = () => {
+      if (document.hidden || polling) return;
+      clearTimeout(timer);
+      void refresh();
+    };
+    refreshNow.current = wake;
+    document.addEventListener("visibilitychange", wake);
     void refresh();
-    const timer = setInterval(() => void refresh(), 900);
     return () => {
       closed = true;
       alive.current = false;
-      clearInterval(timer);
+      clearTimeout(timer);
+      document.removeEventListener("visibilitychange", wake);
+      if (refreshNow.current === wake) refreshNow.current = undefined;
     };
   }, [conversation?.id, paper?.id]);
+  useEffect(() => {
+    if (taskPending.current) refreshNow.current?.();
+  }, [active.length > 0 || generating.length > 0]);
   useEffect(() => {
     setExportUrl("");
     try {
@@ -311,10 +348,13 @@ export function ResearchPpt({
         {},
       );
       if (!alive.current) return;
-      if (result.version)
+      if (result.version) {
+        if (done(result.version))
+          settledVersions.current.set(result.version.id, result.version);
         setVersions((old) =>
           old.map((v) => (v.id === id ? result.version! : v)),
         );
+      }
       if (result.turn && finished(result.turn))
         setCancelledTurns((old) => [...old, id]);
       setNotice("任务已结束，已保存内容和未保存编辑保留，可以继续其他操作。");

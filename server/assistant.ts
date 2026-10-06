@@ -251,6 +251,9 @@ export class AssistantService {
         await this.persist("turns", turn.id, turn);
       }
       this.turns.set(turn.id, turn);
+      // A damaged conversation is quarantined independently; its healthy
+      // turns stay on disk and must not prevent other chats from restoring.
+      if (!this.conversations.states.has(turn.conversationId)) continue;
       const state = this.conversations.get(turn.conversationId);
       let changed = false;
       if (!state.recentTurnIds.includes(turn.id)) {

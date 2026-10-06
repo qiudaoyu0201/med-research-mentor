@@ -3,7 +3,7 @@ import { getDocument } from "pdfjs-dist/legacy/build/pdf.mjs";
 import { createCanvas } from "@napi-rs/canvas";
 import type { PaperBundle, Source } from "../shared/types.ts";
 import { digest } from "./materials.ts";
-import { read, save } from "./storage.ts";
+import { read, save, missingRecord } from "./storage.ts";
 
 export interface ExcerptRange {
   page: number;
@@ -92,7 +92,7 @@ export async function registerFigureEvidence(
   try {
     added[0].image = await read<string>("material-cache", key);
   } catch (error: any) {
-    if (error.code !== "ENOENT") throw error;
+    if (!missingRecord(error)) throw error;
     const task = getDocument({ data: bytes, useSystemFonts: true });
     try {
       const pdf = await task.promise,

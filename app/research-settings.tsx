@@ -9,6 +9,7 @@ import {
 } from "../shared/learning-intent.ts";
 export function ResearchSettings({
   conversation,
+  loading = false,
   onState,
   ensure,
   close,
@@ -21,6 +22,7 @@ export function ResearchSettings({
   onAutoGuide,
 }: {
   conversation?: ConversationState;
+  loading?: boolean;
   onState: (state: ConversationState) => void;
   ensure: () => Promise<ConversationState>;
   close: () => void;
@@ -61,7 +63,7 @@ export function ResearchSettings({
     };
   }, []);
   async function preference(patch: object) {
-    if (working) return;
+    if (working || loading) return;
     setWorking(true);
     try {
       const state = await ensure();
@@ -86,7 +88,11 @@ export function ResearchSettings({
           ×
         </button>
       </header>
-      <p>讲解偏好保存在当前聊天，随时可用自然语言调整。</p>
+      <p>
+        {loading
+          ? "正在读取当前聊天的偏好…"
+          : "讲解偏好保存在当前聊天，随时可用自然语言调整。"}
+      </p>
       <label>
         外观
         <select
@@ -131,7 +137,7 @@ export function ResearchSettings({
         学习背景
         <select
           aria-label="学习背景"
-          disabled={working || !profiles.length}
+          disabled={loading || working || !profiles.length}
           value={conversation?.profileId ?? profiles[0]?.id ?? ""}
           onChange={(e) => void preference({ profileId: e.target.value })}
         >
@@ -151,7 +157,7 @@ export function ResearchSettings({
         讲解程度
         <select
           aria-label="讲解程度"
-          disabled={working}
+          disabled={loading || working}
           value={learning.verbosity}
           onChange={(e) =>
             void preference({
@@ -170,7 +176,7 @@ export function ResearchSettings({
         学习重点
         <select
           aria-label="学习重点"
-          disabled={working}
+          disabled={loading || working}
           value={learning.focus}
           onChange={(e) =>
             void preference({ learningPreferences: { focus: e.target.value } })

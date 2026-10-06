@@ -18,7 +18,7 @@ import type {
   WorkspaceBootstrap,
   WorkspaceIndex,
 } from "../shared/workspace.ts";
-import { importPaper, researchApi } from "./research-api.ts";
+import { importPaper, researchApi, pollWorkspace } from "./research-api.ts";
 import { ResearchNavigation } from "./research-navigation.tsx";
 import {
   ResearchDiscussion,
@@ -174,6 +174,7 @@ export function ResearchWorkspace() {
   const dialog = useRef<HTMLDialogElement>(null),
     revision = useRef(0),
     actionLock = useRef(false);
+  const pollNow = useRef<(() => void) | undefined>(undefined);
   const dragDepth = useRef(0),
     retry = useRef<
       | {
@@ -213,6 +214,7 @@ export function ResearchWorkspace() {
     setIndex(value.index);
     setPapers(value.papers);
     setConversations(value.conversations);
+    if (value.recoveryNotice) setNotice(value.recoveryNotice);
     return value;
   }
   async function openConversation(id: string, supplied?: WorkspaceBootstrap) {
@@ -427,19 +429,39 @@ export function ResearchWorkspace() {
     const id = conversation.id;
     const token = revision.current;
     let stopped = false,
-      polling = false;
+      polling = false,
+      timer: ReturnType<typeof setTimeout>,
+      previous: WorkspaceBootstrap | undefined;
     const tick = async () => {
-      if (polling) return;
+      if (stopped || polling) return;
       polling = true;
       try {
         const [history, state, workspace] = await Promise.all([
           researchApi<ResearchTurn[]>(`/api/conversations/${id}/turns`),
           researchApi<ConversationState>(`/api/conversations/${id}`),
-          researchApi<WorkspaceBootstrap>("/api/workspace"),
+          pollWorkspace(previous),
         ]);
         if (stopped || token !== revision.current) return;
-        setTurns(history);
-        setConversation(state);
+        setTurns((current) => {
+          const known = new Map(current.map((turn) => [turn.id, turn]));
+          const received = new Set(history.map((turn) => turn.id));
+          return [
+            ...history.map((turn) =>
+              !finished(turn) &&
+              known.has(turn.id) &&
+              finished(known.get(turn.id)!)
+                ? known.get(turn.id)!
+                : turn,
+            ),
+            ...current.filter((turn) => !received.has(turn.id)),
+          ];
+        });
+        previous = workspace;
+        setConversation((current) =>
+          current?.id === state.id && current.version > state.version
+            ? current
+            : state,
+        );
         setIndex(workspace.index);
         setConversations(workspace.conversations);
         setPapers(workspace.papers);
@@ -447,14 +469,35 @@ export function ResearchWorkspace() {
         if (!stopped) setError((err as Error).message);
       } finally {
         polling = false;
+        if (!stopped) {
+          const running =
+            currentConversation.current?.id === id &&
+            currentTurns.current.some((turn) => !finished(turn));
+          timer = setTimeout(
+            () => void tick(),
+            document.hidden ? 10000 : running ? 900 : 3000,
+          );
+        }
       }
     };
-    const timer = setInterval(() => void tick(), 900);
+    const wake = () => {
+      if (document.hidden || polling) return;
+      clearTimeout(timer);
+      void tick();
+    };
+    pollNow.current = wake;
+    document.addEventListener("visibilitychange", wake);
+    timer = setTimeout(() => void tick(), active ? 900 : 3000);
     return () => {
       stopped = true;
-      clearInterval(timer);
+      clearTimeout(timer);
+      document.removeEventListener("visibilitychange", wake);
+      if (pollNow.current === wake) pollNow.current = undefined;
     };
   }, [conversation?.id]);
+  useEffect(() => {
+    if (active) pollNow.current?.();
+  }, [active?.id]);
   useEffect(() => {
     const escape = (e: KeyboardEvent) => {
       if (e.key === "Escape") {
@@ -592,8 +635,13 @@ export function ResearchWorkspace() {
   currentPaper.current = paper;
   const currentConversation = useRef(conversation);
   currentConversation.current = conversation;
+  const currentTurns = useRef(turns);
+  currentTurns.current = turns;
   function applyConversation(state: ConversationState) {
-    if (currentConversation.current?.id === state.id) setConversation(state);
+    if (currentConversation.current?.id === state.id)
+      setConversation((current) =>
+        current && current.version > state.version ? current : state,
+      );
   }
   async function ensure() {
     if (conversation) return conversation;
@@ -1536,6 +1584,7 @@ export function ResearchWorkspace() {
       {settings && (
         <ResearchSettings
           conversation={conversation}
+          loading={loading}
           ensure={ensure}
           onState={applyConversation}
           close={() => setSettings(false)}

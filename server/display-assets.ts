@@ -3,7 +3,7 @@ import { join } from "node:path";
 import { createCanvas, loadImage } from "@napi-rs/canvas";
 import { getDocument } from "pdfjs-dist/legacy/build/pdf.mjs";
 import type { PaperBundle, Source } from "../shared/types.ts";
-import { root, read, save, safeId } from "./storage.ts";
+import { root, read, save, safeId, missingRecord } from "./storage.ts";
 import { samplePdf } from "./sample.ts";
 import { digest } from "./materials.ts";
 
@@ -46,7 +46,7 @@ export async function saveDisplayAsset(paper: PaperBundle, source: Source) {
     await read<DisplayAsset>("display-assets", id);
     return id;
   } catch (err: any) {
-    if (err.code !== "ENOENT") throw err;
+    if (!missingRecord(err)) throw err;
   }
   let asset: DisplayAsset;
   if (purpose === "page") {

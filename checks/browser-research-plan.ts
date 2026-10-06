@@ -136,8 +136,8 @@ try {
   const beforeSave = await page.request.get(
     base + `/api/research-plans/${p.id}/exports/${seed.currentVersion}`,
   );
-  assert.match(await beforeSave.text(), /用户原稿/);
-  assert.doesNotMatch(await beforeSave.text(), /手动修改后的内容/);
+  assert.equal(beforeSave.status(), 409);
+  assert.match(await beforeSave.text(), /不能导出/);
   await page.reload();
   await page.getByRole("button", { name: "研究方案", exact: true }).click();
   await preview
@@ -159,7 +159,7 @@ try {
     false,
   );
   report.assertions.push(
-    "默认阅读正文与设计理由，条件和核对按需查看；编辑返回阅读及刷新保留手稿，导出仍绑定保存稿",
+    "默认阅读正文与设计理由，条件和核对按需查看；编辑返回阅读及刷新保留手稿，未核对原稿不可导出",
   );
   await page.getByRole("button", { name: "保存手动修改", exact: true }).click();
   await page
@@ -178,9 +178,18 @@ try {
   const markdown = await page.request.get(
     base + `/api/research-plans/${p.id}/exports/${saved.currentVersion}`,
   );
-  assert.ok(markdown.ok());
-  assert.match(await markdown.text(), /手动修改后的内容/);
-  assert.match(await markdown.text(), /未核对/);
+  assert.equal(markdown.status(), 409);
+  assert.match(await markdown.text(), /不能导出/);
+  assert.equal(
+    await page
+      .getByRole("button", { name: "导出方案", exact: true })
+      .isDisabled(),
+    true,
+  );
+  assert.equal(
+    await page.getByRole("link", { name: "导出此保存版 Markdown" }).count(),
+    0,
+  );
   assert.equal(
     await page.getByLabel("保存版本", { exact: true }).isVisible(),
     false,
@@ -198,17 +207,39 @@ try {
       .count(),
     0,
   );
+  let oldPlanCaptured!: () => void, releaseOldPlan!: () => void;
+  const oldPlanReady = new Promise<void>((resolve) => {
+    oldPlanCaptured = resolve;
+  });
+  const oldPlanReleased = new Promise<void>((resolve) => {
+    releaseOldPlan = resolve;
+  });
+  let heldPlan = false;
+  await page.route(`**/api/research-plans/${p.id}`, async (route) => {
+    if (heldPlan || route.request().method() !== "GET") return route.continue();
+    heldPlan = true;
+    const response = await route.fetch();
+    oldPlanCaptured();
+    await oldPlanReleased;
+    await route.fulfill({ response });
+  });
+  await oldPlanReady;
   await page.getByRole("button", { name: "恢复为新版本", exact: true }).click();
   await page
     .getByText("已恢复为新版本，历史核对未复用。", { exact: true })
     .waitFor();
+  releaseOldPlan();
+  await page.waitForTimeout(300);
+  await page.unroute(`**/api/research-plans/${p.id}`);
   await preview.getByRole("button", { name: "编辑方案", exact: true }).click();
   assert.equal(
     await page.getByLabel("章节 1 内容", { exact: true }).inputValue(),
     "用户原稿，拟比较测量对象。",
   );
   assert.equal((await api(`/api/research-plans/${p.id}`)).versions.length, 3);
-  report.assertions.push("真实 API 保存、精确版本导出、恢复追加版本与核对失效");
+  report.assertions.push(
+    "真实 API 保存与恢复追加版本保留；未核对稿前端禁用导出、后端拒绝直链",
+  );
   await page.getByLabel("章节 1 内容", { exact: true }).fill("这次放弃的改稿");
   await page
     .getByRole("button", { name: "放弃未保存修改", exact: true })
@@ -226,11 +257,24 @@ try {
     budget: { attempts: [], limit: 2 },
   };
   let fixtureJobs: any[] = [queued];
-  await page.route(`**/api/research-plans/${p.id}/jobs`, (route) =>
-    route.request().method() === "GET"
-      ? route.fulfill({ json: fixtureJobs })
-      : route.continue(),
-  );
+  let oldJobsCaptured!: () => void, releaseOldJobs!: () => void;
+  const oldJobsReady = new Promise<void>((resolve) => {
+    oldJobsCaptured = resolve;
+  });
+  const oldJobsReleased = new Promise<void>((resolve) => {
+    releaseOldJobs = resolve;
+  });
+  let jobReads = 0;
+  await page.route(`**/api/research-plans/${p.id}/jobs`, async (route) => {
+    if (route.request().method() !== "GET") return route.continue();
+    jobReads++;
+    const snapshot = structuredClone(fixtureJobs);
+    if (jobReads === 2) {
+      oldJobsCaptured();
+      await oldJobsReleased;
+    }
+    await route.fulfill({ json: snapshot });
+  });
   await page.route(
     "**/api/research-plan-jobs/cancel-plan-fixture/cancel",
     (route) => {
@@ -238,10 +282,19 @@ try {
       return route.fulfill({ json: fixtureJobs[0] });
     },
   );
+  await oldJobsReady;
   await page.getByRole("button", { name: "取消方案任务", exact: true }).click();
   await page
     .getByRole("button", { name: "取消方案任务", exact: true })
     .waitFor({ state: "hidden" });
+  releaseOldJobs();
+  await page.waitForTimeout(300);
+  assert.equal(
+    await page
+      .getByRole("button", { name: "取消方案任务", exact: true })
+      .count(),
+    0,
+  );
   assert.equal(
     await page
       .getByRole("button", {

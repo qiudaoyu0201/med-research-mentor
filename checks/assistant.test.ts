@@ -81,6 +81,31 @@ const method: AssistantMessage = {
   mode: "live",
 };
 const lesson = { unit: exampleUnits.qpcr, deck: null };
+test("隔离损坏会话后，其健康回答不阻断其他聊天恢复，也不被删除", async () => {
+  const h = harness([lesson, novice, review]);
+  const state = await h.conversations.create({ paperId: sample.id });
+  const accepted = await h.assistant.submit(state.id, method);
+  await h.assistant.wait(accepted.id);
+  const turn = structuredClone(h.assistant.turns.get(accepted.id)!);
+  const orphan = {
+    ...turn,
+    id: "orphan-turn",
+    conversationId: "quarantined-chat",
+  };
+  const restored = harness([]);
+  await restored.assistant.restore(
+    async <T>(group: string): Promise<T[]> =>
+      (group === "conversations"
+        ? [h.conversations.get(state.id)]
+        : group === "turns"
+          ? [turn, orphan]
+          : []) as T[],
+  );
+  assert.ok(restored.conversations.states.has(state.id));
+  assert.ok(restored.assistant.turns.has(turn.id));
+  assert.ok(restored.assistant.turns.has(orphan.id));
+  assert.equal(restored.records.has("turns/orphan-turn"), false);
+});
 test("optional full speech reaches PPT generation, grounding and saved deck without extra compose calls", async () => {
   const script =
     "# 开场\n介绍本次汇报。\n# 逐页讲述\n根据页面解释证据。\n# 转场\n下面讨论边界。\n# 结尾\n谢谢。";

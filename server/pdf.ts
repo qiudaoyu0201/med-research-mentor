@@ -1,7 +1,7 @@
 import { getDocument } from "pdfjs-dist/legacy/build/pdf.mjs";
 import { readFile } from "node:fs/promises";
 import { createHash } from "node:crypto";
-import { read, save } from "./storage.ts";
+import { read, save, missingRecord } from "./storage.ts";
 import type { PaperBundle } from "../shared/types.ts";
 export async function parsePdf(
   path: string,
@@ -17,7 +17,7 @@ export async function parsePdf(
   try {
     cached = await read("material-cache", key);
   } catch (error: any) {
-    if (error.code !== "ENOENT") throw error;
+    if (!missingRecord(error)) throw error;
   }
   if (cached)
     return {

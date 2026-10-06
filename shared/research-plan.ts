@@ -108,6 +108,13 @@ export interface ResearchPlanVersion {
   jobId?: string;
   review?: PlanReview;
 }
+export function planVersionReady(version: ResearchPlanVersion) {
+  return (
+    !!version.review &&
+    version.review.versionId === version.id &&
+    !version.review.issues.some((issue) => issue.severity === "blocking")
+  );
+}
 export interface ResearchPlan {
   id: string;
   topic: ResearchTopic;

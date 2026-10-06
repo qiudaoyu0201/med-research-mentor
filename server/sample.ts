@@ -6,7 +6,7 @@ import { createCanvas } from "@napi-rs/canvas";
 import { sample } from "../examples/bundle.ts";
 import { parsePdf } from "./pdf.ts";
 import { figureOneEvidence, digest } from "./materials.ts";
-import { read, save } from "./storage.ts";
+import { read, save, missingRecord } from "./storage.ts";
 
 export const samplePdf = resolve(
   "data/papers/Xu_2018_Senolytics/Xu_2018_NatureMedicine_Senolytics_fulltext.pdf",
@@ -77,7 +77,7 @@ export async function localSample() {
         source.locator += "；图像为图件所在原页";
         continue;
       } catch (error: any) {
-        if (error.code !== "ENOENT") throw error;
+        if (!missingRecord(error)) throw error;
       }
       const page = await pdf.getPage(source.page!);
       const viewport = page.getViewport({ scale: 1.3 });

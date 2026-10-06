@@ -75,7 +75,7 @@ export class ResearchPlans {
       this.plans.set(p.id, p);
     for (const j of jobs ?? (await list<StoredJob>("research-plan-jobs"))) {
       if (!this.plans.has(j.planId)) {
-        await this.erase("research-plan-jobs", j.id);
+        // Preserve healthy jobs when their parent record was quarantined.
         continue;
       }
       const committed = this.plans
@@ -85,6 +85,17 @@ export class ResearchPlans {
       if (committed && committed.id !== j.resultVersion) {
         j.resultVersion = committed.id;
         j.phase = "review";
+      }
+      const reviewed = this.plans
+        .get(j.planId)!
+        .versions.find((version) => version.id === j.resultVersion)?.review;
+      if (
+        j.status === "completed" &&
+        reviewed?.issues.some((issue) => issue.severity === "blocking")
+      ) {
+        j.status = "failed";
+        j.error = "方案核对未通过，请修改后重新生成或核对。";
+        await this.persist("research-plan-jobs", j.id, j);
       }
       if (!planJobDone(j)) {
         j.status = "interrupted";
@@ -187,7 +198,12 @@ export class ResearchPlans {
     return this.get(plan.id);
   }
   private async storePlan(plan: ResearchPlan) {
-    plan.updatedAt = new Date().toISOString();
+    plan.updatedAt = new Date(
+      Math.max(
+        Date.now(),
+        Date.parse(this.plans.get(plan.id)?.updatedAt ?? "1970-01-01") + 1,
+      ),
+    ).toISOString();
     await this.persist("research-plans", plan.id, plan);
     this.plans.set(plan.id, plan);
   }
@@ -633,7 +649,14 @@ export class ResearchPlans {
       const latest = await this.currentFor(job, signal);
       latest.versions.find((v) => v.id === version.id)!.review = report;
       await this.storePlan(latest);
-      job.status = repair ? "generating" : "completed";
+      const blocked = report.issues.some(
+        (issue) => issue.severity === "blocking",
+      );
+      job.status = repair ? "generating" : blocked ? "failed" : "completed";
+      job.error =
+        !repair && blocked
+          ? "方案核对未通过，请修改后重新生成或核对。"
+          : undefined;
       job.phase = repair ? "generation" : "review";
       await persist();
     });
@@ -741,6 +764,15 @@ export class ResearchPlans {
     const plan = this.get(id),
       v = plan.versions.find((v) => v.id === versionId);
     if (!v) throw new Error("请选择一个已保存版本导出。");
+    if (
+      !v.review ||
+      v.review.versionId !== v.id ||
+      v.review.issues.some((issue) => issue.severity === "blocking") ||
+      this.jobs.get(v.review.jobId)?.status !== "completed"
+    )
+      throw new ResearchConflict(
+        "方案尚未成功完成核对，不能导出。请修改后重新生成或核对。",
+      );
     const refs = v.topic.sources;
     const citation = (ids: string[]) =>
       ids.map((id) => `[${refs.findIndex((s) => s.id === id) + 1}]`).join(" ");

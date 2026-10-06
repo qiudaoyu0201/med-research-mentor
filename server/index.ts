@@ -7,7 +7,15 @@ import { createServer as createVite } from "vite";
 import { z } from "zod";
 import { sample, profiles, defaultDeck } from "../examples/bundle.ts";
 import type { PaperBundle, TaskRun } from "../shared/types.ts";
-import { root, save, read, list, remove, safeId } from "./storage.ts";
+import {
+  root,
+  save,
+  read,
+  list,
+  remove,
+  safeId,
+  recoveryNotice,
+} from "./storage.ts";
 import {
   inputSchema,
   deckSchema,
@@ -291,11 +299,15 @@ app.get(
     res.send(Buffer.from(original.base64, "base64"));
   },
 );
-app.get("/api/workspace", async (_req, res) => {
+const workspaceSnapshot: express.RequestHandler = async (req, res) => {
   const papers = await Promise.all(
-    [loadedSample, ...(await list<PaperBundle>("papers"))].map((p) =>
-      paperById(p.id),
-    ),
+    [loadedSample, ...(await list<PaperBundle>("papers"))].map(async (p) => ({
+      ...p,
+      sources: [
+        ...p.sources.filter((s) => !s.attachmentId),
+        ...attachments.sources(p.id, undefined, p.version),
+      ],
+    })),
   );
   const index = projects.snapshot();
   index.positions = index.positions.map((p) =>
@@ -304,12 +316,30 @@ app.get("/api/workspace", async (_req, res) => {
       papers.find((paper) => paper.id === p.paperId),
     ),
   );
+  const paperRevisions = Object.fromEntries(
+    papers.map((p) => [p.id, digest(p)]),
+  );
+  const known =
+    req.method === "POST"
+      ? z
+          .object({ paperRevisions: z.record(z.string(), z.string()) })
+          .strict()
+          .parse(req.body).paperRevisions
+      : undefined;
+  res.setHeader("Cache-Control", "no-store");
   res.json({
     index,
-    papers,
+    papers: known
+      ? papers.filter((p) => known[p.id] !== paperRevisions[p.id])
+      : papers,
+    paperIds: papers.map((p) => p.id),
+    paperRevisions,
+    recoveryNotice: recoveryNotice(),
     conversations: [...assistant.conversations.states.values()],
   });
-});
+};
+app.get("/api/workspace", workspaceSnapshot);
+app.post("/api/workspace", workspaceSnapshot);
 app.post("/api/projects", async (req, res) => {
   const body = z
     .object({ name: nameInput, goal: z.string().max(2000).optional() })

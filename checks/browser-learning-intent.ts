@@ -41,6 +41,12 @@ try {
   const openSettings = async () => {
     await page.getByRole("button", { name: "设置", exact: true }).click();
     await page.getByLabel("学习重点", { exact: true }).waitFor();
+    await page.waitForFunction(
+      () =>
+        !document.querySelector<HTMLSelectElement>(
+          'select[aria-label="学习重点"]',
+        )?.disabled,
+    );
   };
   await openSettings();
   assert.equal(

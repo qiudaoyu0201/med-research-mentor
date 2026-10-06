@@ -165,6 +165,38 @@ test("相同请求返回原任务；不同内容同键冲突，并发提交仅�
     ).value.id,
   );
 });
+test("失败的新稿不影响先前成功稿导出；手改和恢复稿必须重新核对", async () => {
+  const h = harness([content, review, content, new Error("核对连接断开")]);
+  const p = await h.store.create(topic);
+  const first = await h.store.start(p.id, input(p));
+  const successful = await h.store.wait(first.id);
+  assert.equal(successful.status, "completed");
+  const checked = h.store.get(p.id);
+  const failed = await h.store.start(
+    p.id,
+    input(checked, { action: "revise" }),
+  );
+  assert.equal((await h.store.wait(failed.id)).status, "failed");
+  assert.match(
+    h.store.exportMarkdown(p.id, successful.resultVersion!),
+    /轻量核对完成/,
+  );
+  assert.throws(
+    () => h.store.exportMarkdown(p.id, h.store.get(p.id).currentVersion!),
+    /不能导出/,
+  );
+  const current = h.store.get(p.id);
+  const restored = await h.store.restoreVersion(
+    p.id,
+    successful.resultVersion!,
+    current.currentVersion,
+    current.topic.version,
+  );
+  assert.throws(
+    () => h.store.exportMarkdown(p.id, restored.currentVersion!),
+    /不能导出/,
+  );
+});
 test("多论文同名来源不碰撞，不信任客户端来源正文或权限", async () => {
   const h = harness();
   const p = await h.store.create({
@@ -212,9 +244,11 @@ test("手动保存和恢复创建新版本，保留归属，旧核对不复制�
     content: edited,
   });
   const v = updated.versions.at(-1)!;
+  assert.ok(updated.updatedAt > base.updatedAt);
   assert.equal(v.content.sections[0].author, "assistant");
   assert.equal(v.content.sections[1].author, "mixed");
   assert.equal(v.review, undefined);
+  assert.throws(() => h.store.exportMarkdown(p.id, v.id), /不能导出/);
   await assert.rejects(
     h.store.saveVersion(p.id, {
       expectedVersion: old.id,
@@ -271,7 +305,10 @@ test("生成成功但核对失败时，保存草稿且不标通过；用量和�
   const saved = h.store.get(p.id);
   assert.equal(saved.versions.length, 1);
   assert.equal(saved.versions[0].review, undefined);
-  assert.match(h.store.exportMarkdown(p.id, saved.currentVersion!), /未核对/);
+  assert.throws(
+    () => h.store.exportMarkdown(p.id, saved.currentVersion!),
+    /不能导出/,
+  );
   await assert.rejects(h.store.resumeReview(j.id), /未知/);
 });
 test("非法模型引用与无依据事实拒绝，未污染旧稿", async () => {
@@ -295,7 +332,7 @@ test("非法模型引用与无依据事实拒绝，未污染旧稿", async () =>
     /事实必须/,
   );
 });
-test("核对返回非法定位时保留草稿，blocking 也可按实际状态导出", async () => {
+test("核对返回非法定位或阻断问题时保留草稿，但禁止导出", async () => {
   const h = harness([
     content,
     {
@@ -335,10 +372,14 @@ test("核对返回非法定位时保留草稿，blocking 也可按实际状态�
   await h2.store.wait(j2.id);
   const result = h2.store.get(p2.id);
   assert.equal(result.versions[0].review?.status, "issues");
-  assert.match(
-    h2.store.exportMarkdown(p2.id, result.currentVersion!),
-    /关键对照待确认/,
+  assert.throws(
+    () => h2.store.exportMarkdown(p2.id, result.currentVersion!),
+    /不能导出/,
   );
+  const legacy = structuredClone(h2.records.get(`research-plan-jobs/${j2.id}`));
+  legacy.status = "completed";
+  await h2.store.restore([result], [legacy]);
+  assert.equal(h2.store.job(j2.id).status, "failed");
 });
 test("单节改写保留其它章节和用户归属", async () => {
   const revised = structuredClone(content);
@@ -530,7 +571,7 @@ test("新条件不能直接核对旧稿；纯核对不自动改用户稿", async
   const j = await h.store.start(p.id, input(restored, { action: "review" })),
     result = await h.store.wait(j.id);
   assert.equal(result.budget.attempts.length, 1);
-  assert.equal(result.status, "completed");
+  assert.equal(result.status, "failed");
   assert.equal(h.store.get(p.id).versions.length, 2);
 });
 test("显式两次上限不被自动修订扩大，客户端不能提高上限", async () => {
@@ -551,7 +592,7 @@ test("显式两次上限不被自动修订扩大，客户端不能提高上限",
   await assert.rejects(h.store.start(p.id, { ...input(p), maxCalls: 100 }));
   const j = await h.store.start(p.id, { ...input(p), maxCalls: 2 });
   const done = await h.store.wait(j.id);
-  assert.equal(done.status, "completed");
+  assert.equal(done.status, "failed");
   assert.equal(done.budget.attempts.length, 2);
   assert.equal(done.budget.limit, 2);
   assert.equal(h.store.get(p.id).versions[0].review?.status, "issues");

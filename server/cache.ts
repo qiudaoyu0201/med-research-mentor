@@ -1,5 +1,5 @@
 import type { TaskRun } from "../shared/types.ts";
-import { read, save } from "./storage.ts";
+import { read, save, missingRecord } from "./storage.ts";
 export class ResultCache {
   constructor(
     private namespace = "task-cache",
@@ -11,7 +11,7 @@ export class ResultCache {
       const run = await this.fetch<TaskRun>(this.namespace, key);
       return this.eligible(run) ? run : undefined;
     } catch (error: any) {
-      if (error.code === "ENOENT") return;
+      if (missingRecord(error)) return;
       throw error;
     }
   }

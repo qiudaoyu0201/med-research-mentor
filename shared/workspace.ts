@@ -80,6 +80,9 @@ export interface WorkspaceBootstrap {
   index: WorkspaceIndex;
   papers: PaperBundle[];
   conversations: ConversationState[];
+  paperRevisions?: Record<string, string>;
+  paperIds?: string[];
+  recoveryNotice?: string;
 }
 export function paperName(paper: PaperBundle, index: WorkspaceIndex) {
   return (

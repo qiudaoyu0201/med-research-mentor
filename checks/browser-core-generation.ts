@@ -31,11 +31,26 @@ try {
   let turns: any[] = [],
     speechCancel = false,
     cancelGeneration = false;
+  let holdVersionPoll = false,
+    versionPollCaptured!: () => void,
+    releaseVersionPoll!: () => void;
+  const versionPollReady = new Promise<void>((resolve) => {
+    versionPollCaptured = resolve;
+  });
+  const versionPollReleased = new Promise<void>((resolve) => {
+    releaseVersionPoll = resolve;
+  });
   const speechText =
     "# 开场\n介绍研究问题。\n\n# 第 1 页\n解释问题与依据。\n\n# 转场\n接下来讨论方法。\n\n# 结尾\n谢谢，欢迎讨论。";
-  await page.route("**/api/deck-versions?*", (route) =>
-    route.fulfill({ json: versions }),
-  );
+  await page.route("**/api/deck-versions?*", async (route) => {
+    const snapshot = structuredClone(versions);
+    if (holdVersionPoll) {
+      holdVersionPoll = false;
+      versionPollCaptured();
+      await versionPollReleased;
+    }
+    await route.fulfill({ json: snapshot });
+  });
   await page.route("**/api/deck-versions/*/select", (route) =>
     route.fulfill({
       json: { ...chat, latestDeckVersionId: versions.at(-1).id },
@@ -251,10 +266,23 @@ try {
     .click();
   await page
     .getByRole("button", { name: "取消演讲稿任务", exact: true })
+    .waitFor();
+  holdVersionPoll = true;
+  await versionPollReady;
+  await page
+    .getByRole("button", { name: "取消演讲稿任务", exact: true })
     .click();
   await page
     .getByRole("button", { name: "取消演讲稿任务", exact: true })
     .waitFor({ state: "hidden" });
+  releaseVersionPoll();
+  await page.waitForTimeout(300);
+  assert.equal(
+    await page
+      .getByRole("button", { name: "取消演讲稿任务", exact: true })
+      .count(),
+    0,
+  );
   assert.equal(versions.at(-1).status, "cancelled");
   assert.equal(
     await page.getByLabel("完整演讲稿正文", { exact: true }).inputValue(),

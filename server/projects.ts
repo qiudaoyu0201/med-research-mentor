@@ -8,7 +8,7 @@ import type {
   ResearchNote,
   ResearchTurn,
 } from "../shared/workspace.ts";
-import { read, save } from "./storage.ts";
+import { read, save, missingRecord } from "./storage.ts";
 
 export class Projects {
   private index: WorkspaceIndex = {
@@ -23,7 +23,7 @@ export class Projects {
     try {
       this.index = await loader<WorkspaceIndex>("workspace", "index");
     } catch (error: any) {
-      if (error.code !== "ENOENT") throw error;
+      if (!missingRecord(error)) throw error;
     }
   }
   snapshot() {

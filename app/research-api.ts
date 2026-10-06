@@ -1,4 +1,31 @@
 import type { PaperBundle } from "../shared/types.ts";
+import type { WorkspaceBootstrap } from "../shared/workspace.ts";
+
+// Normal navigation still receives a complete snapshot; polling sends only
+// paper fingerprints and merges changed material into the previous snapshot.
+export async function pollWorkspace(previous?: WorkspaceBootstrap) {
+  const response = await fetch("/api/workspace", {
+    ...(previous?.paperRevisions
+      ? {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ paperRevisions: previous.paperRevisions }),
+        }
+      : {}),
+  });
+  const value: WorkspaceBootstrap & { error?: string } = await response.json();
+  if (!response.ok) throw new Error(value.error || "工作区刷新失败，请重试。");
+  if (previous && value.paperIds) {
+    const papers = new Map(previous.papers.map((paper) => [paper.id, paper]));
+    for (const paper of value.papers) papers.set(paper.id, paper);
+    value.papers = value.paperIds.map((id) => {
+      const paper = papers.get(id);
+      if (!paper) throw new Error("资料更新不完整，请重新打开工作区。");
+      return paper;
+    });
+  }
+  return value;
+}
 
 export async function researchApi<T>(
   url: string,
