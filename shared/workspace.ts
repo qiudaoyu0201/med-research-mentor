@@ -29,7 +29,7 @@ export interface SourceAnchor {
 export interface ResearchNote {
   id: string;
   conversationId: string;
-  turnId: string;
+  turnId?: string;
   paperId: string | null;
   title: string;
   text: string;

@@ -434,6 +434,19 @@ app.patch("/api/workspace/notes/:id", async (req, res) => {
     .parse(req.body);
   res.json(await projects.editNote(safeId(req.params.id), body));
 });
+app.post("/api/workspace/notes/manual", async (req, res) => {
+  const body = z
+    .object({
+      conversationId: entityId,
+      id: entityId,
+      title: nameInput.default("我的笔记"),
+      text: z.string().trim().min(1).max(50_000),
+    })
+    .strict()
+    .parse(req.body);
+  const state = assistant.conversations.get(body.conversationId);
+  res.status(201).json(await projects.createNote(state, body));
+});
 const learningRecords = new LearningRecords(assistant.conversations, (id) =>
   manager.runs.get(id),
 );

@@ -629,7 +629,11 @@ export function ResearchPpt({
                   </article>
                   <div className="rw-evidence">
                     {draft.citations.map((id) => (
-                      <button key={id} onClick={() => onCitation(id)}>
+                      <button
+                        className="rw-citation-chip"
+                        key={id}
+                        onClick={() => onCitation(id)}
+                      >
                         {paper.sources.find((s) => s.id === id)?.title ?? id} ↗
                       </button>
                     ))}

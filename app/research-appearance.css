@@ -44,13 +44,8 @@
   --rp-accent: var(--rw-accent);
   color-scheme: light;
   font-family:
-    "Research Sans",
-    -apple-system,
-    BlinkMacSystemFont,
-    "Segoe UI",
-    "PingFang SC",
-    "Microsoft YaHei",
-    sans-serif;
+    -apple-system, BlinkMacSystemFont, "Segoe UI", "PingFang SC",
+    "Microsoft YaHei UI", "Microsoft YaHei", sans-serif;
   font-weight: 400;
   font-synthesis: none;
   -webkit-font-smoothing: antialiased;
@@ -62,10 +57,16 @@
 [data-research-theme="dark"] .rw {
   color-scheme: dark;
 }
-[data-research-font="system"] .rw {
+[data-research-font="source-han"] .rw {
   font-family:
-    -apple-system, BlinkMacSystemFont, "Segoe UI", "PingFang SC",
-    "Microsoft YaHei", sans-serif;
+    "Research Sans",
+    -apple-system,
+    BlinkMacSystemFont,
+    "Segoe UI",
+    "PingFang SC",
+    "Microsoft YaHei UI",
+    "Microsoft YaHei",
+    sans-serif;
 }
 .rw button,
 .rw a,
@@ -100,6 +101,7 @@
 }
 .rw :is(h1, h2, h3, strong) {
   color: var(--rw-text);
+  font-weight: 600;
 }
 .rw small,
 .rw .hint {
@@ -688,6 +690,7 @@
 }
 .rw .rp-source-card p {
   color: var(--rw-text);
+  font-size: 16px;
   line-height: 1.75;
 }
 .rw .rw-bibliography summary {
@@ -955,6 +958,65 @@
 }
 .rw .rw-ppt-preview {
   padding: 12px 20px;
+}
+.rw .rw-ppt-preview > details {
+  margin: 10px 0;
+  padding: 0 14px;
+  border: 1px solid color-mix(in srgb, var(--rw-line) 65%, transparent);
+  border-radius: 13px;
+  background: var(--rw-surface);
+  box-shadow: 0 1px 3px #00000006;
+}
+.rw .rw-ppt-preview > details > summary {
+  padding: 12px 0;
+  color: var(--rw-text);
+  font-size: 15px;
+  line-height: 1.45;
+  cursor: pointer;
+}
+.rw .rw-ppt-preview > details[open] {
+  padding-bottom: 14px;
+}
+.rw .rw-ppt-preview > details[open] > summary {
+  margin-bottom: 10px;
+  border-bottom: 1px solid color-mix(in srgb, var(--rw-line) 60%, transparent);
+}
+.rw .rw-ppt-preview > details .rw-ppt-notes {
+  margin: 0;
+  line-height: 1.75;
+}
+.rw .rw-ppt-preview .rw-actions > a {
+  display: inline-flex;
+  align-items: center;
+  min-height: 36px;
+  padding: 6px 10px;
+  border: 1px solid color-mix(in srgb, var(--rw-accent) 22%, var(--rw-line));
+  border-radius: 10px;
+  background: color-mix(in srgb, var(--rw-accent) 7%, var(--rw-surface));
+  text-decoration: none;
+}
+.rw .rw-ppt-sources-dialog {
+  width: min(1000px, calc(100vw - 32px));
+  height: min(850px, calc(100dvh - 32px));
+  max-width: none;
+  max-height: none;
+  padding: 0;
+  overflow: hidden;
+  border: 1px solid var(--rw-line);
+  border-radius: 18px;
+  color: var(--rw-text);
+  background: var(--rw-surface);
+  box-shadow: 0 20px 70px #00000030;
+}
+.rw .rw-ppt-sources-dialog::backdrop {
+  background: #00000055;
+}
+.rw .rw-ppt-sources-dialog .rw-reader {
+  position: relative;
+  inset: auto;
+  width: 100%;
+  height: 100%;
+  flex: none;
 }
 .rw .rw-ppt-editor {
   margin-left: 4px;

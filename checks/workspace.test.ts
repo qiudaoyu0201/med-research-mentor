@@ -88,6 +88,49 @@ test("failed metadata persistence does not publish a change or block subsequent 
   await projects.create("成功课题");
   assert.equal(projects.snapshot().projects.length, 1);
 });
+test("typed notes save without an answer, retry once by id, persist and keep edit conflicts", async () => {
+  const m = memory(),
+    projects = new Projects(m.persist),
+    conversations = new ConversationStore(m.persist);
+  const state = await conversations.create();
+  const input = {
+    id: "typed-note",
+    title: "我的记录",
+    text: "直接打字记录的想法",
+  };
+  const [first, retry] = await Promise.all([
+    projects.createNote(state, input),
+    projects.createNote(state, input),
+  ]);
+  assert.equal(first.id, retry.id);
+  assert.equal(projects.snapshot().notes.length, 1);
+  assert.equal(first.turnId, undefined);
+  assert.deepEqual(first.anchors, []);
+  assert.equal(first.paperId, null);
+  await assert.rejects(
+    projects.createNote(state, { ...input, text: "不同的文本" }),
+    /已保存/,
+  );
+  const other = await conversations.create();
+  await assert.rejects(projects.createNote(other, input), /已保存/);
+  const restored = new Projects(m.persist);
+  await restored.restore(m.load);
+  const edited = await restored.editNote(first.id, {
+    title: "修改标题",
+    text: "新记录",
+    updatedAt: first.updatedAt,
+  });
+  assert.equal(edited.text, "新记录");
+  await assert.rejects(
+    restored.editNote(first.id, {
+      title: "旧修改",
+      text: "不能覆盖",
+      updatedAt: first.updatedAt,
+    }),
+    /已更新/,
+  );
+});
+
 test("reading start uses the imported source and offers no invented figure; unreadable PDFs offer no questions", () => {
   const start = readingStart(imported);
   assert.equal(start.sourceVersion, imported.version);

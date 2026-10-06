@@ -149,6 +149,10 @@ export function ResearchWorkspace() {
   const [projectId, setProjectId] = useState<string | null>(null);
   const [start, setStart] = useState<ReadingStart>();
   const [panel, setPanel] = useState<"sources" | "notes" | null>(null);
+  const pptSourcesDialog = useRef<HTMLDialogElement>(null);
+  useEffect(() => {
+    if (mode === "ppt" && panel) pptSourcesDialog.current?.showModal();
+  }, [mode, panel]);
   const [sourceId, setSourceId] = useState<string>();
   const [sourceRevision, setSourceRevision] = useState(0);
   const [extraSource, setExtraSource] = useState<Source>();
@@ -781,6 +785,76 @@ export function ResearchWorkspace() {
       setNotice("已保存名称与归属。");
     });
   }
+  const readingPanel = panel ? (
+    <ResearchReading
+      overlay={mode === "ppt"}
+      returnLabel={mode === "ppt" ? "返回 PPT 汇报" : "返回讨论"}
+      key={paper?.id ?? "idea"}
+      paper={paper}
+      name={currentName}
+      panel={panel}
+      sourceId={sourceId}
+      locatorRevision={sourceRevision}
+      onMaterial={(value) => {
+        if (value.id === currentPaper.current?.id) {
+          const token = revision.current;
+          setPaper(value);
+          setSelection(undefined);
+          localStorage.removeItem(`${draftKeyRef.current}:selection`);
+          void refresh()
+            .then(() =>
+              researchApi<ReadingStart>(`/api/papers/${value.id}/start`),
+            )
+            .then((guide) => {
+              if (token === revision.current) setStart(guide);
+            })
+            .catch((err) => setError(err.message));
+        }
+      }}
+      extraSource={extraSource}
+      notes={notes}
+      busy={busy}
+      onPanel={setPanel}
+      onClose={closeReading}
+      pinned={pinned}
+      onPin={() => {
+        setPinned((old) => !old);
+        if (!canCompare)
+          setNotice("当前空间不足以并排，可收起导航后固定对照。");
+      }}
+      wide={wide}
+      onWide={() => setWide(true)}
+      onBack={() => setWide(false)}
+      onSource={(id) => citation(id)}
+      onFocus={(next, text) => {
+        if (mode === "ppt") {
+          closeReading();
+          setMode("research");
+        }
+        focus(next, text);
+      }}
+      onSaveNote={(note: ResearchNote, title, text) =>
+        void action(async () => {
+          await researchApi(
+            `/api/workspace/notes/${note.id}`,
+            { title, text, updatedAt: note.updatedAt },
+            "PATCH",
+          );
+          await refresh();
+          setNotice("笔记修改已保存。");
+        })
+      }
+      onCreateNote={async (input) => {
+        const state = await ensure();
+        await researchApi("/api/workspace/notes/manual", {
+          ...input,
+          conversationId: state.id,
+        });
+        await refresh();
+      }}
+      onReturn={(id) => void openConversation(id)}
+    />
+  ) : null;
   const latestReply = [...turns]
     .reverse()
     .find((t) => t.status === "completed" && t.reply?.content);
@@ -833,6 +907,7 @@ export function ResearchWorkspace() {
         mode={mode}
         onHome={() => setMode("research")}
         onPpt={() => {
+          setPanel(null);
           setMode("ppt");
           setMobile(false);
         }}
@@ -982,7 +1057,13 @@ export function ResearchWorkspace() {
                   setPanel("notes");
                 },
               },
-              { label: "PPT 汇报", run: () => setMode("ppt") },
+              {
+                label: "PPT 汇报",
+                run: () => {
+                  setPanel(null);
+                  setMode("ppt");
+                },
+              },
               { label: "研究方案", run: () => setMode("plan") },
               {
                 label: "更多问题",
@@ -1034,10 +1115,7 @@ export function ResearchWorkspace() {
             notes={notes}
             ensure={ensure}
             onState={applyConversation}
-            onCitation={(id) => {
-              setMode("research");
-              citation(id);
-            }}
+            onCitation={citation}
             onResearch={() => setMode("research")}
             layout={layout}
             resize={resize}
@@ -1174,7 +1252,9 @@ export function ResearchWorkspace() {
                     setNotice("回答已保存，原讨论与依据已保留。");
                   })
                 }
-                savedIds={index.notes.map((n) => n.turnId)}
+                savedIds={index.notes.flatMap((n) =>
+                  n.turnId ? [n.turnId] : [],
+                )}
                 latestTitle={
                   !conversation && !paper && recent
                     ? titleOf(recent)
@@ -1380,65 +1460,23 @@ export function ResearchWorkspace() {
                 onChange={(v) => resize("reading", v)}
               />
             )}
-            {panel && (
-              <ResearchReading
-                key={paper?.id ?? "idea"}
-                paper={paper}
-                name={currentName}
-                panel={panel}
-                sourceId={sourceId}
-                locatorRevision={sourceRevision}
-                onMaterial={(value) => {
-                  if (value.id === currentPaper.current?.id) {
-                    const token = revision.current;
-                    setPaper(value);
-                    setSelection(undefined);
-                    localStorage.removeItem(`${draftKeyRef.current}:selection`);
-                    void refresh()
-                      .then(() =>
-                        researchApi<ReadingStart>(
-                          `/api/papers/${value.id}/start`,
-                        ),
-                      )
-                      .then((guide) => {
-                        if (token === revision.current) setStart(guide);
-                      })
-                      .catch((err) => setError(err.message));
-                  }
-                }}
-                extraSource={extraSource}
-                notes={notes}
-                busy={busy}
-                onPanel={setPanel}
-                onClose={closeReading}
-                pinned={pinned}
-                onPin={() => {
-                  setPinned((old) => !old);
-                  if (!canCompare)
-                    setNotice("当前空间不足以并排，可收起导航后固定对照。");
-                }}
-                wide={wide}
-                onWide={() => setWide(true)}
-                onBack={() => setWide(false)}
-                onSource={(id) => citation(id)}
-                onFocus={focus}
-                onSaveNote={(note: ResearchNote, title, text) =>
-                  void action(async () => {
-                    await researchApi(
-                      `/api/workspace/notes/${note.id}`,
-                      { title, text, updatedAt: note.updatedAt },
-                      "PATCH",
-                    );
-                    await refresh();
-                    setNotice("笔记修改已保存。");
-                  })
-                }
-                onReturn={(id) => void openConversation(id)}
-              />
-            )}
+            {readingPanel}
           </div>
         )}
       </main>
+      {mode === "ppt" && panel && (
+        <dialog
+          ref={pptSourcesDialog}
+          className="rw-ppt-sources-dialog"
+          aria-label="PPT 来源与笔记"
+          onCancel={(event) => {
+            event.preventDefault();
+            closeReading();
+          }}
+        >
+          {readingPanel}
+        </dialog>
+      )}
       {dragging && (
         <div className="rw-drop" role="status">
           <strong>{uploading ? "正在导入论文" : "放下文件，导入论文"}</strong>

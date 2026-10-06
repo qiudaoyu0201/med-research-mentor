@@ -3,12 +3,15 @@ export type ResearchTheme = "system" | "light" | "dark";
 export type ResearchFont = "source-han" | "system";
 export function useResearchFont() {
   const [font, setFont] = useState<ResearchFont>(() =>
-    readPreference("research-font", ["source-han", "system"], "source-han"),
+    readPreference("research-font-version", ["2"], "") === "2"
+      ? readPreference("research-font", ["source-han", "system"], "system")
+      : "system",
   );
   useEffect(() => {
     document.documentElement.dataset.researchFont = font;
     try {
       localStorage.setItem("research-font", font);
+      localStorage.setItem("research-font-version", "2");
     } catch {}
   }, [font]);
   return { font, setFont };

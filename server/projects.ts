@@ -203,6 +203,34 @@ export class Projects {
       return note;
     });
   }
+  createNote(
+    state: ConversationState,
+    input: { id: string; title: string; text: string },
+  ) {
+    return this.change((index) => {
+      const existing = index.notes.find((note) => note.id === input.id);
+      if (existing) {
+        if (
+          existing.conversationId !== state.id ||
+          existing.title !== input.title ||
+          existing.text !== input.text
+        )
+          throw new Error("此笔记已保存，内容有变化时请编辑已保存笔记。");
+        return existing;
+      }
+      const now = new Date().toISOString();
+      const note: ResearchNote = {
+        ...input,
+        conversationId: state.id,
+        paperId: state.paperId,
+        anchors: [],
+        createdAt: now,
+        updatedAt: now,
+      };
+      index.notes.push(note);
+      return note;
+    });
+  }
   validatePosition(position: ReadingPosition, paper?: PaperBundle) {
     if (!position.sourceId) return position;
     const source = paper?.sources.find((s) => s.id === position.sourceId);

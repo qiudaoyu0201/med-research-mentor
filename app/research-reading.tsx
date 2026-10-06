@@ -95,6 +95,108 @@ function NoteEditor({
     </article>
   );
 }
+type NewNote = { id: string; title: string; text: string };
+function NoteComposer({
+  draftKey,
+  onCreate,
+}: {
+  draftKey: string;
+  onCreate: (input: NewNote) => Promise<void>;
+}) {
+  const empty = (): NewNote => ({
+    id: crypto.randomUUID(),
+    title: "",
+    text: "",
+  });
+  const [draft, setDraft] = useState<NewNote>(() => {
+    try {
+      return JSON.parse(localStorage.getItem(draftKey) ?? "null") ?? empty();
+    } catch {
+      return empty();
+    }
+  });
+  const [open, setOpen] = useState(Boolean(draft.text)),
+    [saving, setSaving] = useState(false),
+    [error, setError] = useState("");
+  const lock = useRef(false);
+  function update(value: NewNote) {
+    setDraft(value);
+    try {
+      localStorage.setItem(draftKey, JSON.stringify(value));
+    } catch {}
+  }
+  async function saveNote() {
+    if (lock.current || !draft.text.trim()) return;
+    lock.current = true;
+    setSaving(true);
+    setError("");
+    try {
+      await onCreate({
+        ...draft,
+        title: draft.title.trim() || "我的笔记",
+        text: draft.text.trim(),
+      });
+      update(empty());
+      setOpen(false);
+    } catch (e) {
+      setError((e as Error).message);
+    } finally {
+      lock.current = false;
+      setSaving(false);
+    }
+  }
+  return (
+    <section className="rw-note">
+      {!open ? (
+        <button onClick={() => setOpen(true)}>新建笔记</button>
+      ) : (
+        <>
+          <label>
+            标题（可选）
+            <input
+              aria-label="新笔记标题"
+              maxLength={120}
+              value={draft.title}
+              onChange={(e) => update({ ...draft, title: e.target.value })}
+              disabled={saving}
+            />
+          </label>
+          <label>
+            记录内容
+            <textarea
+              aria-label="新笔记正文"
+              autoFocus
+              rows={6}
+              maxLength={50000}
+              value={draft.text}
+              placeholder="直接记录想法、要点或待办…"
+              onChange={(e) => update({ ...draft, text: e.target.value })}
+              disabled={saving}
+            />
+          </label>
+          <div className="rw-actions">
+            <button
+              disabled={saving || !draft.text.trim()}
+              onClick={() => void saveNote()}
+            >
+              {saving ? "正在保存…" : "保存新笔记"}
+            </button>
+            <button
+              disabled={saving}
+              onClick={() => {
+                setOpen(false);
+                setError("");
+              }}
+            >
+              收起草稿
+            </button>
+          </div>
+          {error && <p role="alert">{error}</p>}
+        </>
+      )}
+    </section>
+  );
+}
 export function ResearchReading({
   paper,
   name,
@@ -110,12 +212,15 @@ export function ResearchReading({
   onSource,
   onFocus,
   onSaveNote,
+  onCreateNote,
   onReturn,
   pinned,
   onPin,
   wide,
   onWide,
   onBack,
+  returnLabel = "返回讨论",
+  overlay = false,
 }: {
   paper?: PaperBundle;
   name: string;
@@ -131,12 +236,15 @@ export function ResearchReading({
   onSource: (id: string) => void;
   onFocus: (selection: ResearchSelection, question: string) => void;
   onSaveNote: (note: ResearchNote, title: string, text: string) => void;
+  onCreateNote: (input: NewNote) => Promise<void>;
   onReturn: (id: string) => void;
   pinned: boolean;
   onPin: () => void;
   wide: boolean;
   onWide: () => void;
   onBack: () => void;
+  returnLabel?: string;
+  overlay?: boolean;
 }) {
   const body = useRef<HTMLDivElement>(null);
   const [manual, setManual] = useState(() => {
@@ -236,14 +344,18 @@ export function ResearchReading({
     <aside className="rp-viewer rw-reader" aria-label="资料与笔记面板">
       <header className="rp-viewer-header">
         <strong title={name}>{name}</strong>
-        <button aria-pressed={pinned} onClick={onPin}>
-          {pinned ? "取消固定" : "固定对照"}
-        </button>
-        <button onClick={wide ? onBack : onWide}>
-          {wide ? "返回资料" : "展开阅读"}
-        </button>
-        <button aria-label="返回讨论" onClick={onClose}>
-          × 返回讨论
+        {!overlay && (
+          <button aria-pressed={pinned} onClick={onPin}>
+            {pinned ? "取消固定" : "固定对照"}
+          </button>
+        )}
+        {!overlay && (
+          <button onClick={wide ? onBack : onWide}>
+            {wide ? "返回资料" : "展开阅读"}
+          </button>
+        )}
+        <button aria-label={returnLabel} onClick={onClose}>
+          × {returnLabel}
         </button>
       </header>
       <div className="rp-tabs" role="tablist" aria-label="阅读面板">
@@ -513,8 +625,13 @@ export function ResearchReading({
           <>
             <h2>我的笔记</h2>
             <p className="rw-note-help">
-              在回答下方保存内容，笔记会保留原讨论与依据。
+              可以直接打字记录，也可以保存回答并保留原讨论与依据。
             </p>
+            <NoteComposer
+              key={paper?.id ?? "idea"}
+              draftKey={`research-new-note:${paper?.id ?? "idea"}`}
+              onCreate={onCreateNote}
+            />
             {!notes.length && <p>还没有保存笔记。</p>}
             {notes.map((note) => (
               <NoteEditor
@@ -527,7 +644,11 @@ export function ResearchReading({
               />
             ))}
             {!!notes.length && (
-              <button className="rp-primary rw-export" onClick={exportNotes}>
+              <button
+                className="rp-primary rw-export"
+                disabled={busy}
+                onClick={exportNotes}
+              >
                 导出 Markdown
               </button>
             )}

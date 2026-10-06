@@ -100,16 +100,16 @@ export function ResearchSettings({
         </select>
       </label>
       <label>
-        阅读字体
+        界面与阅读字体
         <select
           aria-label="阅读字体"
           value={font}
           onChange={(e) => onFont(e.target.value as ResearchFont)}
         >
-          <option value="source-han">思源黑体 · 舒适阅读</option>
-          <option value="system">系统字体</option>
+          <option value="system">系统无衬线 · 简洁清晰</option>
+          <option value="source-han">思源黑体</option>
         </select>
-        <small>思源黑体随应用加载，中文正文使用常规字重。</small>
+        <small>导航、正文和控件统一使用所选字体，原始 PDF 保留原文样式。</small>
       </label>
       <label>
         <span className="rw-switch-row">
