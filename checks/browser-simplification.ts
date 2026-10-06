@@ -539,7 +539,10 @@ try {
   const freshChat = await post(`/api/papers/${freshGuide.id}/chat`, {});
   await position(freshChat, freshGuide);
   // Start a fresh tab context deliberately; ordinary reload keeps the user's tab.
-  await page.evaluate(() => sessionStorage.removeItem("research-current-chat"));
+  await page.evaluate(() => {
+    sessionStorage.removeItem("research-current-chat");
+    sessionStorage.removeItem("research-new-discussion");
+  });
   await page.reload();
   await page
     .getByRole("button", { name: "整理研究起点", exact: true })
@@ -597,7 +600,10 @@ try {
     if (t.status === "completed") break;
     await new Promise((r) => setTimeout(r, 30));
   }
-  await page.evaluate(() => sessionStorage.removeItem("research-current-chat"));
+  await page.evaluate(() => {
+    sessionStorage.removeItem("research-current-chat");
+    sessionStorage.removeItem("research-new-discussion");
+  });
   await page.reload();
   await page.locator(`[data-turn-id="${actual.id}"]`).waitFor();
   await answerAction(page, actual.id, "收藏解释");

@@ -139,6 +139,7 @@ export function ResearchWorkspace() {
   useEffect(() => {
     if (conversation)
       try {
+        sessionStorage.removeItem("research-new-discussion");
         sessionStorage.setItem("research-current-chat", conversation.id);
       } catch {}
   }, [conversation?.id]);
@@ -302,6 +303,26 @@ export function ResearchWorkspace() {
     void refresh()
       .then(async (value) => {
         if (closed) return;
+        try {
+          const pending = JSON.parse(
+            sessionStorage.getItem("research-new-discussion") ?? "null",
+          );
+          if (
+            pending &&
+            (pending.paperId === null ||
+              value.papers.some((p) => p.id === pending.paperId)) &&
+            (pending.projectId === null ||
+              value.index.projects.some(
+                (p) => p.id === pending.projectId && !p.archived,
+              ))
+          ) {
+            blank(
+              pending.projectId,
+              value.papers.find((p) => p.id === pending.paperId),
+            );
+            return;
+          }
+        } catch {}
         let preferredId = value.index.lastConversationId;
         try {
           const local = sessionStorage.getItem("research-current-chat");
@@ -550,6 +571,10 @@ export function ResearchWorkspace() {
   function blank(owner: string | null = null, bound?: PaperBundle) {
     try {
       sessionStorage.removeItem("research-current-chat");
+      sessionStorage.setItem(
+        "research-new-discussion",
+        JSON.stringify({ paperId: bound?.id ?? null, projectId: owner }),
+      );
     } catch {}
     ++revision.current;
     setConversation(undefined);
