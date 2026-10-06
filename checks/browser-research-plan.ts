@@ -32,6 +32,11 @@ try {
   await page
     .getByLabel("对象、资源和限制", { exact: true })
     .fill("有限设备；先看框架，不编样本量");
+  assert.equal(
+    await page.getByLabel("研究类型", { exact: true }).isVisible(),
+    false,
+  );
+  await page.getByText("更多设置（可选）", { exact: true }).click();
   await page
     .getByLabel("研究类型", { exact: true })
     .selectOption("basic-translational");
@@ -48,7 +53,9 @@ try {
   await page
     .getByRole("button", { name: "起草并轻量核对", exact: true })
     .waitFor();
-  report.assertions.push("无 PDF 起步、用户条件与讲解设置保存；并列入口可达");
+  report.assertions.push(
+    "无 PDF 起步；非必填设置默认折叠，展开后可保存；并列入口可达",
+  );
   const seed = await api(`/api/research-plans/${p.id}/versions`, {
     expectedVersion: null,
     expectedTopicVersion: p.topic.version,
@@ -101,6 +108,11 @@ try {
   assert.ok(markdown.ok());
   assert.match(await markdown.text(), /手动修改后的内容/);
   assert.match(await markdown.text(), /未核对/);
+  assert.equal(
+    await page.getByLabel("保存版本", { exact: true }).isVisible(),
+    false,
+  );
+  await page.getByText("历史版本", { exact: true }).click();
   await page
     .getByLabel("保存版本", { exact: true })
     .selectOption(seed.currentVersion);

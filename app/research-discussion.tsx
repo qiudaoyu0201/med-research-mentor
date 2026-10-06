@@ -38,6 +38,43 @@ export const statusLabel: Record<string, string> = {
   interrupted: "请求已中断",
   clarification: "需要补充信息",
 };
+function citationGroups(
+  ids: string[],
+  paper: PaperBundle | undefined,
+  materials: Source[],
+) {
+  const groups = new Map<
+    string,
+    { label: string; entries: { id: string; source?: Source }[] }
+  >();
+  for (const id of new Set(ids)) {
+    const source =
+      paper?.sources.find((s) => s.id === id) ??
+      materials.find((s) => s.id === id);
+    const samePage = source?.kind === "paper" && source.page;
+    const key = samePage
+      ? JSON.stringify([
+          source.paperId ?? paper?.id ?? id,
+          source.paperVersion ?? paper?.version ?? id,
+          source.page,
+        ])
+      : id;
+    const label =
+      source?.kind === "paper"
+        ? source.page
+          ? `PDF ${source.page}`
+          : source.figure
+            ? `图 ${source.figure}`
+            : "论文来源"
+        : source?.attachmentId
+          ? "上传图片"
+          : "补充来源";
+    const group = groups.get(key) ?? { label, entries: [] };
+    group.entries.push({ id, source });
+    groups.set(key, group);
+  }
+  return [...groups.entries()];
+}
 export function ResearchDiscussion({
   turns,
   paper,
@@ -405,28 +442,45 @@ export function ResearchDiscussion({
                                 }
                               />
                             )}
-                          {section.citations.map((id) => {
-                            const source =
-                              paper?.sources.find((s) => s.id === id) ??
-                              turn.run?.materials
-                                ?.at(-1)
-                                ?.sources.find((s) => s.id === id);
-                            return (
+                          {citationGroups(
+                            section.citations,
+                            paper,
+                            turn.run?.materials?.at(-1)?.sources ?? [],
+                          ).map(([key, group]) => {
+                            const first = group.entries[0];
+                            const chip = (
                               <button
-                                key={id}
-                                onClick={() => onCitation(id, source)}
+                                type="button"
+                                className="rw-citation-chip"
+                                title={group.entries
+                                  .map((e) =>
+                                    e.source
+                                      ? `${e.source.title} · ${e.source.locator}`
+                                      : e.id,
+                                  )
+                                  .join("\n")}
+                                onClick={() =>
+                                  onCitation(first.id, first.source)
+                                }
                               >
-                                {source?.kind === "paper"
-                                  ? source.page
-                                    ? `PDF ${source.page}`
-                                    : source.figure
-                                      ? `图 ${source.figure}`
-                                      : "论文来源"
-                                  : source?.attachmentId
-                                    ? "上传图片"
-                                    : "补充来源"}{" "}
-                                ↗
+                                {group.label} <span aria-hidden="true">↗</span>
                               </button>
+                            );
+                            return group.entries.length === 1 ? (
+                              <span key={key}>{chip}</span>
+                            ) : (
+                              <div className="rw-citation-group" key={key}>
+                                <ObjectMenu
+                                  objectKey={key}
+                                  label={`查看${group.label}的${group.entries.length}个来源片段`}
+                                  actions={group.entries.map((e) => ({
+                                    label: `${e.source?.title ?? "来源片段"} · ${e.source?.locator ?? e.id}`,
+                                    run: () => onCitation(e.id, e.source),
+                                  }))}
+                                >
+                                  {chip}
+                                </ObjectMenu>
+                              </div>
                             );
                           })}
                         </div>

@@ -318,6 +318,55 @@
   color: var(--rw-accent);
   padding: 3px 7px;
 }
+.rw .rw-evidence .rw-citation-chip,
+.rw .rw-evidence .rw-citation-group {
+  border: 1px solid color-mix(in srgb, var(--rw-accent) 22%, var(--rw-line));
+  border-radius: 11px;
+  background: color-mix(in srgb, var(--rw-accent) 7%, var(--rw-surface));
+  box-shadow: 0 1px 2px #00000008;
+}
+.rw .rw-evidence .rw-citation-chip {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  min-height: 30px;
+  padding: 4px 10px;
+  font-size: 13px;
+  line-height: 1.3;
+  transition:
+    background 120ms ease,
+    box-shadow 120ms ease;
+}
+.rw .rw-evidence .rw-citation-chip:hover {
+  background: color-mix(in srgb, var(--rw-accent) 14%, var(--rw-surface));
+}
+.rw .rw-evidence .rw-citation-group:hover {
+  background: color-mix(in srgb, var(--rw-accent) 14%, var(--rw-surface));
+}
+.rw .rw-evidence .rw-citation-chip:active {
+  background: color-mix(in srgb, var(--rw-accent) 20%, var(--rw-surface));
+}
+.rw .rw-evidence .rw-citation-chip span {
+  font-size: 12px;
+}
+.rw .rw-evidence .rw-citation-group > .rw-object {
+  display: inline-flex;
+  align-items: center;
+}
+.rw .rw-evidence .rw-citation-group .rw-citation-chip {
+  border: 0;
+  box-shadow: none;
+  background: transparent;
+}
+.rw .rw-evidence .rw-citation-group .rw-more {
+  width: 28px;
+  min-width: 28px;
+  flex-basis: 28px;
+  min-height: 30px;
+  padding: 4px;
+  border-radius: 0 10px 10px 0;
+  border-left: 1px solid color-mix(in srgb, var(--rw-line) 65%, transparent);
+}
 .rw .rw-answer summary {
   color: var(--rw-secondary);
 }

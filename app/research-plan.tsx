@@ -399,123 +399,126 @@ export function ResearchPlanPanel({
               }
             />
           </label>
-          <div className="rplan-fields">
-            <label>
-              研究类型
-              <select
-                aria-label="研究类型"
-                value={topic.studyTypes[0] ?? ""}
-                onChange={(e) =>
-                  updateTopic({
-                    ...topic,
-                    studyTypes: e.target.value
-                      ? [e.target.value as StudyType]
-                      : [],
-                    typeStatus: e.target.value ? "provisional" : "unknown",
-                  })
-                }
-              >
-                <option value="">暂不确定</option>
-                {Object.entries(studyTypeLabels).map(([key, label]) => (
-                  <option key={key} value={key}>
-                    {label}
-                  </option>
-                ))}
-              </select>
-            </label>
-            {topic.studyTypes.length > 0 && (
+          <details>
+            <summary>更多设置（可选）</summary>
+            <div className="rplan-fields">
               <label>
-                类型确认
+                研究类型
                 <select
-                  aria-label="类型确认"
-                  value={topic.typeStatus}
+                  aria-label="研究类型"
+                  value={topic.studyTypes[0] ?? ""}
                   onChange={(e) =>
                     updateTopic({
                       ...topic,
-                      typeStatus: e.target.value as TopicDraft["typeStatus"],
+                      studyTypes: e.target.value
+                        ? [e.target.value as StudyType]
+                        : [],
+                      typeStatus: e.target.value ? "provisional" : "unknown",
                     })
                   }
                 >
-                  <option value="provisional">暂定，按假设起草</option>
-                  <option value="confirmed">我已确认</option>
+                  <option value="">暂不确定</option>
+                  {Object.entries(studyTypeLabels).map(([key, label]) => (
+                    <option key={key} value={key}>
+                      {label}
+                    </option>
+                  ))}
                 </select>
               </label>
-            )}
-            <details>
-              <summary>复合设计：补充研究类型</summary>
-              {Object.entries(studyTypeLabels).map(([key, label]) => (
-                <label key={key}>
-                  <input
-                    type="checkbox"
-                    checked={topic.studyTypes.includes(key as StudyType)}
-                    onChange={() => {
-                      const studyTypes = topic.studyTypes.includes(
-                        key as StudyType,
-                      )
-                        ? topic.studyTypes.filter((x) => x !== key)
-                        : [...topic.studyTypes, key as StudyType];
+              {topic.studyTypes.length > 0 && (
+                <label>
+                  类型确认
+                  <select
+                    aria-label="类型确认"
+                    value={topic.typeStatus}
+                    onChange={(e) =>
                       updateTopic({
                         ...topic,
-                        studyTypes,
-                        typeStatus: studyTypes.length
-                          ? topic.typeStatus === "unknown"
-                            ? "provisional"
-                            : topic.typeStatus
-                          : "unknown",
-                      });
-                    }}
-                  />
-                  {label}
+                        typeStatus: e.target.value as TopicDraft["typeStatus"],
+                      })
+                    }
+                  >
+                    <option value="provisional">暂定，按假设起草</option>
+                    <option value="confirmed">我已确认</option>
+                  </select>
                 </label>
-              ))}
-            </details>
-            <label>
-              讲解程度
-              <select
-                aria-label="方案讲解程度"
-                value={topic.learningPreferences.verbosity}
-                onChange={(e) =>
-                  updateTopic({
-                    ...topic,
-                    learningPreferences: {
-                      ...topic.learningPreferences,
-                      verbosity: e.target
-                        .value as TopicDraft["learningPreferences"]["verbosity"],
-                    },
-                  })
-                }
-              >
-                {Object.entries(verbosityLabels).map(([key, label]) => (
-                  <option key={key} value={key}>
+              )}
+              <details>
+                <summary>复合设计：补充研究类型</summary>
+                {Object.entries(studyTypeLabels).map(([key, label]) => (
+                  <label key={key}>
+                    <input
+                      type="checkbox"
+                      checked={topic.studyTypes.includes(key as StudyType)}
+                      onChange={() => {
+                        const studyTypes = topic.studyTypes.includes(
+                          key as StudyType,
+                        )
+                          ? topic.studyTypes.filter((x) => x !== key)
+                          : [...topic.studyTypes, key as StudyType];
+                        updateTopic({
+                          ...topic,
+                          studyTypes,
+                          typeStatus: studyTypes.length
+                            ? topic.typeStatus === "unknown"
+                              ? "provisional"
+                              : topic.typeStatus
+                            : "unknown",
+                        });
+                      }}
+                    />
                     {label}
-                  </option>
+                  </label>
                 ))}
-              </select>
-            </label>
-            <label>
-              学习重点
-              <select
-                aria-label="方案学习重点"
-                value={topic.learningPreferences.focus}
-                onChange={(e) =>
-                  updateTopic({
-                    ...topic,
-                    learningPreferences: {
-                      ...topic.learningPreferences,
-                      focus: e.target
-                        .value as TopicDraft["learningPreferences"]["focus"],
-                    },
-                  })
-                }
-              >
-                {Object.entries(focusLabels).map(([key, label]) => (
-                  <option key={key} value={key}>
-                    {label}
-                  </option>
-                ))}
-              </select>
-            </label>
-          </div>
+              </details>
+              <label>
+                讲解程度
+                <select
+                  aria-label="方案讲解程度"
+                  value={topic.learningPreferences.verbosity}
+                  onChange={(e) =>
+                    updateTopic({
+                      ...topic,
+                      learningPreferences: {
+                        ...topic.learningPreferences,
+                        verbosity: e.target
+                          .value as TopicDraft["learningPreferences"]["verbosity"],
+                      },
+                    })
+                  }
+                >
+                  {Object.entries(verbosityLabels).map(([key, label]) => (
+                    <option key={key} value={key}>
+                      {label}
+                    </option>
+                  ))}
+                </select>
+              </label>
+              <label>
+                学习重点
+                <select
+                  aria-label="方案学习重点"
+                  value={topic.learningPreferences.focus}
+                  onChange={(e) =>
+                    updateTopic({
+                      ...topic,
+                      learningPreferences: {
+                        ...topic.learningPreferences,
+                        focus: e.target
+                          .value as TopicDraft["learningPreferences"]["focus"],
+                      },
+                    })
+                  }
+                >
+                  {Object.entries(focusLabels).map(([key, label]) => (
+                    <option key={key} value={key}>
+                      {label}
+                    </option>
+                  ))}
+                </select>
+              </label>
+            </div>
+          </details>
           <details>
             <summary>
               选择已有来源 · {topic.sources.length} 个（最多 12 个）
@@ -614,37 +617,42 @@ export function ResearchPlanPanel({
               </p>
             )}
             <div className="rplan-card">
-              <div className="rplan-fields">
-                <label>
-                  本次范围
-                  <select
-                    aria-label="本次方案范围"
-                    value={scope}
-                    onChange={(e) => setScope(e.target.value as typeof scope)}
-                  >
-                    <option value="direction">方向框架</option>
-                    <option value="design-draft">设计草案</option>
-                    <option value="full-plan">较完整方案（限现有条件）</option>
-                  </select>
-                </label>
-                {!!current && (
+              <details>
+                <summary>生成选项（可选）</summary>
+                <div className="rplan-fields">
                   <label>
-                    修改位置
+                    本次范围
                     <select
-                      aria-label="修改位置"
-                      value={sectionId}
-                      onChange={(e) => setSectionId(e.target.value)}
+                      aria-label="本次方案范围"
+                      value={scope}
+                      onChange={(e) => setScope(e.target.value as typeof scope)}
                     >
-                      <option value="">整体方案</option>
-                      {current.content.sections.map((s) => (
-                        <option key={s.id} value={s.id}>
-                          {s.title}
-                        </option>
-                      ))}
+                      <option value="direction">方向框架</option>
+                      <option value="design-draft">设计草案</option>
+                      <option value="full-plan">
+                        较完整方案（限现有条件）
+                      </option>
                     </select>
                   </label>
-                )}
-              </div>
+                  {!!current && (
+                    <label>
+                      修改位置
+                      <select
+                        aria-label="修改位置"
+                        value={sectionId}
+                        onChange={(e) => setSectionId(e.target.value)}
+                      >
+                        <option value="">整体方案</option>
+                        {current.content.sections.map((s) => (
+                          <option key={s.id} value={s.id}>
+                            {s.title}
+                          </option>
+                        ))}
+                      </select>
+                    </label>
+                  )}
+                </div>
+              </details>
               <label>
                 本轮建议
                 <textarea
@@ -713,14 +721,14 @@ export function ResearchPlanPanel({
               {latestJob && (
                 <div className="rplan-job" role="status">
                   <strong>{statusLabels[latestJob.status]}</strong>
-                  <small>
-                    本次 {latestJob.budget.attempts.length} /{" "}
-                    {latestJob.budget.limit} 次调用 · 此方案累计 {totalCalls} 次
-                    · {latestJob.capability.model}
-                  </small>
                   {latestJob.error && <p>{latestJob.error}</p>}
                   <details>
-                    <summary>实际范围与调用记录</summary>
+                    <summary>任务详情</summary>
+                    <small>
+                      本次 {latestJob.budget.attempts.length} /{" "}
+                      {latestJob.budget.limit} 次调用 · 此方案累计 {totalCalls}{" "}
+                      次 · {latestJob.capability.model}
+                    </small>
                     <p>{latestJob.capability.scope}</p>
                     {latestJob.budget.attempts.map((a) => (
                       <p key={a.id}>
@@ -773,26 +781,29 @@ export function ResearchPlanPanel({
             </div>
             {current && (
               <div className="rplan-actions">
-                <label>
-                  保存版本
-                  <select
-                    aria-label="保存版本"
-                    value={historical || current.id}
-                    onChange={(e) =>
-                      setHistorical(
-                        e.target.value === current.id ? "" : e.target.value,
-                      )
-                    }
-                  >
-                    {[...plan.versions].reverse().map((v, i) => (
-                      <option key={v.id} value={v.id}>
-                        {i === 0 ? "当前 · " : "历史 · "}
-                        {v.content.title} ·{" "}
-                        {new Date(v.createdAt).toLocaleTimeString()}
-                      </option>
-                    ))}
-                  </select>
-                </label>
+                <details>
+                  <summary>历史版本</summary>
+                  <label>
+                    保存版本
+                    <select
+                      aria-label="保存版本"
+                      value={historical || current.id}
+                      onChange={(e) =>
+                        setHistorical(
+                          e.target.value === current.id ? "" : e.target.value,
+                        )
+                      }
+                    >
+                      {[...plan.versions].reverse().map((v, i) => (
+                        <option key={v.id} value={v.id}>
+                          {i === 0 ? "当前 · " : "历史 · "}
+                          {v.content.title} ·{" "}
+                          {new Date(v.createdAt).toLocaleTimeString()}
+                        </option>
+                      ))}
+                    </select>
+                  </label>
+                </details>
                 {shown && (
                   <a
                     href={`/api/research-plans/${plan.id}/exports/${shown.id}`}
