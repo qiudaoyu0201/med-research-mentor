@@ -10,7 +10,9 @@ const skillRoot = resolve("skills");
 export interface RuleSnapshot {
   shared: string;
   teachingContract?: string;
-  explanationTracing?: boolean;
+  explanationTracing?: boolean | "compact-v1";
+  teachingContractVersion?:
+    "source-explanation-a" | "source-explanation-b" | "source-explanation-c";
   entries: Record<
     string,
     { text: string; version: string; description: string; hash: string }
@@ -20,7 +22,7 @@ export function teachingContract() {
   return internalRules.getStore()?.teachingContract ?? "";
 }
 export function explanationTracing() {
-  return internalRules.getStore()?.explanationTracing === true;
+  return internalRules.getStore()?.explanationTracing ?? false;
 }
 const internalRules = new AsyncLocalStorage<RuleSnapshot>();
 // Internal comparisons have independent snapshots; regular requests load active rules.
@@ -174,6 +176,9 @@ export async function loadSkills(
       ["shared", digest(shared)],
       ...(teachingContract()
         ? [["teaching-contract", digest(teachingContract())]]
+        : []),
+      ...(explanationTracing()
+        ? [["explanation-tracing", String(explanationTracing())]]
         : []),
       ...modules.map((m) => [m.id, m.hash]),
     ]),

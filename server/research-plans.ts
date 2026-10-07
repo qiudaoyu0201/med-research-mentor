@@ -1,7 +1,7 @@
 import { randomUUID } from "node:crypto";
 import { sharedRules, teachingContract, explanationTracing } from "./skills.ts";
 import {
-  explanationLinksSchema,
+  tracingSchema,
   validateExplanationLinks,
 } from "./explanation-links.ts";
 import type { PaperBundle } from "../shared/types.ts";
@@ -44,7 +44,7 @@ type StoredJob = PlanJob & {
   instructions: {
     generation: string;
     review: string;
-    traced?: boolean;
+    traced?: boolean | "compact-v1";
     explanationLinks?: unknown;
   };
 };
@@ -346,7 +346,7 @@ export class ResearchPlans {
     const instructions = {
       generation: shared + "\n" + generationRules + "\n" + teachingContract(),
       review: reviewRules,
-      ...(explanationTracing() ? { traced: true } : {}),
+      ...(explanationTracing() ? { traced: explanationTracing() } : {}),
     };
     const modelFingerprint = digest({
       id: this.provider.id,
@@ -563,14 +563,18 @@ export class ResearchPlans {
         },
         job.instructions.traced
           ? planContentSchema.extend({
-              explanationLinks: explanationLinksSchema,
+              explanationLinks: tracingSchema(job.instructions.traced),
             })
           : planContentSchema,
         signal,
         callOptions,
       );
+      const { explanationLinks: _links, ...delivered } =
+        generated.output as typeof generated.output & {
+          explanationLinks?: unknown;
+        };
       const content = this.content(
-        generated.output,
+        delivered,
         job.context.learningSourceRefs,
         "assistant",
         parent,
@@ -598,6 +602,7 @@ export class ResearchPlans {
           })),
           plan.topic.question,
           "plan",
+          job.instructions.traced,
         );
       job.candidate = {
         id: randomUUID(),

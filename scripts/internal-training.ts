@@ -1,11 +1,4 @@
-import {
-  mkdir,
-  readFile,
-  writeFile,
-  open,
-  copyFile,
-  readdir,
-} from "node:fs/promises";
+import { mkdir, readFile, writeFile, open, copyFile } from "node:fs/promises";
 import { z } from "zod";
 import {
   trainingLineage,
@@ -17,7 +10,10 @@ import {
   reserveIterationUnit,
   developmentPassed,
   type IterationQuota,
+  recoveryProtocolVersion,
+  calibrationPassed,
 } from "../server/training-protocol.ts";
+import { trainingEngine, hashFile } from "../server/training-engine.ts";
 import { explanationCalibration } from "../evals/explanation-calibration.ts";
 import { trainingAdmission } from "../server/training-admission.ts";
 import { trainingCost } from "../server/training-cost.ts";
@@ -59,8 +55,8 @@ const stage = process.argv[2] ?? "prepare";
 const iteration = process.env.TUTOR_TRAINING_QUOTA === "iteration-v1.1-70x3";
 if (process.env.TUTOR_TRAINING_QUOTA && !iteration)
   throw new Error("未知训练额度版本。");
-if (!["prepare", "m1", "m2"].includes(stage))
-  throw new Error("入口：prepare / m1 / m2；M3 独立试验另行运行。");
+if (!["prepare", "calibrate", "m1", "m2"].includes(stage))
+  throw new Error("入口：prepare / calibrate / m1 / m2；M3 独立试验另行运行。");
 // Set isolation before loading any module that binds its default storage root.
 process.env.TUTOR_DATA_DIR = join(directory, "data");
 process.env.TUTOR_READING_GUIDES = "manual";
@@ -170,23 +166,12 @@ try {
   }
   const baseline = await freezeRules(),
     candidate = iteration
-      ? explanationCandidateRules(baseline, (quota?.cycle ?? 0) >= 2)
+      ? explanationCandidateRules(
+          baseline,
+          quota?.cycle === 3 ? "compact-v1" : quota?.cycle === 2,
+        )
       : candidateRules(baseline);
-  const engineFiles = (
-    await Promise.all(
-      ["server", "shared", "scripts", "evals"].map(async (root) =>
-        (await readdir(root, { recursive: true }))
-          .filter((p) => /\.(ts|ps1)$/.test(p))
-          .map((p) => join(root, p)),
-      ),
-    )
-  )
-    .flat()
-    .concat("package.json", "package-lock.json")
-    .sort();
-  const engine = await Promise.all(
-    engineFiles.map(async (path) => ({ path, hash: await fileHash(path) })),
-  );
+  const engine = await trainingEngine();
   const materials = [];
   for (const input of trainingPapers) {
     const hash = await fileHash(input.path);
@@ -280,7 +265,15 @@ try {
     });
   }
   const protocol = {
-    version: iteration ? "internal-iteration-v1.1" : "internal-first-cycle-2",
+    version:
+      quota?.cycle === 3
+        ? recoveryProtocolVersion
+        : iteration
+          ? "internal-iteration-v1.1"
+          : "internal-first-cycle-2",
+    recoveryHash: process.env.TUTOR_TRAINING_RECOVERY
+      ? await hashFile(resolve(process.env.TUTOR_TRAINING_RECOVERY))
+      : null,
     quota,
     lineage,
     git: execFileSync("git", ["rev-parse", "HEAD"], {
@@ -362,22 +355,54 @@ try {
         digest(previousProtocol.calibrationCases) ===
           digest(explanationCalibration) &&
         previousProtocol.reviewVersion === reviewVersion &&
-        previousReport.calibration.length === 6 &&
-        previousReport.calibration.every(
-          (c: Report["calibration"][number]) =>
-            c.evaluation.valid &&
-            c.expectedChecks?.every((check) =>
-              c.evaluation.review.checks.some(
-                (actual) =>
-                  actual.criterion === check.criterion &&
-                  actual.passed === check.passed,
-              ),
-            ),
-        )
+        calibrationPassed(explanationCalibration, previousReport.calibration)
       ) {
         let identical = true;
         for (const sample of explanationCalibration) {
-          const attempt = previousReport.batches
+          const calibration = previousReport.calibration.find(
+            (c: Report["calibration"][number]) => c.id === sample.id,
+          );
+          const sourceDirectory: string =
+            calibration?.reusedFrom ?? lineage.previousDirectory;
+          if (
+            sourceDirectory !== lineage.previousDirectory &&
+            sourceDirectory !== previousProtocol.lineage.previousDirectory
+          ) {
+            identical = false;
+            break;
+          }
+          const originalReport =
+            sourceDirectory === lineage.previousDirectory
+              ? previousReport
+              : JSON.parse(
+                  await readFile(
+                    join(sourceDirectory, "records/training/report.json"),
+                    "utf8",
+                  ),
+                );
+          const originalProtocol =
+            sourceDirectory === lineage.previousDirectory
+              ? previousProtocol
+              : JSON.parse(
+                  await readFile(
+                    join(sourceDirectory, "records/training/protocol.json"),
+                    "utf8",
+                  ),
+                );
+          if (
+            digest(originalProtocol.fingerprint) !== digest(fingerprint) ||
+            originalProtocol.evaluatorHash !== protocol.evaluatorHash ||
+            !calibrationPassed(
+              explanationCalibration,
+              originalReport.calibration,
+            ) ||
+            digest(originalProtocol.calibrationCases) !==
+              digest(explanationCalibration)
+          ) {
+            identical = false;
+            break;
+          }
+          const attempt = originalReport.batches
             .flatMap((b: TrainingBatch) => b.budget.attempts)
             .find(
               (a: any) =>
@@ -388,7 +413,7 @@ try {
             ? JSON.parse(
                 await readFile(
                   join(
-                    lineage.previousDirectory,
+                    sourceDirectory,
                     "records/provider-inputs",
                     `${attempt.id}.json`,
                   ),
@@ -420,7 +445,10 @@ try {
         if (identical)
           report.calibration = structuredClone(
             previousReport.calibration as Report["calibration"],
-          ).map((c) => ({ ...c, reusedFrom: lineage.previousDirectory }));
+          ).map((c) => ({
+            ...c,
+            reusedFrom: c.reusedFrom ?? lineage.previousDirectory,
+          }));
       }
     }
     await storage.save("training", "protocol", protocol);
@@ -479,8 +507,23 @@ try {
   if (stage === "prepare") {
     /* zero external calls */
   } else {
+    if (
+      [
+        "retain-baseline-development-failed",
+        "retain-baseline-holdout-failed",
+      ].includes(report.decision)
+    )
+      throw new Error("当前候选已在质量门槛停止，不继续后续案例或重发。");
     if (iteration) await trainingAdmission();
     if (report.stopReason) throw new Error(report.stopReason);
+    if (
+      stage !== "calibrate" &&
+      iteration &&
+      !calibrationPassed(explanationCalibration, report.calibration)
+    )
+      throw new Error(
+        "先完成独立 calibrate 批次，不将校准与完整比较放入同批。",
+      );
     if (
       stage === "m2" &&
       !report.results.some(
@@ -508,7 +551,8 @@ try {
       throw new Error("M1 未完成校准与 D1 独立评价，不进入 M2。");
     const batch: TrainingBatch = {
       id: randomUUID(),
-      phase: stage === "m1" ? "M1" : "M2",
+      phase:
+        stage === "calibrate" ? "calibration" : stage === "m1" ? "M1" : "M2",
       cycleLimit: iteration ? 70 : 108,
       status: "running",
       budget: new BudgetLedger("batch", async () => {}, undefined, 45 * 60_000)
@@ -539,7 +583,7 @@ try {
     process.once("SIGINT", cancel);
     process.once("SIGTERM", cancel);
     try {
-      if (stage === "m1" && !iteration) {
+      if ((stage === "m1" || stage === "calibrate") && !iteration) {
         for (const sample of calibrationCases) {
           if (report.calibration.some((c) => c.id === sample.id)) continue;
           reserve(1);
@@ -579,7 +623,7 @@ try {
             throw new Error("评价校准未通过，停止产物比较并保留基线。");
         }
       }
-      if (stage === "m1" && iteration) {
+      if (stage === "calibrate" && iteration) {
         if (report.calibration.length < 6)
           reserve(6 - report.calibration.length);
         for (const sample of explanationCalibration) {
@@ -630,9 +674,11 @@ try {
         }
       }
       const selectedCases =
-        stage === "m1"
-          ? trainingCases.filter((c) => c.id === "D1")
-          : trainingCases.filter((c) => c.id !== "D1");
+        stage === "calibrate"
+          ? []
+          : stage === "m1"
+            ? trainingCases.filter((c) => c.id === "D1")
+            : trainingCases.filter((c) => c.id !== "D1");
       for (const test of selectedCases) {
         if (
           ["baseline", "candidate"].every((side) =>
@@ -886,7 +932,6 @@ try {
         }
         if (
           iteration &&
-          test.split === "development" &&
           !report.results.some(
             (r) =>
               r.id === test.id &&
@@ -896,14 +941,21 @@ try {
               r.evaluation.passed,
           )
         ) {
-          report.decision = "retain-baseline-development-failed";
+          report.decision =
+            test.split === "development"
+              ? "retain-baseline-development-failed"
+              : "retain-baseline-holdout-failed";
           break;
         }
       }
       batch.status = "complete";
-      report.decision =
-        report.decision === "retain-baseline-development-failed"
-          ? report.decision
+      report.decision = [
+        "retain-baseline-development-failed",
+        "retain-baseline-holdout-failed",
+      ].includes(report.decision)
+        ? report.decision
+        : stage === "calibrate"
+          ? "retain-baseline-calibrated"
           : stage === "m1" &&
               !report.results.some(
                 (r) =>

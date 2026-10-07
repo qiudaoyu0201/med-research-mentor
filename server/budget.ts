@@ -1,6 +1,6 @@
 import { randomUUID } from "node:crypto";
 import type { Attempt, BudgetState, TokenUsage } from "../shared/types.ts";
-import type { Provider } from "./provider.ts";
+import type { Provider, ProviderObserver } from "./provider.ts";
 import { ProviderFailure } from "./provider.ts";
 import type { z } from "zod";
 
@@ -62,6 +62,7 @@ export class BudgetLedger {
       sourceHash: string;
       skillHash: string;
       onReserved?: (attempt: Attempt) => Promise<void>;
+      observe?: ProviderObserver;
     },
   ) {
     signal.throwIfAborted();
@@ -118,18 +119,95 @@ export class BudgetLedger {
     const timed = AbortSignal.any([signal, AbortSignal.timeout(deadline)]);
     const started = Date.now();
     let abortListener: (() => void) | undefined;
+    let observationWrites = Promise.resolve();
+    let lastObservationWrite = 0;
+    let observationClosed = false;
+    const observe: ProviderObserver = (event) => {
+      if (observationClosed) return;
+      const observation = (attempt.observation ??= {
+        outputUpdates: 0,
+        events: [],
+      });
+      observation.lastActivityAt = event.at;
+      if (event.threadId) observation.threadId = event.threadId;
+      if (event.turnId) observation.turnId = event.turnId;
+      if (event.type === "response") observation.firstResponseAt ??= event.at;
+      if (event.type === "output") {
+        observation.firstOutputAt ??= event.at;
+        observation.outputUpdates++;
+        attempt.rawOutput = event.text;
+        attempt.outputChars = event.text?.length ?? 0;
+      }
+      if (event.type === "usage") {
+        attempt.usage = event.usage;
+        attempt.tokens = normalizeUsage(event.usage);
+      }
+      if (event.type === "timeout") observation.timeoutLayer = event.layer;
+      if (event.type === "interrupt")
+        observation.interruptAcknowledged = event.status === "acknowledged";
+      if (event.type === "terminal") observation.remoteTerminal = event.status;
+      // Output growth is summarized; avoid duplicating every streamed fragment in the ledger.
+      if (
+        event.type !== "output" &&
+        (event.type !== "response" ||
+          !observation.events.some((e) => e.type === "response"))
+      )
+        observation.events.push({
+          type: event.type,
+          at: event.at,
+          status: event.status,
+          layer: event.layer,
+        });
+      options.observe?.(event);
+      if (
+        Date.now() - lastObservationWrite >= 1000 ||
+        ["terminal", "interrupt", "usage"].includes(event.type)
+      ) {
+        lastObservationWrite = Date.now();
+        observationWrites = observationWrites.then(() => this.persist());
+        // Handled here, then surfaced again before final persistence.
+        void observationWrites.catch(() => {});
+      }
+    };
+    const pending = Promise.resolve().then(() =>
+      provider.generate(
+        instructions,
+        input,
+        schema,
+        timed,
+        options.image,
+        observe,
+      ),
+    );
+    // An abort must give cooperative providers time to capture interrupt/terminal events.
+    // Providers that ignore cancellation still cannot hold the ledger indefinitely.
+    const settled = pending.then(
+      () => {},
+      () => {},
+    );
     try {
       const result = await Promise.race([
-        provider.generate(instructions, input, schema, timed, options.image),
+        pending,
         new Promise<never>((_resolve, reject) => {
-          abortListener = () => reject(timed.reason);
+          abortListener = () => {
+            observe({
+              type: signal.aborted ? "cancel" : "timeout",
+              at: new Date().toISOString(),
+              layer: signal.aborted ? "external" : "budget",
+            });
+            const grace = setTimeout(() => reject(timed.reason), 5500);
+            void settled.then(() => {
+              clearTimeout(grace);
+              reject(timed.reason);
+            });
+          };
           timed.addEventListener("abort", abortListener, { once: true });
           if (timed.aborted) abortListener();
         }),
       ]);
       timed.throwIfAborted();
-      attempt.usage = result.usage;
-      attempt.tokens = normalizeUsage(result.usage);
+      attempt.usage = result.usage ?? attempt.usage;
+      attempt.tokens = normalizeUsage(attempt.usage);
       attempt.outputChars = JSON.stringify(result.output).length;
       attempt.status = "succeeded";
       return result;
@@ -143,15 +221,21 @@ export class BudgetLedger {
             : "unknown";
       attempt.error = error instanceof Error ? error.message : "生成失败";
       if (error instanceof ProviderFailure) {
-        attempt.rawOutput = error.rawOutput;
-        attempt.usage = error.usage;
-        attempt.tokens = normalizeUsage(error.usage);
-        attempt.outputChars = error.rawOutput?.length ?? 0;
+        if (error.rawOutput !== undefined) {
+          attempt.rawOutput = error.rawOutput;
+          attempt.outputChars = error.rawOutput.length;
+        }
+        if (error.usage !== undefined) {
+          attempt.usage = error.usage;
+          attempt.tokens = normalizeUsage(error.usage);
+        }
       }
       throw error;
     } finally {
       if (abortListener) timed.removeEventListener("abort", abortListener);
+      observationClosed = true;
       attempt.durationMs = Date.now() - started;
+      await observationWrites.catch(() => {});
       await this.persist();
     }
   }

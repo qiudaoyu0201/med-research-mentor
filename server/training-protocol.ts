@@ -1,7 +1,129 @@
 import type { TrainingCase } from "../evals/internal-training-cases.ts";
 import type { TrainingBatch } from "./internal-training.ts";
+import type { Attempt } from "../shared/types.ts";
 
 export const iterationQuotaVersion = "iteration-v1.1-70x3";
+export const recoveryProtocolVersion = "iteration-v1.2-recovery-c";
+export function calibrationPassed(
+  samples: readonly {
+    id: string;
+    checks: readonly { criterion: string; passed: boolean }[];
+  }[],
+  records: {
+    id: string;
+    expected: boolean;
+    expectedChecks?: { criterion: string; passed: boolean }[];
+    evaluation: {
+      valid: boolean;
+      passed: boolean;
+      review: { checks: { criterion: string; passed: boolean }[] };
+    };
+  }[],
+) {
+  return (
+    records.length === samples.length &&
+    samples.every((sample) => {
+      const matches = records.filter((record) => record.id === sample.id);
+      if (matches.length !== 1) return false;
+      const record = matches[0],
+        expected = sample.checks.every((check) => check.passed);
+      return (
+        record.expected === expected &&
+        record.evaluation.valid &&
+        record.evaluation.passed === expected &&
+        record.expectedChecks?.length === sample.checks.length &&
+        record.evaluation.review.checks.length === sample.checks.length &&
+        sample.checks.every(
+          (check) =>
+            record.expectedChecks!.filter(
+              (c) =>
+                c.criterion === check.criterion && c.passed === check.passed,
+            ).length === 1 &&
+            record.evaluation.review.checks.filter(
+              (c) =>
+                c.criterion === check.criterion && c.passed === check.passed,
+            ).length === 1,
+        )
+      );
+    })
+  );
+}
+export interface TrainingRecovery {
+  version: typeof recoveryProtocolVersion;
+  previousDirectory: string;
+  reportHash: string;
+  originReportHash: string;
+  historicalAttempts: number;
+  priorProductAttempts: number;
+  engineHash: string;
+  planHash: string;
+  attempts: {
+    id: string;
+    status: string;
+    threadId: string | null;
+    turnId: string | null;
+    remoteTerminal: string | null;
+    confirmed: boolean;
+    evidence?: { path: string; hash: string };
+  }[];
+}
+export function validateRecovery(
+  manifest: TrainingRecovery,
+  report: { quota: IterationQuota; batches: TrainingBatch[] },
+  bindings: {
+    reportHash: string;
+    previousDirectory: string;
+    engineHash: string;
+    planHash: string;
+  },
+  verifiedEvidence: Record<string, NonNullable<Attempt["observation"]>> = {},
+) {
+  validateQuota(report.quota);
+  const pending = report.batches
+    .flatMap((b) => b.budget.attempts)
+    .filter((a) => ["reserved", "unknown", "cancelled"].includes(a.status));
+  if (
+    manifest.version !== recoveryProtocolVersion ||
+    report.quota.cycle !== 2 ||
+    manifest.originReportHash !== report.quota.originReportHash ||
+    manifest.historicalAttempts !== 44 ||
+    manifest.priorProductAttempts !==
+      iterationUsage(report.quota, report.batches).product ||
+    Object.entries(bindings).some(
+      ([key, value]) => manifest[key as keyof TrainingRecovery] !== value,
+    ) ||
+    report.batches.some((b) => b.status === "running") ||
+    !pending.length ||
+    manifest.attempts.length !== pending.length ||
+    new Set(manifest.attempts.map((a) => a.id)).size !== pending.length
+  )
+    throw new Error("恢复清单与前序账本、引擎或方案不一致。");
+  for (const attempt of pending) {
+    const entry = manifest.attempts.find((a) => a.id === attempt.id);
+    const observation = entry?.evidence
+      ? verifiedEvidence[attempt.id]
+      : attempt.observation;
+    if (
+      !entry ||
+      entry.status !== attempt.status ||
+      !entry.confirmed ||
+      !observation?.threadId ||
+      !observation.turnId ||
+      !["completed", "interrupted", "failed"].includes(
+        observation.remoteTerminal ?? "",
+      ) ||
+      entry.threadId !== observation.threadId ||
+      entry.turnId !== observation.turnId ||
+      entry.remoteTerminal !== observation.remoteTerminal ||
+      !observation.events.some(
+        (e) => e.type === "terminal" && e.status === entry.remoteTerminal,
+      )
+    )
+      throw new Error(
+        "前序请求远端终止未确认；停止命令确认不代替终态，不派发新候选。",
+      );
+  }
+}
 export interface IterationQuota {
   version: typeof iterationQuotaVersion;
   cycle: number;

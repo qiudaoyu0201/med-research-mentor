@@ -9,7 +9,6 @@ import {
   TrainingProvider,
   reviewArtifact,
   assertContinuation,
-  reserveUnit,
   type TrainingBatch,
 } from "../server/internal-training.ts";
 import {
@@ -33,6 +32,14 @@ import {
 } from "../evals/internal-training-cases.ts";
 import { pptImagePacket } from "../server/ppt-image-packet.ts";
 import { trainingAdmission } from "../server/training-admission.ts";
+import {
+  learningCriteria,
+  learningCalibration,
+  reserveLearningUnit,
+} from "../server/learning-protocol.ts";
+const stage = process.argv[2] ?? "run";
+if (!["calibrate", "run"].includes(stage))
+  throw new Error("学习入口：calibrate / run");
 const directory = resolve(
   process.env.TUTOR_TRAINING_DIR ?? "runs/internal-training/cycle-1",
 );
@@ -163,6 +170,8 @@ try {
       "server/materials.ts",
       "server/ppt-image-packet.ts",
       "server/learner.ts",
+      "server/learning-protocol.ts",
+      "server/provider.ts",
       "evals/internal-training-cases.ts",
     ].map(async (path) => ({
       path,
@@ -178,10 +187,14 @@ try {
     code,
     productProtocol: products.protocolHash,
     products: products.results,
+    learningCriteria,
+    learningCalibration,
   });
   interface LearningReport {
     hash: string;
-    batch: TrainingBatch;
+    batches: TrainingBatch[];
+    calibration: { id: string; matched: boolean; evaluation: unknown }[];
+    status: "calibrating" | "ready" | "running" | "complete" | "stopped";
     results: {
       taskId: string;
       side: string;
@@ -197,16 +210,60 @@ try {
   try {
     report = await store.read<LearningReport>("learning", "report");
     if (report.hash !== learningHash) throw new Error("学习试验输入版本改变");
-    assertContinuation([report.batch]);
-    if (report.batch.status === "complete") {
-      console.log("已有完整学习记录，不重复调用。");
-      process.exitCode = 0;
-    } else throw new Error("学习批次已停止，保留原记录，不自动重发。");
+    assertContinuation(report.batches);
+    if (report.status === "stopped")
+      throw new Error("学习批次已停止，保留原记录，不自动重发。");
   } catch (error: any) {
     if (error.code !== "ENOENT") throw error;
+    report = {
+      hash: learningHash,
+      batches: [],
+      calibration: [],
+      results: [],
+      status: "calibrating",
+    };
+    await store.save("learning", "protocol", {
+      tasks,
+      initial,
+      fingerprint,
+      code,
+      learningHash,
+      productProtocol: products.protocolHash,
+      learningCriteria,
+      learningCalibration,
+      maxCalls: 28,
+      batchLimit: 12,
+      limitations: [
+        "每条件一次，仅模型模拟；自带先验无法消除，不能据单次正确作答归因于教学，真实学习迁移未验。",
+      ],
+    });
+    await store.save("learning", "report", report);
+  }
+  if (
+    report.status === "complete" ||
+    (stage === "calibrate" &&
+      report.calibration.length === 4 &&
+      report.calibration.every((c) => c.matched))
+  ) {
+    console.log("已有完整阶段记录，不重复调用。");
+  } else {
+    if (
+      stage === "run" &&
+      (report.calibration.length !== 4 ||
+        report.calibration.some((c) => !c.matched))
+    )
+      throw new Error("先完成独立学习评价校准批次。");
+    if (stage === "calibrate" && report.calibration.length)
+      throw new Error("校准单元不完整，保留记录，不自动补发。");
+    if (
+      stage === "run" &&
+      report.batches.filter((b) => b.budget.limit === 12).length >= 2
+    )
+      throw new Error("两批学习比较已用完，保留未运行分支，不追加第三批。");
     const batch: TrainingBatch = {
-      id: "learning-cycle-1",
+      id: `learning-batch-${report.batches.length + 1}`,
       phase: "M3",
+      cycleLimit: 28,
       status: "running",
       budget: new BudgetLedger(
         "learning",
@@ -215,35 +272,63 @@ try {
         45 * 60_000,
       ).state,
     };
-    batch.budget.limit = 24;
-    batch.budget.groupLimit = 24;
-    report = { hash: learningHash, batch, results: [] };
+    batch.budget.limit = stage === "calibrate" ? 4 : 12;
+    batch.budget.groupLimit = batch.budget.limit;
+    report.batches.push(batch);
     const persist = () => store.save("learning", "report", report);
-    await store.save("learning", "protocol", {
-      tasks,
-      initial,
-      fingerprint,
-      code,
-      learningHash,
-      productProtocol: products.protocolHash,
-      limitations: [
-        "每条件一次，仅模型模拟；自带先验无法消除，不能据单次正确作答归因于教学，真实学习迁移未验。",
-      ],
-    });
     await persist();
     const counted = new TrainingProvider(
       provider,
       batch,
       persist,
       (id, data) => store.save("learner-inputs", id, data),
-      () => batch.budget.attempts.length,
+      () => report.batches.reduce((n, b) => n + b.budget.attempts.length, 0),
     );
     const controller = new AbortController(),
       cancel = () => controller.abort();
     process.once("SIGINT", cancel);
     process.once("SIGTERM", cancel);
     try {
-      for (const specification of tasks)
+      if (stage === "calibrate") {
+        reserveLearningUnit(batch, report.batches, 4);
+        for (const sample of learningCalibration) {
+          counted.context = `learning-calibration-${sample.id}`;
+          await trainingAdmission();
+          const evaluation = await reviewArtifact(
+            counted,
+            {
+              question: "按可见材料完成独立复述或设计，说明必要推理和依据范围",
+              conditions:
+                "预定学习评价正反例；逐项评价，不把自评理解当作通过。",
+              criteria: learningCriteria,
+              artifact: { text: sample.text },
+              sources: [
+                {
+                  id: "learning-calibration-source",
+                  text: sample.source,
+                  locator: "校准原句",
+                },
+              ],
+            },
+            controller.signal,
+          );
+          const matched =
+            evaluation.valid &&
+            learningCriteria.every((criterion, index) =>
+              evaluation.review.checks.some(
+                (c) =>
+                  c.criterion === criterion &&
+                  c.passed === sample.expected[index],
+              ),
+            );
+          report.calibration.push({ id: sample.id, matched, evaluation });
+          await persist();
+          if (!matched)
+            throw new Error("学习评价逐维校准失败，不启动四条件比较。");
+        }
+        report.status = "ready";
+      }
+      comparisons: for (const specification of stage === "run" ? tasks : [])
         for (const condition of [
           { side: "control", branch: "unlearned" },
           { side: "control", branch: "materials" },
@@ -251,19 +336,35 @@ try {
           { side: "candidate", branch: "materials-and-teaching" },
         ] as const) {
           const { side, branch } = condition;
+          if (
+            report.results.some(
+              (r) =>
+                r.taskId === specification.id &&
+                r.side === side &&
+                r.branch === branch,
+            )
+          )
+            continue;
+          if (batch.budget.attempts.length + 2 > batch.budget.limit)
+            break comparisons;
+          if (
+            Date.parse(batch.budget.deadline) - Date.now() <
+            2 * 180_000 + 120_000
+          )
+            break comparisons;
           const item: LearningReport["results"][number] = {
             taskId: specification.id,
             side,
             branch,
             status: "not-run",
           };
-          report.results.push(item);
           const { material, teaching } = lessonExposure(
             products.results,
             specification.lessonCase,
             side === "control" ? "baseline" : side,
           );
           if (branch === "materials-and-teaching" && !teaching) {
+            report.results.push(item);
             item.reason =
               "前序教学未成功交付；不能用失败草稿或固定答案替代可见教学。";
             await persist();
@@ -309,9 +410,12 @@ try {
               .find((p) => p.id === specification.paperId)!
               .sources.filter((s) => s.image),
           );
-          if (batch.budget.attempts.length + 2 > 24 || batch.stopReason)
+          if (batch.stopReason)
             throw new Error("学习试验额度或状态不允许完整作答及独立评价。");
-          reserveUnit(batch, 2, batch.budget.attempts.length);
+          reserveLearningUnit(batch, report.batches, 2);
+          report.results.push(item);
+          item.status = "running";
+          report.status = "running";
           (report.admission ??= []).push({
             task: specification.id,
             side,
@@ -339,11 +443,7 @@ try {
               question: task.question,
               conditions:
                 "固定初始画像的独立克隆；未经助手改写的原始作答。评价可见依据，不能按自评掌握判通过。",
-              criteria: [
-                "正确完成当前独立复述、设计或汇报任务，解释必要推理连接",
-                "事实和设计边界准确，不编造资源、样本量或实测结果",
-                "作答的知识依据可从可见目标资料和真实曝光支持，额外模型先验须指出",
-              ],
+              criteria: learningCriteria,
               artifact: observation.rawAnswer,
               sources: [
                 ...sources,
@@ -371,8 +471,11 @@ try {
           console.log("learning", specification.id, side, branch, item.status);
         }
       batch.status = "complete";
+      if (stage === "run" && report.results.length === 12)
+        report.status = "complete";
     } catch (error) {
       batch.status = "stopped";
+      report.status = "stopped";
       batch.stopReason ??= String(error);
       console.log("learning stopped", batch.stopReason);
     } finally {

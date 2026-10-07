@@ -47,6 +47,31 @@ export function trainingCost(
     statuses,
     tokens,
     providerMs: attempts.reduce((n, a) => n + a.durationMs, 0),
+    roles: [...new Set(attempts.map((a) => a.role))].map((role) => {
+      const records = attempts.filter((a) => a.role === role);
+      return {
+        role,
+        calls: records.length,
+        providerMs: records.reduce((n, a) => n + a.durationMs, 0),
+        attempts: records.map((a) => ({
+          id: a.id,
+          status: a.status,
+          tokens: a.tokens,
+          firstResponseMs: a.observation?.firstResponseAt
+            ? Date.parse(a.observation.firstResponseAt) -
+              Date.parse(a.startedAt)
+            : null,
+          firstOutputMs: a.observation?.firstOutputAt
+            ? Date.parse(a.observation.firstOutputAt) - Date.parse(a.startedAt)
+            : null,
+          lastActivityAt: a.observation?.lastActivityAt ?? null,
+          outputUpdates: a.observation?.outputUpdates ?? null,
+          timeoutLayer: a.observation?.timeoutLayer ?? null,
+          remoteTerminal: a.observation?.remoteTerminal ?? null,
+          interruptAcknowledged: a.observation?.interruptAcknowledged ?? null,
+        })),
+      };
+    }),
     inputChars: attempts.reduce((n, a) => n + a.inputChars, 0),
     billingModes: [...new Set(batches.map((b) => b.budget.billingMode))],
     amount: null,

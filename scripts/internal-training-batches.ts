@@ -32,10 +32,13 @@ try {
   for (let index = 0; index < 8; index++) {
     const report = await store.read<Report>("training", "report");
     assertContinuation(report.batches);
-    if (report.decision === "retain-baseline-development-failed") {
-      console.log(
-        "开发候选未达质量门槛，保留后续与留出额度；先定位缺口再另立候选。",
-      );
+    if (
+      [
+        "retain-baseline-development-failed",
+        "retain-baseline-holdout-failed",
+      ].includes(report.decision)
+    ) {
+      console.log("候选未达质量门槛，保留后续额度；本周期停止。");
       break;
     }
     const used = report.batches.reduce(
@@ -82,7 +85,7 @@ try {
         [
           resolve("node_modules/tsx/dist/cli.mjs"),
           "scripts/internal-training.ts",
-          "m2",
+          pending[0].id === "D1" ? "m1" : "m2",
         ],
         { stdio: "inherit", windowsHide: true },
       );

@@ -158,125 +158,134 @@ test("new candidate changes generation only; concurrent online and evaluator rul
     cacheKey(input, sample, b.skills.versions, "fixture"),
   );
 });
-test("actual generation and revision receive the candidate while checks only receive source-backed revision changes", async () => {
-  const baseline = await freezeRules(),
-    candidate = explanationCandidateRules(baseline, true);
-  const first = structuredClone(exampleUnits.paper),
-    revised = structuredClone(first);
-  revised.sections[0].text += " 修订后的比较以实际对照为参照。";
-  const feedback = { understood: [], breakpoints: [] };
-  const check = {
-    issues: [
-      {
-        id: "gap",
-        location: first.sections[0].title,
-        type: "teaching",
-        evidence: ["xu-design"],
-        suggestion: "解释比较参照",
-        severity: "warning",
-        resolved: false,
-      },
-    ],
-    checkedSources: ["xu-design"],
-    limitations: [],
-  };
-  const outputs = [
-    {
-      unit: first,
-      deck: null,
-      explanationLinks: [
+for (const tracing of [true, "compact-v1"] as const)
+  test(`actual generation and revision receive ${tracing} candidate while checks only receive source-backed revision changes`, async () => {
+    const baseline = await freezeRules(),
+      candidate = explanationCandidateRules(baseline, tracing);
+    const first = structuredClone(exampleUnits.paper),
+      revised = structuredClone(first);
+    revised.sections[0].text += " 修订后的比较以实际对照为参照。";
+    const feedback = { understood: [], breakpoints: [] };
+    const check = {
+      issues: [
         {
-          purpose: "comparison",
-          goal: "解释比较",
-          sourceIds: ["xu-design"],
-          evidenceQuote: sample.sources
-            .find((s) => s.id === "xu-design")!
-            .text.slice(0, 16),
-          artifactLocation: "unit.sections.0.text",
-          explanation: first.sections[0].text.slice(0, 80),
-          gap: null,
+          id: "gap",
+          location: first.sections[0].title,
+          type: "teaching",
+          evidence: ["xu-design"],
+          suggestion: "解释比较参照",
+          severity: "warning",
+          resolved: false,
         },
       ],
-    },
-    feedback,
-    check,
-    {
-      unit: revised,
-      deck: null,
-      explanationLinks: [
-        {
-          purpose: "comparison",
-          goal: "解释比较",
-          sourceIds: ["xu-design"],
-          evidenceQuote: sample.sources
-            .find((s) => s.id === "xu-design")!
-            .text.slice(0, 16),
-          artifactLocation: "unit.sections.0.text",
-          explanation: revised.sections[0].text.slice(0, 80),
-          gap: null,
-        },
-      ],
-    },
-    feedback,
-    { ...check, issues: [] },
-  ];
-  const calls: { instructions: string; input: any }[] = [];
-  const provider: Provider = {
-    model: "fixture",
-    async generate(instructions, input, schema) {
-      calls.push({ instructions, input: structuredClone(input) });
-      return { output: schema.parse(outputs.shift()) };
-    },
-  };
-  const manager = new TaskManager(provider, async () => {});
-  const run = await withRuleSnapshot(candidate, () =>
-    manager.start(
+      checkedSources: ["xu-design"],
+      limitations: [],
+    };
+    const outputs = [
       {
-        paperId: sample.id,
-        module: "paper",
-        mode: "live",
-        question: "解释对照",
-        profileId: "beginner",
-        sourceIds: sample.sources.map((s) => s.id),
-        taughtConcepts: [],
+        unit: first,
+        deck: null,
+        explanationLinks: [
+          {
+            purpose: "comparison",
+            goal: "解释比较",
+            sourceIds: ["xu-design"],
+            evidenceQuote: sample.sources
+              .find((s) => s.id === "xu-design")!
+              .text.slice(0, 16),
+            sourceQuote: sample.sources
+              .find((s) => s.id === "xu-design")!
+              .text.slice(0, 16),
+            artifactAnchor: first.sections[0].text.slice(0, 40),
+            artifactLocation: "unit.sections.0.text",
+            explanation: first.sections[0].text.slice(0, 80),
+            gap: null,
+          },
+        ],
       },
-      sample,
-    ),
-  );
-  await manager.wait(run.id);
-  assert.equal(run.status, "completed", run.error);
-  assert.equal(calls.length, 6);
-  assert.ok(calls[0].instructions.includes(candidate.teachingContract!));
-  assert.ok(calls[3].instructions.includes(candidate.teachingContract!));
-  assert.equal(
-    calls[2].instructions.includes(candidate.teachingContract!),
-    false,
-  );
-  assert.equal(
-    calls[5].instructions.includes(candidate.teachingContract!),
-    false,
-  );
-  assert.deepEqual(calls[3].input.revisionEvidence.verifiedSourceIds, [
-    "xu-design",
-  ]);
-  assert.ok(
-    calls[5].input.revisionAudit.changes.some(
-      (c: any) => c.location === "unit.sections.0.text",
-    ),
-  );
-  assert.equal("revisionTrace" in run.result!, false);
-  assert.equal("explanationLinks" in run.result!, false);
-  assert.equal(
-    JSON.stringify(calls[1].input).includes('"explanationLinks"'),
-    false,
-  );
-  assert.equal(
-    JSON.stringify(calls[2].input).includes('"explanationLinks"'),
-    false,
-  );
-  assert.ok((run.explanationTrace as { links: unknown[] }).links.length > 0);
-  assert.ok(run.revisionTrace);
-});
+      feedback,
+      check,
+      {
+        unit: revised,
+        deck: null,
+        explanationLinks: [
+          {
+            purpose: "comparison",
+            goal: "解释比较",
+            sourceIds: ["xu-design"],
+            evidenceQuote: sample.sources
+              .find((s) => s.id === "xu-design")!
+              .text.slice(0, 16),
+            sourceQuote: sample.sources
+              .find((s) => s.id === "xu-design")!
+              .text.slice(0, 16),
+            artifactAnchor: revised.sections[0].text.slice(0, 40),
+            artifactLocation: "unit.sections.0.text",
+            explanation: revised.sections[0].text.slice(0, 80),
+            gap: null,
+          },
+        ],
+      },
+      feedback,
+      { ...check, issues: [] },
+    ];
+    const calls: { instructions: string; input: any }[] = [];
+    const provider: Provider = {
+      model: "fixture",
+      async generate(instructions, input, schema) {
+        calls.push({ instructions, input: structuredClone(input) });
+        return { output: schema.parse(outputs.shift()) };
+      },
+    };
+    const manager = new TaskManager(provider, async () => {});
+    const run = await withRuleSnapshot(candidate, () =>
+      manager.start(
+        {
+          paperId: sample.id,
+          module: "paper",
+          mode: "live",
+          question: "解释对照",
+          profileId: "beginner",
+          sourceIds: sample.sources.map((s) => s.id),
+          taughtConcepts: [],
+        },
+        sample,
+      ),
+    );
+    await manager.wait(run.id);
+    assert.equal(run.status, "completed", run.error);
+    assert.equal(calls.length, 6);
+    assert.ok(calls[0].instructions.includes(candidate.teachingContract!));
+    assert.ok(calls[3].instructions.includes(candidate.teachingContract!));
+    assert.equal(
+      calls[2].instructions.includes(candidate.teachingContract!),
+      false,
+    );
+    assert.equal(
+      calls[5].instructions.includes(candidate.teachingContract!),
+      false,
+    );
+    assert.deepEqual(calls[3].input.revisionEvidence.verifiedSourceIds, [
+      "xu-design",
+    ]);
+    assert.ok(
+      calls[5].input.revisionAudit.changes.some(
+        (c: any) => c.location === "unit.sections.0.text",
+      ),
+    );
+    assert.equal("revisionTrace" in run.result!, false);
+    assert.equal("explanationLinks" in run.result!, false);
+    assert.equal(
+      JSON.stringify(calls[1].input).includes('"explanationLinks"'),
+      false,
+    );
+    assert.equal(
+      JSON.stringify(calls[2].input).includes('"explanationLinks"'),
+      false,
+    );
+    assert.ok((run.explanationTrace as { links: unknown[] }).links.length > 0);
+    assert.ok(run.revisionTrace);
+  });
 test("revision audit locates changed references and formulas, keeps both drafts, and permits evidence-backed correction", () => {
   const artifact = (text: string): TeachingArtifact => ({
     unit: {

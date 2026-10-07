@@ -1,10 +1,13 @@
 import { z } from "zod";
-import type { Provider } from "./provider.ts";
+import type { Provider, ProviderObserver } from "./provider.ts";
 import type { BudgetState } from "../shared/types.ts";
 import { BudgetLedger } from "./budget.ts";
 import { digest } from "./materials.ts";
 import type { RuleSnapshot } from "./skills.ts";
-import { explanationLinksInstruction } from "./explanation-links.ts";
+import {
+  explanationLinksInstruction,
+  compactExplanationLinksInstruction,
+} from "./explanation-links.ts";
 
 export const feedbackCandidate = `
 反馈整合与解释深度：feedback、review、previousIssues、materialRequests 和 openQuestions 是待审计的工作记录。逐项判断其是否影响用户当前问题；新手不理解时补上推理桥梁，不以删掉关键概念或泛泛比喻替代；核对意见要求额外专业细节时，先判断该细节是否改变当前结论或可行性，不能为迎合核对扩展为未请求的复现实验手册。
@@ -23,19 +26,30 @@ export function candidateRules(baseline: RuleSnapshot): RuleSnapshot {
 export const sourceExplanationCandidate = `针对当前问题，先识别结论依赖的研究对象、测量原理、干预选择和对照作用，分别把必要解释融入正文或逐页讲稿。每个适用原理说明测到或改变什么、为何选用、实际来源如何支持读数到判断；某项已讲清不能替代另一项。首次术语用准确短句解释。先利用实际可见来源，确实缺失才说明影响。数字、单位、方向和参照以来源及原图为准；歧义保持具体未知，不由词义推导公式。反馈是待审计意见，只补影响当前结论的理解断点。直接给解释，科学限制贴近对应结论说明一次，工作记录留在结构化记录，避免重复核验状态和预先辩解。`;
 export function explanationCandidateRules(
   baseline: RuleSnapshot,
-  traced = false,
+  traced: boolean | "compact-v1" = false,
 ): RuleSnapshot {
   return {
     ...structuredClone(baseline),
     teachingContract:
       sourceExplanationCandidate +
-      (traced ? "\n" + explanationLinksInstruction : ""),
+      (traced
+        ? "\n" +
+          (traced === "compact-v1"
+            ? compactExplanationLinksInstruction
+            : explanationLinksInstruction)
+        : ""),
     explanationTracing: traced,
+    teachingContractVersion:
+      traced === "compact-v1"
+        ? "source-explanation-c"
+        : traced
+          ? "source-explanation-b"
+          : "source-explanation-a",
   };
 }
 export interface TrainingBatch {
   id: string;
-  phase: "M1" | "M2" | "M3";
+  phase: "M1" | "M2" | "M3" | "calibration";
   status: "running" | "complete" | "stopped";
   budget: BudgetState;
   stopReason?: string;
@@ -60,10 +74,16 @@ export function reserveUnit(
   batch: TrainingBatch,
   required: number,
   cycleUsed: number,
-  minimumMs = required * 60_000,
+  minimumMs = required * 180_000 + 120_000,
 ) {
-  const limit = batch.phase === "M3" ? 36 : (batch.cycleLimit ?? 108);
+  const limit = batch.cycleLimit ?? (batch.phase === "M3" ? 36 : 108);
   if (
+    !Number.isSafeInteger(required) ||
+    required < 1 ||
+    !Number.isSafeInteger(cycleUsed) ||
+    cycleUsed < 0 ||
+    !Number.isFinite(minimumMs) ||
+    minimumMs < 0 ||
     batch.status !== "running" ||
     batch.stopReason ||
     batch.budget.attempts.length + required > batch.budget.limit ||
@@ -107,6 +127,7 @@ export class TrainingProvider implements Provider {
     schema: z.ZodType<T>,
     signal: AbortSignal,
     image?: string,
+    observe?: ProviderObserver,
   ) {
     reserveUnit(this.batch, 1, this.cycleUsed(), 1);
     return this.ledger
@@ -125,6 +146,7 @@ export class TrainingProvider implements Provider {
             model: this.model,
             settings: this.settings,
           }),
+        observe,
       })
       .catch(async (error) => {
         const last = this.batch.budget.attempts.at(-1);

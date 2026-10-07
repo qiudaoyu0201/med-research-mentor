@@ -88,7 +88,8 @@ test("training stops before an unaffordable whole pair and preserves consumed cy
   const b = batch();
   b.budget.limit = 24;
   b.budget.groupLimit = 24;
-  reserveUnit(b, 16, 6);
+  reserveUnit(b, 14, 6);
+  assert.throws(() => reserveUnit(b, 16, 6)); // 48 + 2 minutes cannot fit a 45-minute batch.
   assert.throws(() => reserveUnit(b, 16, 100));
   b.budget.deadline = new Date(Date.now() + 1000).toISOString();
   assert.throws(() => reserveUnit(b, 16, 0));

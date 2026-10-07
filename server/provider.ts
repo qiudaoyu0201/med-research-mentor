@@ -4,6 +4,25 @@ import { mkdir } from "node:fs/promises";
 import { resolve } from "node:path";
 import { EventEmitter } from "node:events";
 import { z } from "zod";
+export interface ProviderEvent {
+  type:
+    | "response"
+    | "output"
+    | "usage"
+    | "timeout"
+    | "cancel"
+    | "interrupt"
+    | "terminal"
+    | "closed";
+  at: string;
+  text?: string;
+  usage?: unknown;
+  threadId?: string;
+  turnId?: string;
+  status?: string;
+  layer?: string;
+}
+export type ProviderObserver = (event: ProviderEvent) => void;
 export interface Provider {
   id?: string;
   billingMode?: "chatgpt" | "api";
@@ -21,6 +40,7 @@ export interface Provider {
     schema: z.ZodType<T>,
     signal: AbortSignal,
     image?: string,
+    observe?: ProviderObserver,
   ): Promise<{ output: T; usage?: unknown }>;
 }
 export class ProviderFailure extends Error {
@@ -145,6 +165,13 @@ export class CodexClient {
   }
 }
 export class CodexProvider implements Provider {
+  constructor(
+    private clientFactory: () => Pick<
+      CodexClient,
+      "init" | "rpc" | "close" | "events"
+    > = () => new CodexClient(),
+    private timeoutMs = 180_000,
+  ) {}
   id = "codex-chatgpt";
   billingMode = "chatgpt" as const;
   capabilities = {
@@ -188,19 +215,17 @@ export class CodexProvider implements Provider {
     schema: z.ZodType<T>,
     signal: AbortSignal,
     image?: string,
+    observe?: ProviderObserver,
   ): Promise<{ output: T; usage?: unknown }> {
     signal.throwIfAborted();
-    const client = new CodexClient();
+    const client = this.clientFactory();
     let threadId: string | undefined, turnId: string | undefined;
+    const emit = (event: Omit<ProviderEvent, "at">) =>
+      observe?.({ ...event, at: new Date().toISOString(), threadId, turnId });
     const cwd = resolve("data/model-workspace");
-    const abort = () => {
-      if (threadId && turnId)
-        void client
-          .rpc("turn/interrupt", { threadId, turnId }, 5000)
-          .catch(() => {});
-      client.close();
-    };
-    signal.addEventListener("abort", abort, { once: true });
+    let abort = () => client.close();
+    const abortListener = () => abort();
+    signal.addEventListener("abort", abortListener, { once: true });
     try {
       await mkdir(cwd, { recursive: true });
       signal.throwIfAborted();
@@ -243,17 +268,22 @@ export class CodexProvider implements Provider {
         let text = "",
           usage: unknown;
         let settled = false;
-        const timer = setTimeout(
-          () => finish(new Error("本次生成超过 180 秒；已停止，未自动重发。")),
-          180_000,
-        );
+        let stopping = false;
+        let remoteEnded = false;
+        let terminalReceived: () => void;
+        const terminal = new Promise<void>((done) => {
+          terminalReceived = done;
+        });
+        const timer = setTimeout(() => {
+          emit({ type: "timeout", layer: "provider" });
+          void stop(new Error("本次生成超过 180 秒；已停止，未自动重发。"));
+        }, this.timeoutMs);
         const finish = (error?: Error) => {
           if (settled) return;
           settled = true;
           clearTimeout(timer);
           client.events.off("message", onMessage);
           client.events.off("closed", onClosed);
-          signal.removeEventListener("abort", onAbort);
           if (error) {
             client.close();
             reject(
@@ -274,24 +304,75 @@ export class CodexProvider implements Provider {
             }
           }
         };
-        const onAbort = () => finish(new Error("任务已取消"));
-        const onClosed = () => finish(new Error("生成中断；未自动重发。"));
+        const stop = async (error: Error) => {
+          if (settled || stopping) return;
+          stopping = true;
+          clearTimeout(timer);
+          if (threadId && turnId) {
+            try {
+              await client.rpc("turn/interrupt", { threadId, turnId }, 4500);
+              emit({ type: "interrupt", status: "acknowledged" });
+            } catch {
+              emit({ type: "interrupt", status: "unconfirmed" });
+            }
+          }
+          if (!settled && !remoteEnded) {
+            // A successful interrupt RPC often precedes the turn's terminal notification.
+            let timer: NodeJS.Timeout | undefined;
+            await Promise.race([
+              terminal,
+              new Promise<void>((done) => {
+                timer = setTimeout(done, 500);
+              }),
+            ]);
+            if (timer) clearTimeout(timer);
+          }
+          finish(error);
+        };
+        abort = () => {
+          emit({ type: "cancel", layer: "signal" });
+          void stop(new Error("任务已取消或达到期限"));
+        };
+        const onClosed = () => {
+          emit({ type: "closed", status: "transport-closed" });
+          finish(new Error("生成中断；未自动重发。"));
+        };
         const onMessage = (msg: any) => {
           if (msg.params?.threadId !== threadId) return;
+          if (turnId && msg.params?.turnId && msg.params.turnId !== turnId)
+            return;
+          emit({ type: "response" });
           const item = msg.params?.item;
           if (
             msg.method === "item/started" &&
             item &&
             !["userMessage", "agentMessage", "reasoning"].includes(item.type)
           ) {
-            finish(new Error("接入路径尝试使用未授权工具，本任务已停止。"));
+            void stop(new Error("接入路径尝试使用未授权工具，本任务已停止。"));
             return;
           }
-          if (msg.method === "item/completed" && item?.type === "agentMessage")
+          if (msg.method === "item/agentMessage/delta") {
+            text += msg.params.delta ?? "";
+            emit({ type: "output", text });
+          }
+          if (
+            msg.method === "item/completed" &&
+            item?.type === "agentMessage"
+          ) {
             text = item.text;
-          if (msg.method === "thread/tokenUsage/updated")
+            emit({ type: "output", text });
+          }
+          if (msg.method === "thread/tokenUsage/updated") {
             usage = msg.params.tokenUsage;
+            emit({ type: "usage", usage });
+          }
           if (msg.method === "turn/completed") {
+            if (turnId && msg.params.turn.id !== turnId) return;
+            turnId ??= msg.params.turn.id;
+            emit({ type: "terminal", status: msg.params.turn.status });
+            remoteEnded = true;
+            terminalReceived();
+            if (stopping) return;
             if (msg.params.turn.status !== "completed") {
               const detail = msg.params.turn.error?.message || "";
               finish(
@@ -303,12 +384,11 @@ export class CodexProvider implements Provider {
                       : "Codex 未完成生成；检查登录、额度或模型权限。",
                 ),
               );
-            } else finish();
+            } else if (!stopping && !signal.aborted) finish();
           }
         };
         client.events.on("message", onMessage);
         client.events.once("closed", onClosed);
-        signal.addEventListener("abort", onAbort, { once: true });
         const items: any[] = [{ type: "text", text: JSON.stringify(input) }];
         if (image) items.push({ type: "image", url: image });
         const outputSchema = z.toJSONSchema(schema);
@@ -333,12 +413,13 @@ export class CodexProvider implements Provider {
           })
           .then((result) => {
             turnId = result.turn.id;
-            if (signal.aborted) onAbort();
+            emit({ type: "response" });
+            if (signal.aborted) abort();
           })
           .catch(finish);
       });
     } finally {
-      signal.removeEventListener("abort", abort);
+      signal.removeEventListener("abort", abortListener);
       client.close();
     }
   }

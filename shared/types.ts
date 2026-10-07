@@ -277,6 +277,18 @@ export interface TokenUsage {
   total: number | null;
 }
 export interface Attempt {
+  observation?: {
+    firstResponseAt?: string;
+    firstOutputAt?: string;
+    lastActivityAt?: string;
+    outputUpdates: number;
+    threadId?: string;
+    turnId?: string;
+    timeoutLayer?: string;
+    interruptAcknowledged?: boolean;
+    remoteTerminal?: string;
+    events: { type: string; at: string; status?: string; layer?: string }[];
+  };
   providerId?: string;
   id: string;
   turnId: string;

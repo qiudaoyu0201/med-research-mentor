@@ -36,7 +36,7 @@ import {
   revisionAuditInput,
 } from "./revision-trace.ts";
 import {
-  explanationLinksSchema,
+  tracingSchema,
   validateExplanationLinks,
 } from "./explanation-links.ts";
 
@@ -624,7 +624,9 @@ export class TaskManager {
           run.input.speechScript,
         );
         const generationSchema = skills.explanationTracing
-          ? baseSchema.extend({ explanationLinks: explanationLinksSchema })
+          ? baseSchema.extend({
+              explanationLinks: tracingSchema(skills.explanationTracing),
+            })
           : baseSchema;
         let generated = await call(
           "teaching",
@@ -653,6 +655,7 @@ export class TaskManager {
               sources,
               run.input.question,
               requestedDeck ? "ppt" : "paper",
+              skills.explanationTracing,
             ),
           };
         if (readCheck) await set("novice");
@@ -810,7 +813,7 @@ export class TaskManager {
             },
             skills.explanationTracing
               ? groundedTeachingSchema(sources, run.input.speechScript).extend({
-                  explanationLinks: explanationLinksSchema,
+                  explanationLinks: tracingSchema(skills.explanationTracing),
                 })
               : groundedTeachingSchema(sources, run.input.speechScript),
           );
@@ -827,6 +830,7 @@ export class TaskManager {
                 sources,
                 run.input.question,
                 requestedDeck ? "ppt" : "paper",
+                skills.explanationTracing,
               ),
             };
           const trace = revisionTrace(

@@ -7,7 +7,11 @@ import {
   validateQuota,
   iterationUsage,
   type IterationQuota,
+  type TrainingRecovery,
+  validateRecovery,
 } from "./training-protocol.ts";
+import { recoveryBindings } from "./training-engine.ts";
+import { readRecoveryEvidence } from "./training-recovery.ts";
 
 // A new candidate starts a new protocol; old dispatches, including unknowns,
 // still consume the first round's 108-call budget. Never resume old attempts.
@@ -59,14 +63,43 @@ export async function iterationLineage(
       "utf8",
     ),
   );
-  if (
-    report.batches.some((b: TrainingBatch) =>
-      b.budget.attempts.some((a) =>
-        ["reserved", "unknown", "cancelled"].includes(a.status),
+  const uncertain = report.batches.some((b: TrainingBatch) =>
+    b.budget.attempts.some((a) =>
+      ["reserved", "unknown", "cancelled"].includes(a.status),
+    ),
+  );
+  if (uncertain) {
+    const recoveryPath = process.env.TUTOR_TRAINING_RECOVERY;
+    if (!recoveryPath)
+      throw new Error("前序新派发状态未确认，不能继续候选周期。");
+    const manifest = JSON.parse(
+      await readFile(resolve(recoveryPath), "utf8"),
+    ) as TrainingRecovery;
+    const evidence = Object.fromEntries(
+      await Promise.all(
+        manifest.attempts
+          .filter((a) => a.evidence)
+          .map(async (a) => [
+            a.id,
+            await readRecoveryEvidence(
+              a.evidence!,
+              lineage.previousDirectory!,
+              a.id,
+            ),
+          ]),
       ),
-    )
-  )
-    throw new Error("前序新派发状态未确认，不能继续候选周期。");
+    );
+    validateRecovery(
+      manifest,
+      report,
+      {
+        ...(await recoveryBindings()),
+        previousDirectory: lineage.previousDirectory,
+        reportHash: lineage.reportHash,
+      },
+      evidence,
+    );
+  }
   let quota: IterationQuota;
   if (report.quota) {
     const previous = report.quota as IterationQuota;
