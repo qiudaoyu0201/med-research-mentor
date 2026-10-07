@@ -3,7 +3,9 @@ import type { TrainingBatch } from "./internal-training.ts";
 import type { Attempt } from "../shared/types.ts";
 
 export const iterationQuotaVersion = "iteration-v1.1-70x3";
-export const recoveryProtocolVersion = "iteration-v1.2-recovery-c";
+export const recoveryProtocolVersion = "iteration-v1.3-isolated-c";
+export const historicalCancelledAttempt =
+  "e4be626d-08dc-485a-8c25-2aef5aad24a8";
 export function calibrationPassed(
   samples: readonly {
     id: string;
@@ -57,6 +59,8 @@ export interface TrainingRecovery {
   priorProductAttempts: number;
   engineHash: string;
   planHash: string;
+  disposition?: "historical-unknown-isolated";
+  decisionReason?: string;
   attempts: {
     id: string;
     status: string;
@@ -98,6 +102,32 @@ export function validateRecovery(
     new Set(manifest.attempts.map((a) => a.id)).size !== pending.length
   )
     throw new Error("恢复清单与前序账本、引擎或方案不一致。");
+  // A one-off decision for the archived B cancellation. Admission does not
+  // assert remote completion, and this never permits replay or new unknowns.
+  if (manifest.disposition !== undefined) {
+    const attempt = pending[0],
+      entry = manifest.attempts[0];
+    if (
+      manifest.disposition !== "historical-unknown-isolated" ||
+      pending.length !== 1 ||
+      attempt.id !== historicalCancelledAttempt ||
+      attempt.status !== "cancelled" ||
+      manifest.priorProductAttempts !== 22 ||
+      !manifest.decisionReason?.trim() ||
+      entry.id !== attempt.id ||
+      entry.status !== attempt.status ||
+      entry.confirmed !== false ||
+      entry.evidence !== undefined ||
+      entry.threadId !== (attempt.observation?.threadId ?? null) ||
+      entry.turnId !== (attempt.observation?.turnId ?? null) ||
+      entry.remoteTerminal !== null ||
+      attempt.observation?.remoteTerminal
+    )
+      throw new Error(
+        "历史隔离仅适用于旧 B 的单一取消请求，不能确认终态或放行新未知派发。",
+      );
+    return;
+  }
   for (const attempt of pending) {
     const entry = manifest.attempts.find((a) => a.id === attempt.id);
     const observation = entry?.evidence

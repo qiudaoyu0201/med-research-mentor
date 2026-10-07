@@ -1,13 +1,20 @@
-import { readFile, writeFile, mkdir } from "node:fs/promises";
+import { readFile, writeFile, mkdir, access } from "node:fs/promises";
 import { resolve, join, relative, isAbsolute } from "node:path";
 import { createHash } from "node:crypto";
 import { recoveryBindings, hashFile } from "../server/training-engine.ts";
 import { readRecoveryEvidence } from "../server/training-recovery.ts";
+import { trainingAdmission } from "../server/training-admission.ts";
 import {
   recoveryProtocolVersion,
   iterationUsage,
+  validateRecovery,
   type TrainingRecovery,
 } from "../server/training-protocol.ts";
+const isolateHistorical = process.argv
+  .slice(2)
+  .includes("--isolate-historical-b");
+if (process.argv.slice(2).some((arg) => arg !== "--isolate-historical-b"))
+  throw new Error("未知恢复选项。");
 const previousDirectory = resolve(
   process.env.TUTOR_TRAINING_PREVIOUS_DIR ??
     "runs/internal-training/iteration-b",
@@ -78,6 +85,28 @@ if (process.env.TUTOR_TRAINING_TERMINAL_EVIDENCE) {
     remoteTerminal: observation.remoteTerminal,
   });
 }
+if (isolateHistorical) {
+  for (const path of [
+    resolve("runs/internal-training/dispatch.lock"),
+    join(previousDirectory, "runner.lock"),
+  ]) {
+    try {
+      await access(path);
+      throw new Error("本地训练锁仍存在，不能建立历史隔离准入。");
+    } catch (error: any) {
+      if (error.code !== "ENOENT") throw error;
+    }
+  }
+  const admission = await trainingAdmission();
+  manifest.disposition = "historical-unknown-isolated";
+  manifest.decisionReason = `旧 B 本地批次已停止，在线状态 ${admission.online}；保留未确认远端终态和未知用量，新 C 独立派发，不重发旧请求。`;
+  validateRecovery(manifest, report, {
+    previousDirectory,
+    reportHash: manifest.reportHash,
+    engineHash: manifest.engineHash,
+    planHash: manifest.planHash,
+  });
+}
 await mkdir(directory, { recursive: true });
 const path = resolve(
   process.env.TUTOR_TRAINING_RECOVERY ?? join(directory, "recovery.json"),
@@ -95,7 +124,9 @@ console.log(
     path,
     admitted:
       manifest.attempts.length > 0 &&
-      manifest.attempts.every((a) => a.confirmed),
+      (manifest.disposition === "historical-unknown-isolated" ||
+        manifest.attempts.every((a) => a.confirmed)),
+    disposition: manifest.disposition ?? "verified-terminal-required",
     historicalAttempts: manifest.historicalAttempts,
     priorProductAttempts: manifest.priorProductAttempts,
     modelCalls: 0,

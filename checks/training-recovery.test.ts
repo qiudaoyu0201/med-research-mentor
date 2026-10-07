@@ -25,6 +25,7 @@ import {
 import {
   validateRecovery,
   recoveryProtocolVersion,
+  historicalCancelledAttempt,
   iterationUsage,
   type TrainingRecovery,
   type IterationQuota,
@@ -742,6 +743,95 @@ test("recovery inherits every prior call and requires exact remote evidence, rep
   );
   assert.equal(budget.attempts[5].status, "cancelled");
 });
+test("historical B isolation preserves unknown cost and only admits its stopped second-cycle cancellation", () => {
+  const budget = new BudgetLedger("fixture", async () => {}).state;
+  budget.attempts = Array.from({ length: 6 }, (_, i) => ({
+    id: i === 5 ? historicalCancelledAttempt : `done-${i}`,
+    status: i === 5 ? "cancelled" : "succeeded",
+  })) as never;
+  const report = {
+    quota: {
+      version: "iteration-v1.1-70x3" as const,
+      cycle: 2,
+      historicalAttempts: 44,
+      priorProductAttempts: 16,
+      previousReportHash: "a".repeat(64),
+      originReportHash: "b".repeat(64),
+    },
+    batches: [
+      { id: "B", phase: "M1", status: "stopped", budget } as TrainingBatch,
+    ],
+  };
+  const bindings = {
+    previousDirectory: "B",
+    reportHash: "c".repeat(64),
+    engineHash: "d".repeat(64),
+    planHash: "e".repeat(64),
+  };
+  const manifest: TrainingRecovery = {
+    version: recoveryProtocolVersion,
+    ...bindings,
+    originReportHash: report.quota.originReportHash,
+    historicalAttempts: 44,
+    priorProductAttempts: 22,
+    disposition: "historical-unknown-isolated",
+    decisionReason: "保留未知远端状态与用量，独立派发 C，不重发 B。",
+    attempts: [
+      {
+        id: historicalCancelledAttempt,
+        status: "cancelled",
+        threadId: null,
+        turnId: null,
+        remoteTerminal: null,
+        confirmed: false,
+      },
+    ],
+  };
+  const original = JSON.stringify(report);
+  validateRecovery(manifest, report, bindings);
+  assert.equal(JSON.stringify(report), original);
+  assert.equal(iterationUsage(report.quota, report.batches).combined, 66);
+  for (const change of [
+    { disposition: undefined },
+    { decisionReason: "" },
+    { reportHash: "f".repeat(64) },
+    { engineHash: "f".repeat(64) },
+    { planHash: "f".repeat(64) },
+    { priorProductAttempts: 21 },
+    { attempts: [{ ...manifest.attempts[0], confirmed: true }] },
+    { attempts: [{ ...manifest.attempts[0], remoteTerminal: "interrupted" }] },
+    { attempts: [{ ...manifest.attempts[0], id: "new-cancelled" }] },
+    { attempts: [...manifest.attempts, manifest.attempts[0]] },
+  ])
+    assert.throws(() =>
+      validateRecovery({ ...manifest, ...change }, report, bindings),
+    );
+  for (const status of ["reserved", "unknown"]) {
+    const changed = structuredClone(report);
+    changed.batches[0].budget.attempts[5].status = status as "unknown";
+    assert.throws(() =>
+      validateRecovery(
+        { ...manifest, attempts: [{ ...manifest.attempts[0], status }] },
+        changed,
+        bindings,
+      ),
+    );
+  }
+  const running = structuredClone(report);
+  running.batches[0].status = "running";
+  assert.throws(() => validateRecovery(manifest, running, bindings));
+  const fourth = structuredClone(report);
+  fourth.quota.cycle = 3;
+  assert.throws(() => validateRecovery(manifest, fourth, bindings));
+  const extra = structuredClone(report);
+  extra.batches[0].budget.attempts.push({
+    ...extra.batches[0].budget.attempts[5],
+    id: "new-unknown",
+    status: "unknown",
+  });
+  assert.throws(() => validateRecovery(manifest, extra, bindings));
+});
+
 test("whole-pair admission uses 180 seconds per role and learning shares a 28-call ledger across batches", () => {
   const budget = new BudgetLedger(
     "fixture",
