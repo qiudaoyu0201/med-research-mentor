@@ -18,7 +18,11 @@
     "test:browser": "tsx checks/browser.ts",
     "format": "prettier --write app server shared scripts checks evals examples vite.config.ts tsconfig.json package.json",
     "transfer:check": "tsx scripts/transfer-check.ts",
-    "learner:check": "tsx scripts/learner-check.ts"
+    "learner:check": "tsx scripts/learner-check.ts",
+    "training:prepare": "tsx scripts/internal-training-assets.ts && tsx scripts/internal-training.ts prepare",
+    "training:m1": "tsx scripts/internal-training.ts m1",
+    "training:m2": "tsx scripts/internal-training-batches.ts",
+    "training:m3": "tsx scripts/internal-learning.ts"
   },
   "dependencies": {
     "@napi-rs/canvas": "^1.0.10",

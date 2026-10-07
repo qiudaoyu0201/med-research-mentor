@@ -3,9 +3,35 @@ import { createHash } from "node:crypto";
 import { resolve, relative, isAbsolute } from "node:path";
 import { realpath } from "node:fs/promises";
 import { parse } from "yaml";
+import { AsyncLocalStorage } from "node:async_hooks";
 import type { Module } from "../shared/types.ts";
 
 const skillRoot = resolve("skills");
+export interface RuleSnapshot {
+  shared: string;
+  entries: Record<
+    string,
+    { text: string; version: string; description: string; hash: string }
+  >;
+}
+const internalRules = new AsyncLocalStorage<RuleSnapshot>();
+// Internal comparisons have independent snapshots; regular requests load active rules.
+export function withRuleSnapshot<T>(snapshot: RuleSnapshot, work: () => T): T {
+  return internalRules.run(structuredClone(snapshot), work);
+}
+export async function sharedRules() {
+  return (
+    internalRules.getStore()?.shared ??
+    readFile("skills/shared/rules.md", "utf8")
+  );
+}
+export async function freezeRules(): Promise<RuleSnapshot> {
+  const catalog = await skillCatalog();
+  const entries = await Promise.all(
+    catalog.map(async ({ id }) => [id, await loadSkill(id)] as const),
+  );
+  return { shared: await sharedRules(), entries: Object.fromEntries(entries) };
+}
 export function parseSkill(text: string, id: string) {
   const match = /^---\r?\n([\s\S]*?)\r?\n---\r?\n([\s\S]*)$/.exec(text);
   if (!match) throw new Error(`${id}: 缺少 Skill YAML 入口`);
@@ -51,12 +77,19 @@ export async function loadSkill(
   override?: { id: string; text: string; version: string },
 ) {
   if (!/^[a-z0-9]+(?:-[a-z0-9]+)*$/.test(id)) throw new Error("Skill 编号无效");
+  const frozen = internalRules.getStore()?.entries[id];
+  if (frozen && !override) return { id, ...structuredClone(frozen) };
   const original = await readFile(resolve(skillRoot, id, "SKILL.md"), "utf8");
   const entry = parseSkill(original, id);
   const manifest = JSON.parse(
     await readFile(resolve(skillRoot, id, "manifest.json"), "utf8"),
   );
-  const text = override?.id === id ? override.text : entry.body;
+  const text =
+    override?.id === id
+      ? override.text.startsWith("---")
+        ? parseSkill(override.text, id).body
+        : override.text
+      : entry.body;
   const version = override?.id === id ? override.version : manifest.version;
   await validateSkillReferences(id, text);
   return {
@@ -116,7 +149,7 @@ export async function loadSkills(
     ...(roles.readability ? ["medical-novice-simulator"] : []),
     ...(roles.grounding ? ["medical-grounding-check"] : []),
   ];
-  const shared = await readFile("skills/shared/rules.md", "utf8");
+  const shared = await sharedRules();
   const modules = await Promise.all(
     ids.map(async (id) => {
       return loadSkill(id, override);

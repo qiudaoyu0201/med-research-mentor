@@ -1,5 +1,5 @@
 import { randomUUID } from "node:crypto";
-import { readFile } from "node:fs/promises";
+import { sharedRules } from "./skills.ts";
 import type { PaperBundle } from "../shared/types.ts";
 import type {
   PlanContent,
@@ -333,7 +333,7 @@ export class ResearchPlans {
     });
   }
   private async capability() {
-    const shared = await readFile("skills/shared/rules.md", "utf8");
+    const shared = await sharedRules();
     const instructions = {
       generation: shared + "\n" + generationRules,
       review: reviewRules,
