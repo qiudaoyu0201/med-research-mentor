@@ -266,6 +266,8 @@ export interface TaskRun {
   materials?: MaterialSnapshot[];
   materialRequests?: MaterialRequest[];
   evaluationBudget?: BudgetState;
+  explanationTrace?: unknown;
+  revisionTrace?: unknown;
 }
 
 export interface TokenUsage {

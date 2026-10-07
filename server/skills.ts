@@ -9,10 +9,18 @@ import type { Module } from "../shared/types.ts";
 const skillRoot = resolve("skills");
 export interface RuleSnapshot {
   shared: string;
+  teachingContract?: string;
+  explanationTracing?: boolean;
   entries: Record<
     string,
     { text: string; version: string; description: string; hash: string }
   >;
+}
+export function teachingContract() {
+  return internalRules.getStore()?.teachingContract ?? "";
+}
+export function explanationTracing() {
+  return internalRules.getStore()?.explanationTracing === true;
 }
 const internalRules = new AsyncLocalStorage<RuleSnapshot>();
 // Internal comparisons have independent snapshots; regular requests load active rules.
@@ -159,9 +167,14 @@ export async function loadSkills(
     createHash("sha256").update(text).digest("hex").slice(0, 12);
   return {
     shared,
+    teachingContract: teachingContract(),
+    explanationTracing: explanationTracing(),
     modules,
     versions: Object.fromEntries([
       ["shared", digest(shared)],
+      ...(teachingContract()
+        ? [["teaching-contract", digest(teachingContract())]]
+        : []),
       ...modules.map((m) => [m.id, m.hash]),
     ]),
   };

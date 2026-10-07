@@ -11,7 +11,8 @@ export type TextBox = {
 };
 export const slideSize = { width: 13.333333, height: 7.5 };
 export function wrapSlideText(text: string, width: number, fontSize: number) {
-  const limit = (width * 72) / fontSize,
+  // Office glyph placement needs room beyond nominal character widths.
+  const limit = (width * 72 * 0.95) / fontSize,
     lines: string[] = [];
   for (const paragraph of text.split("\n")) {
     let line = "",

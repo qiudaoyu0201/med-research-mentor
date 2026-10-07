@@ -29,6 +29,16 @@ import { materialPacket, digest, selectionVersion } from "./materials.ts";
 import { foundationCatalog } from "./foundations.ts";
 import type { ResultCache } from "./cache.ts";
 import { legacyPreferences } from "../shared/learning-intent.ts";
+import {
+  explanationTrace,
+  revisionTrace,
+  revisionAuditInstruction,
+  revisionAuditInput,
+} from "./revision-trace.ts";
+import {
+  explanationLinksSchema,
+  validateExplanationLinks,
+} from "./explanation-links.ts";
 
 export function visibleInput(
   input: TaskInput,
@@ -569,6 +579,7 @@ export class TaskManager {
       } else {
         const teaching =
           skills.shared +
+          (skills.teachingContract ?? "") +
           "\n" +
           skills.modules
             .filter(
@@ -608,6 +619,13 @@ export class TaskManager {
           learningIntent: run.input.learningIntent ?? null,
         };
         await set("teaching");
+        const baseSchema = groundedTeachingSchema(
+          sources,
+          run.input.speechScript,
+        );
+        const generationSchema = skills.explanationTracing
+          ? baseSchema.extend({ explanationLinks: explanationLinksSchema })
+          : baseSchema;
         let generated = await call(
           "teaching",
           teaching +
@@ -615,13 +633,28 @@ export class TaskManager {
               ? "\n同时在 deck.speechScript 输出完整中文演讲稿（Markdown）：开场、按实际页序逐页讲述与转场、结尾。解释图件与方法，不机械复读 bullet，不补造结果；结构随研究类型和用户要求调整。"
               : ""),
           task,
-          groundedTeachingSchema(sources, run.input.speechScript),
+          generationSchema,
         );
         const requestedDeck = (
           run.input.modules ?? [run.input.module]
         ).includes("ppt");
         if (!requestedDeck) generated = { ...generated, deck: null };
         run.draft = generated.unit;
+        run.explanationTrace = explanationTrace(
+          generated,
+          sources,
+          run.input.question,
+        );
+        if (skills.explanationTracing)
+          run.explanationTrace = {
+            evidence: run.explanationTrace,
+            links: validateExplanationLinks(
+              generated,
+              sources,
+              run.input.question,
+              requestedDeck ? "ppt" : "paper",
+            ),
+          };
         if (readCheck) await set("novice");
         let feedback: NoviceFeedback = readCheck
           ? await call(
@@ -744,6 +777,8 @@ export class TaskManager {
         ) {
           await ledger.revise(run.input.groupId ?? run.id);
           await set("revising");
+          const firstDraft = structuredClone(generated),
+            firstReview = structuredClone(review);
           generated = await call(
             "revision",
             teaching +
@@ -757,11 +792,52 @@ export class TaskManager {
               feedback,
               review,
               materialRequests: run.materialRequests,
-              instruction: "只修订一次。逐项解决具体问题；不新增无来源数据。",
+              revisionEvidence: {
+                beforeHash: digest(firstDraft),
+                sourceHash: digest(sources),
+                locations: explanationTrace(
+                  firstDraft,
+                  sources,
+                  run.input.question,
+                ).locations.map(({ location, sourceIds }) => ({
+                  location,
+                  sourceIds,
+                })),
+                verifiedSourceIds: firstReview.checkedSources,
+              },
+              instruction:
+                "只修订一次。逐项审计当前问题的位置、来源和理解缺口后融入正文。已核实的对象、比较组、参照、单位、方向与证据边界依来源保留；首稿若有错误，给实际依据再纠正，不凭图注词义填造公式。核对所有新增或改变的事实。内部编号留在工作记录。",
             },
-            groundedTeachingSchema(sources, run.input.speechScript),
+            skills.explanationTracing
+              ? groundedTeachingSchema(sources, run.input.speechScript).extend({
+                  explanationLinks: explanationLinksSchema,
+                })
+              : groundedTeachingSchema(sources, run.input.speechScript),
           );
           if (!requestedDeck) generated = { ...generated, deck: null };
+          if (skills.explanationTracing)
+            run.explanationTrace = {
+              evidence: explanationTrace(
+                generated,
+                sources,
+                run.input.question,
+              ),
+              links: validateExplanationLinks(
+                generated,
+                sources,
+                run.input.question,
+                requestedDeck ? "ppt" : "paper",
+              ),
+            };
+          const trace = revisionTrace(
+            firstDraft,
+            generated,
+            sources,
+            firstReview,
+            run.input.question,
+          );
+          run.revisionTrace = trace;
+          await this.persist("runs", run.id, run);
           if (readCheck) await set("rereading");
           feedback = readCheck
             ? await call(
@@ -781,13 +857,14 @@ export class TaskManager {
           await set("rechecking");
           review = await call(
             "grounding-final",
-            checking,
+            checking + "\n" + revisionAuditInstruction,
             {
               sources: materialPacket(sources, run.input.question),
               draft: generated.unit,
               deck: generated.deck,
               feedback,
               previousIssues: review.issues,
+              revisionAudit: revisionAuditInput(trace),
               learningIntent: run.input.learningIntent ?? null,
             },
             groundedReviewSchema(sources),

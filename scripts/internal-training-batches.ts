@@ -7,6 +7,11 @@ import {
   type TrainingBatch,
 } from "../server/internal-training.ts";
 import { trainingCases } from "../evals/internal-training-cases.ts";
+import {
+  comparisonUpperBound,
+  iterationUsage,
+  type IterationQuota,
+} from "../server/training-protocol.ts";
 const directory = resolve(
   process.env.TUTOR_TRAINING_DIR ?? "runs/internal-training/cycle-1",
 );
@@ -19,6 +24,7 @@ interface Report {
   batches: TrainingBatch[];
   decision: string;
   priorAttempts?: number;
+  quota?: IterationQuota;
   stopReason?: string;
   results: { id: string; side: string }[];
 }
@@ -48,7 +54,12 @@ try {
       );
       break;
     }
-    if (used + 16 > 108) {
+    const required = report.quota ? comparisonUpperBound(pending[0]) : 16;
+    if (
+      report.quota
+        ? required > iterationUsage(report.quota, report.batches).remainingCycle
+        : used + required > 108
+    ) {
       console.log(
         "周期剩余额度不足以预约完整比较，未运行：",
         pending.map((c) => c.id).join(","),

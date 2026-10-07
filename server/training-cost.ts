@@ -1,5 +1,10 @@
 import type { TrainingBatch } from "./internal-training.ts";
-export function trainingCost(batches: TrainingBatch[], priorAttempts = 0) {
+import { iterationUsage, type IterationQuota } from "./training-protocol.ts";
+export function trainingCost(
+  batches: TrainingBatch[],
+  priorAttempts = 0,
+  quota?: IterationQuota,
+) {
   const attempts = batches.flatMap((b) => b.budget.attempts);
   const statuses = Object.fromEntries(
     ["reserved", "succeeded", "failed", "cancelled", "unknown"].map(
@@ -22,14 +27,22 @@ export function trainingCost(batches: TrainingBatch[], priorAttempts = 0) {
       ];
     }),
   );
+  const iteration = quota ? iterationUsage(quota, batches) : undefined;
   return {
     currentAttempts: attempts.length,
     priorAttempts,
-    firstRoundAttempts: attempts.length + priorAttempts,
-    productLimit: 108,
+    quotaVersion: quota?.version ?? "first-round-108",
+    firstRoundAttempts: iteration
+      ? iteration.historical
+      : attempts.length + priorAttempts,
+    subsequentProductAttempts: iteration?.product ?? null,
+    combinedProductAttempts: iteration?.combined ?? null,
+    productLimit: iteration ? 210 : 108,
     remainingProductAttempts: Math.max(
       0,
-      108 - attempts.length - priorAttempts,
+      iteration
+        ? iteration.remainingProduct
+        : 108 - attempts.length - priorAttempts,
     ),
     statuses,
     tokens,

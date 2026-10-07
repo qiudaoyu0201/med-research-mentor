@@ -403,6 +403,10 @@ test("manual page correction failure retains exact draft and can be saved again 
 });
 
 test("shared slide layout enlarges figures, preserves readable text, and uses concise page citations", () => {
+  const boundaryText = "损伤形成后处理：检验缓解作用";
+  const boundaryLines = wrapSlideText(boundaryText, 3.5, 18);
+  assert.ok(boundaryLines.length > 1);
+  assert.equal(boundaryLines.join(""), boundaryText);
   assert.ok(
     wrapSlideText("1,000–1,499层与较低风险相关", 3.5, 18).some((line) =>
       line.includes("1,000–1,499"),

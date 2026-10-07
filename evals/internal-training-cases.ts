@@ -119,3 +119,13 @@ export const artifactCriteria = (test: TrainingCase) => [
     ? ["资源变更后修改对应测量和设计，保留未变的研究目标与必要对照"]
     : []),
 ];
+export const explanationCriteria = (test: TrainingCase) => [
+  ...artifactCriteria(test),
+  "当前任务涉及的研究对象含义准确并有必要解释",
+  "当前结论依赖的测量原理有准确解释并连接读数与判断",
+  ...(test.id === "D1" || test.id === "H1"
+    ? ["干预选择的必要原理有实际来源支持且已解释，不由对照理由代替"]
+    : []),
+  "比较或对照的作用与具体替代解释相连，按研究类型判断",
+  "实际引用内容支持相应解释，参照、分母、单位、方向与原图及文本一致",
+];

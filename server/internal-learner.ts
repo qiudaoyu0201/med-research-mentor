@@ -14,6 +14,19 @@ export interface Exposure {
   kind: "material" | "teaching" | "target-hint" | "target-rewrite";
   text: string;
   versionHash: string;
+  image?: string;
+  sourceIds?: string[];
+}
+export function exposureVersion(
+  exposure: Pick<Exposure, "text" | "image" | "sourceIds">,
+) {
+  return exposure.image || exposure.sourceIds
+    ? digest({
+        text: exposure.text,
+        image: exposure.image ?? null,
+        sourceIds: exposure.sourceIds ?? [],
+      })
+    : digest(exposure.text);
 }
 export const openAnswerSchema = z.object({
   text: z.string().min(1).max(10000),
@@ -48,7 +61,13 @@ export function cloneOpenLearner(
   )
     throw new Error("分支输入包含目标提示或改写，不能当作独立学习曝光");
   for (const exposure of [...material, ...teaching])
-    if (digest(exposure.text) !== exposure.versionHash)
+    if (
+      exposureVersion({
+        text: exposure.text,
+        ...(exposure.image ? { image: exposure.image } : {}),
+        ...(exposure.sourceIds ? { sourceIds: exposure.sourceIds } : {}),
+      }) !== exposure.versionHash
+    )
       throw new Error("曝光文本版本不一致");
   return {
     id,
@@ -76,7 +95,10 @@ export function openLearnerView(record: OpenLearnerRecord, task: OpenTask) {
         misconception: misconception ?? null,
       }),
     ),
-    exposures: record.exposures,
+    exposures: record.exposures.map(({ image, ...exposure }) => ({
+      ...exposure,
+      ...(image ? { imageHash: digest(image) } : {}),
+    })),
     history: record.observations.map(({ task, rawAnswer }) => ({
       task,
       rawAnswer,
@@ -90,6 +112,7 @@ export async function answerOpenTask(
   task: OpenTask,
   signal: AbortSignal,
   persist: (record: OpenLearnerRecord) => Promise<void>,
+  image?: string,
 ) {
   const input = openLearnerView(record, task);
   const { output } = await provider.generate(
@@ -97,15 +120,17 @@ export async function answerOpenTask(
     input,
     openAnswerSchema,
     signal,
+    image,
   );
   const allowed = new Set([
     ...record.exposures.map((e) => e.id),
+    ...record.exposures.flatMap((e) => e.sourceIds ?? []),
     ...task.sources.map((s) => s.id),
   ]);
   const observation = {
     task: structuredClone(task),
     rawAnswer: structuredClone(output),
-    inputHash: digest(input),
+    inputHash: digest({ input, imageHash: image ? digest(image) : null }),
     mode: record.exposures.some((e) =>
       ["target-hint", "target-rewrite"].includes(e.kind),
     )

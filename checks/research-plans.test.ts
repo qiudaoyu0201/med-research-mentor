@@ -110,6 +110,36 @@ const plain = (p: PlanContent) => ({
   ...p,
   sections: p.sections.map(({ author: _a, ...s }) => s),
 });
+test("零调用条件继承保留目标和历史稿，手改新稿关联新条件并拒绝核对旧版本", async () => {
+  const h = harness(),
+    p = await h.store.create({ ...topic, conditions: "仅显微镜" });
+  const saved = await h.store.saveVersion(p.id, {
+    expectedVersion: null,
+    expectedTopicVersion: p.topic.version,
+    content,
+  });
+  const changed = await h.store.updateTopic(p.id, saved.topic.version, {
+    ...topic,
+    conditions: "仅已有蛋白读数和细胞计数",
+  });
+  assert.equal(changed.topic.question, p.topic.question);
+  assert.deepEqual(changed.versions[0], saved.versions[0]);
+  await assert.rejects(
+    h.store.start(p.id, input(changed, { action: "review" })),
+    /旧课题条件/,
+  );
+  const edited = structuredClone(content);
+  edited.sections[1].text = "按细胞计数检查总体读数变化";
+  const next = await h.store.saveVersion(p.id, {
+    expectedVersion: changed.currentVersion,
+    expectedTopicVersion: changed.topic.version,
+    content: edited,
+  });
+  assert.equal(next.versions.at(-1)!.parentId, saved.currentVersion);
+  assert.equal(next.versions.at(-1)!.topic.version, changed.topic.version);
+  assert.equal(next.topic.question, p.topic.question);
+  assert.equal(h.calls.length, 0);
+});
 test("无 PDF 起步，在线只调用助手和核对；草稿先持久化，导出保留范围", async () => {
   const h = harness();
   const p = await h.store.create(topic);

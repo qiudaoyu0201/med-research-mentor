@@ -141,6 +141,9 @@ const assistant = new AssistantService(
   attachments,
 );
 const readingGuides = new ReadingGuides(provider, assistant.scheduler);
+app.get("/api/training-admission", (_req, res) =>
+  res.json({ busy: assistant.scheduler.busy || manager.activeIds.size > 0 }),
+);
 await readingGuides.restore();
 await assistant.restore();
 const researchPlans = new ResearchPlans(
