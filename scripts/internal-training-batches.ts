@@ -17,6 +17,8 @@ const lock = await open(join(directory, "batches.lock"), "wx");
 const store = new RecordStorage(join(directory, "records"));
 interface Report {
   batches: TrainingBatch[];
+  decision: string;
+  priorAttempts?: number;
   stopReason?: string;
   results: { id: string; side: string }[];
 }
@@ -24,9 +26,15 @@ try {
   for (let index = 0; index < 8; index++) {
     const report = await store.read<Report>("training", "report");
     assertContinuation(report.batches);
+    if (report.decision === "retain-baseline-development-failed") {
+      console.log(
+        "开发候选未达质量门槛，保留后续与留出额度；先定位缺口再另立候选。",
+      );
+      break;
+    }
     const used = report.batches.reduce(
       (n, b) => n + b.budget.attempts.length,
-      0,
+      report.priorAttempts ?? 0,
     );
     const pending = trainingCases.filter(
       (c) =>

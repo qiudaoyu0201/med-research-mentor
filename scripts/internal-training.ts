@@ -1,4 +1,13 @@
-import { mkdir, readFile, writeFile, open, copyFile } from "node:fs/promises";
+import {
+  mkdir,
+  readFile,
+  writeFile,
+  open,
+  copyFile,
+  readdir,
+} from "node:fs/promises";
+import { trainingLineage } from "../server/training-lineage.ts";
+import { trainingCost } from "../server/training-cost.ts";
 import { resolve, join, relative, isAbsolute } from "node:path";
 import { createHash, randomUUID } from "node:crypto";
 import { execFileSync } from "node:child_process";
@@ -29,6 +38,9 @@ const runsRoot = resolve("runs/internal-training"),
   rel = relative(runsRoot, directory);
 if (!rel || rel.startsWith("..") || isAbsolute(rel))
   throw new Error("运行目录必须在 runs/internal-training 的独立周期子目录。");
+const stage = process.argv[2] ?? "prepare";
+if (!["prepare", "m1", "m2"].includes(stage))
+  throw new Error("入口：prepare / m1 / m2；M3 独立试验另行运行。");
 // Set isolation before loading any module that binds its default storage root.
 process.env.TUTOR_DATA_DIR = join(directory, "data");
 process.env.TUTOR_READING_GUIDES = "manual";
@@ -36,79 +48,74 @@ await mkdir(directory, { recursive: true });
 const lock = await open(join(directory, "runner.lock"), "wx").catch(() => {
   throw new Error("此周期已在运行或上次中断；检查原账本，不自动另起训练。");
 });
-const { RecordStorage } = await import("../server/storage.ts");
-const { parsePdf } = await import("../server/pdf.ts");
-const { bindPaperEvidence, digest, materialPacket, defaultPaperSources } =
-  await import("../server/materials.ts");
-const { freezeRules, withRuleSnapshot } = await import("../server/skills.ts");
-const { createProvider } = await import("../server/model-config.ts");
-const { BudgetLedger } = await import("../server/budget.ts");
-const { TaskManager } = await import("../server/orchestrator.ts");
-const { ConversationStore } = await import("../server/conversation.ts");
-const { AssistantService, rulePlan } = await import("../server/assistant.ts");
-const { ResearchPlans } = await import("../server/research-plans.ts");
-const { DeckVersions } = await import("../server/deck-versions.ts");
-const { withFoundationSources } = await import("../server/foundations.ts");
-const storage = new RecordStorage(join(directory, "records"));
-const stage = process.argv[2] ?? "prepare";
-if (!["prepare", "m1", "m2"].includes(stage))
-  throw new Error("入口：prepare / m1 / m2；M3 独立试验另行运行。");
-type Evaluation = Awaited<ReturnType<typeof reviewArtifact>>;
-interface UnitResult {
-  id: string;
-  side: "baseline" | "candidate";
-  status: string;
-  artifact?: unknown;
-  run?: TaskRun;
-  turn?: AssistantTurn;
-  jobs?: PlanJob[];
-  sources?: { id: string; text: string; locator: string }[];
-  evaluation?: Evaluation;
-  exportPath?: string;
-  error?: string;
-  providerMs: number;
-  endToEndMs: number;
-  calls: number;
-}
-interface Report {
-  protocolHash: string;
-  batches: TrainingBatch[];
-  calibration: { id: string; expected: boolean; evaluation: Evaluation }[];
-  results: UnitResult[];
-  decision: string;
-  stopReason?: string;
-}
-const provider = createProvider();
-const fingerprint = {
-  id: provider.id,
-  model: provider.model,
-  settings: provider.settings,
-  capabilities: provider.capabilities,
-};
-const fileHash = async (path: string) =>
-  createHash("sha256")
-    .update(await readFile(path))
-    .digest("hex");
-const papers: PaperBundle[] = [];
 try {
+  const { RecordStorage } = await import("../server/storage.ts");
+  const { parsePdf } = await import("../server/pdf.ts");
+  const { bindPaperEvidence, digest, materialPacket, defaultPaperSources } =
+    await import("../server/materials.ts");
+  const { freezeRules, withRuleSnapshot } = await import("../server/skills.ts");
+  const { createProvider } = await import("../server/model-config.ts");
+  const { BudgetLedger } = await import("../server/budget.ts");
+  const { TaskManager } = await import("../server/orchestrator.ts");
+  const { ConversationStore } = await import("../server/conversation.ts");
+  const { AssistantService, rulePlan } = await import("../server/assistant.ts");
+  const { ResearchPlans } = await import("../server/research-plans.ts");
+  const { DeckVersions } = await import("../server/deck-versions.ts");
+  const { withFoundationSources } = await import("../server/foundations.ts");
+  const storage = new RecordStorage(join(directory, "records"));
+  type Evaluation = Awaited<ReturnType<typeof reviewArtifact>>;
+  interface UnitResult {
+    id: string;
+    side: "baseline" | "candidate";
+    status: string;
+    artifact?: unknown;
+    run?: TaskRun;
+    turn?: AssistantTurn;
+    jobs?: PlanJob[];
+    sources?: { id: string; text: string; locator: string }[];
+    evaluation?: Evaluation;
+    exportPath?: string;
+    error?: string;
+    providerMs: number;
+    endToEndMs: number;
+    calls: number;
+  }
+  interface Report {
+    protocolHash: string;
+    priorAttempts: number;
+    batches: TrainingBatch[];
+    calibration: { id: string; expected: boolean; evaluation: Evaluation }[];
+    results: UnitResult[];
+    decision: string;
+    stopReason?: string;
+  }
+  const provider = createProvider();
+  const fingerprint = {
+    id: provider.id,
+    model: provider.model,
+    settings: provider.settings,
+    capabilities: provider.capabilities,
+  };
+  const fileHash = async (path: string) =>
+    createHash("sha256")
+      .update(await readFile(path))
+      .digest("hex");
+  const papers: PaperBundle[] = [];
+  const lineage = await trainingLineage(directory);
   const baseline = await freezeRules(),
     candidate = candidateRules(baseline);
-  const engineFiles = [
-    "server/skills.ts",
-    "server/research-plans.ts",
-    "server/internal-training.ts",
-    "server/assistant.ts",
-    "server/orchestrator.ts",
-    "server/materials.ts",
-    "server/provider.ts",
-    "server/compatible-provider.ts",
-    "server/budget.ts",
-    "server/schemas.ts",
-    "server/foundations.ts",
-    "server/export.ts",
-    "scripts/internal-training.ts",
-    "evals/internal-training-cases.ts",
-  ];
+  const engineFiles = (
+    await Promise.all(
+      ["server", "shared", "scripts", "evals"].map(async (root) =>
+        (await readdir(root, { recursive: true }))
+          .filter((p) => /\.(ts|ps1)$/.test(p))
+          .map((p) => join(root, p)),
+      ),
+    )
+  )
+    .flat()
+    .concat("package.json", "package-lock.json")
+    .sort();
   const engine = await Promise.all(
     engineFiles.map(async (path) => ({ path, hash: await fileHash(path) })),
   );
@@ -195,7 +202,8 @@ try {
     });
   }
   const protocol = {
-    version: "internal-first-cycle-1",
+    version: "internal-first-cycle-2",
+    lineage,
     git: execFileSync("git", ["rev-parse", "HEAD"], {
       encoding: "utf8",
     }).trim(),
@@ -242,6 +250,7 @@ try {
     if (error.code !== "ENOENT") throw error;
     report = {
       protocolHash,
+      priorAttempts: lineage.attempts,
       batches: [],
       calibration: [],
       results: [],
@@ -256,11 +265,17 @@ try {
       JSON.stringify(
         {
           protocolHash,
+          cost: trainingCost(report.batches, report.priorAttempts),
+          runnerResourceUsage: {
+            ...process.resourceUsage(),
+            scope:
+              "仅当前 Node 进程，不含模型服务、子进程或整机负载；maxRSS 单位 KiB，CPU 时间单位微秒。",
+          },
           decision: report.decision,
           stopReason: report.stopReason,
           calibration: report.calibration.map((c) => ({
             id: c.id,
-            matched: c.evaluation.passed === c.expected,
+            matched: c.evaluation.valid && c.evaluation.passed === c.expected,
           })),
           batches: report.batches,
           results: report.results.map(
@@ -291,8 +306,22 @@ try {
     if (report.stopReason) throw new Error(report.stopReason);
     if (
       stage === "m2" &&
+      !report.results.some(
+        (r) =>
+          r.id === "D1" &&
+          r.side === "candidate" &&
+          r.status === "generated" &&
+          r.evaluation?.valid &&
+          r.evaluation.passed,
+      )
+    )
+      throw new Error("开发候选未达质量门槛，不消耗后续比较与留出调用。");
+    if (
+      stage === "m2" &&
       (report.calibration.length !== 6 ||
-        report.calibration.some((c) => c.evaluation.passed !== c.expected) ||
+        report.calibration.some(
+          (c) => !c.evaluation.valid || c.evaluation.passed !== c.expected,
+        ) ||
         !["baseline", "candidate"].every((side) =>
           report.results.some(
             (r) => r.id === "D1" && r.side === side && r.evaluation,
@@ -312,7 +341,10 @@ try {
     report.batches.push(batch);
     await checkpoint();
     const used = () =>
-      report.batches.reduce((n, b) => n + b.budget.attempts.length, 0);
+      report.batches.reduce(
+        (n, b) => n + b.budget.attempts.length,
+        report.priorAttempts,
+      );
     const counted = new TrainingProvider(
       provider,
       batch,
@@ -356,13 +388,12 @@ try {
           console.log(
             "calibration",
             sample.id,
-            evaluation.passed === sample.expected ? "matched" : "mismatch",
+            evaluation.valid && evaluation.passed === sample.expected
+              ? "matched"
+              : "mismatch",
           );
           // Invalid coverage/evidence cannot count as correct rejection.
-          if (
-            evaluation.passed !== sample.expected ||
-            evaluation.findings.some((f) => /无效|缺少|重复|未知评价/.test(f))
-          )
+          if (!evaluation.valid || evaluation.passed !== sample.expected)
             throw new Error("评价校准未通过，停止产物比较并保留基线。");
         }
       }
@@ -581,7 +612,18 @@ try {
         }
       }
       batch.status = "complete";
-      report.decision = "retain-baseline-pending-file-and-learning-validation";
+      report.decision =
+        stage === "m1" &&
+        !report.results.some(
+          (r) =>
+            r.id === "D1" &&
+            r.side === "candidate" &&
+            r.status === "generated" &&
+            r.evaluation?.valid &&
+            r.evaluation.passed,
+        )
+          ? "retain-baseline-development-failed"
+          : "retain-baseline-pending-file-and-learning-validation";
     } catch (error) {
       batch.status = "stopped";
       batch.stopReason ??= String(error);

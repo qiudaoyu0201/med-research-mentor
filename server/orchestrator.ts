@@ -397,7 +397,8 @@ export class TaskManager {
         if (cached) {
           run.cacheHit = cached.id;
           run.result = structuredClone(cached.result);
-          run.deck = structuredClone(cached.deck);
+          if ((input.modules ?? [input.module]).includes("ppt"))
+            run.deck = structuredClone(cached.deck);
           run.novice = structuredClone(cached.novice);
           run.review = structuredClone(cached.review);
           run.materialRequests = structuredClone(cached.materialRequests ?? []);
@@ -616,6 +617,10 @@ export class TaskManager {
           task,
           groundedTeachingSchema(sources, run.input.speechScript),
         );
+        const requestedDeck = (
+          run.input.modules ?? [run.input.module]
+        ).includes("ppt");
+        if (!requestedDeck) generated = { ...generated, deck: null };
         run.draft = generated.unit;
         if (readCheck) await set("novice");
         let feedback: NoviceFeedback = readCheck
@@ -756,6 +761,7 @@ export class TaskManager {
             },
             groundedTeachingSchema(sources, run.input.speechScript),
           );
+          if (!requestedDeck) generated = { ...generated, deck: null };
           if (readCheck) await set("rereading");
           feedback = readCheck
             ? await call(

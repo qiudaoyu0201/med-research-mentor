@@ -10,6 +10,8 @@ import {
   validateReview,
   type TrainingBatch,
   candidateRules,
+  factualCriterion,
+  feedbackCandidate,
 } from "../server/internal-training.ts";
 import {
   freezeRules,
@@ -19,6 +21,7 @@ import {
 } from "../server/skills.ts";
 import { readFile } from "node:fs/promises";
 import { ResearchPlans } from "../server/research-plans.ts";
+import { trainingCost } from "../server/training-cost.ts";
 const batch = (): TrainingBatch => ({
   id: "training",
   phase: "M1",
@@ -61,6 +64,15 @@ test("training counts failed and unknown dispatches, saves inputs before provide
   assert.equal(b.budget.attempts.length, 1);
   assert.equal(b.budget.attempts[0].status, "unknown");
   assert.equal(b.status, "stopped");
+  const cost = trainingCost([b], 28);
+  assert.equal(cost.firstRoundAttempts, 29);
+  assert.equal(cost.remainingProductAttempts, 79);
+  assert.equal(cost.statuses.unknown, 1);
+  assert.deepEqual(cost.tokens.total, {
+    reportedSum: null,
+    reportedAttempts: 0,
+    unreportedAttempts: 1,
+  });
   assert.throws(() => assertContinuation([b]));
   await assert.rejects(
     provider.generate(
@@ -104,8 +116,29 @@ test("independent evaluator rejects bogus locations, missing, duplicate and unkn
       checks,
     });
     assert.equal(result.passed, false);
+    assert.equal(result.valid, false);
     assert.ok(result.findings.some((f) => /无效|缺少|重复|未知/.test(f)));
   }
+});
+test("factual evaluation needs actual citations and omissions cannot default to passing", () => {
+  const check = {
+    criterion: factualCriterion,
+    passed: true,
+    location: "观察",
+    sourceIds: [] as string[],
+    explanation: "相符",
+  };
+  assert.equal(
+    validateReview([factualCriterion], "观察", ["source"], { checks: [check] })
+      .valid,
+    false,
+  );
+  assert.equal(
+    validateReview([factualCriterion], "观察", ["source"], {
+      checks: [{ ...check, sourceIds: ["source"] }],
+    }).passed,
+    true,
+  );
 });
 test("candidate rule scope stays isolated across concurrent baseline/online loading and strips YAML on both sides", async () => {
   const baseline = await freezeRules(),
@@ -194,6 +227,6 @@ test("research-plan service freezes the scoped candidate into actual generation 
     assert.equal(service.job(job.id).status, "completed");
   });
   assert.equal(calls.length, 2);
-  assert.ok(calls[0].includes("内部反馈处理"));
-  assert.equal((await sharedRules()).includes("内部反馈处理"), false);
+  assert.ok(calls[0].includes(feedbackCandidate));
+  assert.equal((await sharedRules()).includes(feedbackCandidate), false);
 });

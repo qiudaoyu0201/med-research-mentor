@@ -81,6 +81,100 @@ const method: AssistantMessage = {
   mode: "live",
 };
 const lesson = { unit: exampleUnits.qpcr, deck: null };
+test("ordinary explanations exclude unexpected slides from checks, revisions and delivered artifacts", async () => {
+  for (const module of ["paper", "method"] as const) {
+    const content = module === "paper" ? exampleUnits.paper : lesson.unit;
+    const injected = {
+      unit: content,
+      deck: {
+        slides: defaultDeck.slides.map(
+          ({ imageSource: _imageSource, ...slide }) => ({
+            ...slide,
+            citations: content.sections.flatMap((s) => s.citations),
+          }),
+        ),
+      },
+    };
+    const open = {
+      ...review,
+      checkedSources: content.sections.flatMap((s) => s.citations),
+      issues: [
+        {
+          id: "gap",
+          type: "teaching",
+          severity: "warning",
+          location: content.sections[0].title,
+          claim: "解释",
+          evidence: [],
+          suggestion: "补充解释",
+          resolved: false,
+        },
+      ],
+    };
+    const h = harness(
+      [injected, novice, open, injected, novice, { ...open, issues: [] }],
+      sample,
+      undefined,
+      true,
+    );
+    const state = await h.conversations.create({ paperId: sample.id });
+    const turn = await h.assistant.submit(state.id, {
+      clientMessageId: `no-extra-${module}`,
+      question:
+        module === "paper" ? "请讲解这篇论文的研究问题和证据" : method.question,
+      mode: "live",
+      module,
+      depth: "deep",
+    });
+    await h.assistant.wait(turn.id);
+    assert.equal(turn.status, "completed", turn.error);
+    const run = h.manager.runs.get(turn.runId!)!;
+    assert.equal(run.calls, 6);
+    assert.equal(run.deck, undefined);
+    for (const role of run.roles.filter((r) => r.role !== "teaching")) {
+      assert.equal((role.input as any).deck ?? null, null, role.role);
+      assert.equal((role.input as any).presentation ?? null, null, role.role);
+    }
+    assert.equal(
+      turn.reply!.artifacts.some((a) => a.kind === "pptx"),
+      false,
+    );
+    assert.equal(h.decks!.versions.size, 0);
+    assert.equal(h.conversations.get(state.id).latestDeckVersionId, undefined);
+  }
+});
+test("an ordinary explanation cache cannot reintroduce an unexpected presentation", async () => {
+  const cached = new Map<string, unknown>();
+  const cache = new ResultCache(
+    "scope-cache",
+    async (_g, id, value) => {
+      cached.set(id, structuredClone(value));
+    },
+    async <T>(_g: string, id: string) => {
+      if (!cached.has(id))
+        throw Object.assign(new Error("missing"), { code: "ENOENT" });
+      return cached.get(id) as T;
+    },
+  );
+  const h = harness([lesson, novice, review], sample, cache, true);
+  const first = await h.conversations.create({ paperId: sample.id });
+  const original = await h.assistant.submit(first.id, method);
+  await h.assistant.wait(original.id);
+  assert.equal(original.status, "completed", original.error);
+  assert.equal(cached.size, 1);
+  for (const value of cached.values())
+    (value as TaskRun).deck = structuredClone(defaultDeck);
+  const next = await h.conversations.create({ paperId: sample.id });
+  const turn = await h.assistant.submit(next.id, method);
+  await h.assistant.wait(turn.id);
+  assert.equal(turn.status, "completed", turn.error);
+  const run = h.manager.runs.get(turn.runId!)!;
+  assert.ok(run.cacheHit);
+  assert.equal(run.calls, 0);
+  assert.equal(run.deck, undefined);
+  assert.equal(h.decks!.versions.size, 0);
+  assert.equal(turn.reply!.artifacts.length, 0);
+});
 test("隔离损坏会话后，其健康回答不阻断其他聊天恢复，也不被删除", async () => {
   const h = harness([lesson, novice, review]);
   const state = await h.conversations.create({ paperId: sample.id });

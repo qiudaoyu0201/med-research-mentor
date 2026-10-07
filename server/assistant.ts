@@ -1115,12 +1115,13 @@ export class AssistantService {
             throw new Error(run.error ?? "教学任务未完成");
         }
         let deckVersionId: string | undefined;
-        if (run.deck && this.decks) {
+        if (plan.modules.includes("ppt") && run.deck && this.decks) {
           const version = await this.decks.seed(state.id, paper.id, run);
           deckVersionId = version.id;
           state.latestDeckVersionId = version.id;
         }
         if (
+          plan.modules.includes("ppt") &&
           run.deck &&
           !run.review?.issues.some(
             (i) => !i.resolved && i.severity === "blocking",

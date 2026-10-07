@@ -106,8 +106,10 @@ export const trainingCases = [
 export type TrainingCase = (typeof trainingCases)[number];
 export const artifactCriteria = (test: TrainingCase) => [
   "回应原问题并解释必要原理或设计理由，不用未知替代必要解释",
+  "新手能沿着必要术语解释与测量到推理的连接理解内容，不靠省略关键概念或堆砌专业细节",
   "论文事实与实际可见来源相符，区分证据、推理、假设和结果",
   "交付正文不含内部问题编号、角色核对过程或重复状态说明",
+  "只交付和评价当前请求的产物，不为核对额外生成未请求的 PPT 或复现操作手册",
   test.kind === "ppt"
     ? "页面主线、原图观察、逐页讲稿和完整演讲稿一致，保留证据边界"
     : test.kind === "plan"
