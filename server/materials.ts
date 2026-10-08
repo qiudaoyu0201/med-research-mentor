@@ -3,7 +3,7 @@ import type { Source, PaperBundle } from "../shared/types.ts";
 import { preferredSources } from "../shared/image-region.ts";
 export const digest = (value: unknown) =>
   createHash("sha256").update(JSON.stringify(value)).digest("hex");
-export const selectionVersion = "generic-evidence-v4-page-coverage";
+export const selectionVersion = "generic-evidence-v5-focused-coverage";
 export function figureNumber(text: string) {
   const match = /(?:Figure|Fig\.?|图)\s*([\d一二两三四五六七八九十]+)/i.exec(
     text,
@@ -165,14 +165,35 @@ function pageScore(s: Source, terms: string[], modules: string[]) {
     terms.reduce((n, w) => n + (t.includes(w) ? 15 : 0), 0)
   );
 }
-export function materialPacket(sources: Source[], question = "") {
+export function materialPacket(
+  sources: Source[],
+  question = "",
+  focusIds: string[] = [],
+) {
   const rawLength = [
     ...new Map(sources.map((s) => [digest(s.text), s.text])).values(),
   ].reduce((n, t) => n + t.length, 0);
   const pageExcerpts =
     rawLength > 20_000 && sources.some((s) => /^PDF 第 \d+ 页$/.test(s.title));
+  // A material request may concern text that exists on an already selected page
+  // but was omitted by compression. Preserve its complete block for revision,
+  // sharing the original input allowance rather than appending unlimited text.
+  const focused = new Set<string>();
+  let focusedLength = 0;
+  for (const id of focusIds) {
+    const source = sources.find((s) => s.id === id);
+    if (!source) continue;
+    const hash = digest(source.text);
+    if (focused.has(hash)) continue;
+    if (focusedLength + source.text.length > 10_000) continue;
+    focused.add(hash);
+    focusedLength += source.text.length;
+  }
+  const unfocused = new Set(
+    sources.map((s) => digest(s.text)).filter((hash) => !focused.has(hash)),
+  );
   const quota = Math.floor(
-    19_000 / Math.max(1, new Set(sources.map((s) => digest(s.text))).size),
+    (19_000 - focusedLength) / Math.max(1, unfocused.size),
   );
   const terms = evidenceTerms(question);
   const blocks = new Map<string, { hash: string; text: string }>();
@@ -183,7 +204,7 @@ export function materialPacket(sources: Source[], question = "") {
       ? { ...metadata, caption: undefined }
       : metadata;
     const hash = digest(text);
-    if (!pageExcerpts || text.length <= quota) {
+    if (!pageExcerpts || focused.has(hash) || text.length <= quota) {
       blocks.set(hash, { hash, text });
       return { ...source, blockHash: hash };
     }

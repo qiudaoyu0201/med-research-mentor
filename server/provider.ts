@@ -4,6 +4,9 @@ import { mkdir } from "node:fs/promises";
 import { resolve } from "node:path";
 import { EventEmitter } from "node:events";
 import { z } from "zod";
+export interface ProviderControl {
+  managedTiming: true;
+}
 export interface ProviderEvent {
   type:
     | "response"
@@ -12,6 +15,7 @@ export interface ProviderEvent {
     | "timeout"
     | "cancel"
     | "interrupt"
+    | "diagnosis"
     | "terminal"
     | "closed";
   at: string;
@@ -41,6 +45,7 @@ export interface Provider {
     signal: AbortSignal,
     image?: string,
     observe?: ProviderObserver,
+    control?: ProviderControl,
   ): Promise<{ output: T; usage?: unknown }>;
 }
 export class ProviderFailure extends Error {
@@ -49,6 +54,15 @@ export class ProviderFailure extends Error {
     public kind: "format" | "transport",
     public rawOutput?: string,
     public usage?: unknown,
+  ) {
+    super(message);
+  }
+}
+export class CodexRpcFailure extends Error {
+  constructor(
+    message: string,
+    readonly code: number,
+    readonly missingThread: boolean,
   ) {
     super(message);
   }
@@ -102,13 +116,17 @@ export class CodexClient {
           clearTimeout(p.timer);
           msg.error
             ? p.reject(
-                new Error(
+                new CodexRpcFailure(
                   "Codex 接口拒绝请求（" +
                     msg.error.code +
                     "）；" +
                     (msg.error.code === -32602
                       ? String(msg.error.message).slice(0, 400)
                       : "检查客户端版本与账号状态。"),
+                  msg.error.code,
+                  /(?:no rollout|thread.*not found|not found.*thread|thread.*not loaded)/i.test(
+                    String(msg.error.message),
+                  ),
                 ),
               )
             : p.resolve(msg.result);
@@ -216,6 +234,7 @@ export class CodexProvider implements Provider {
     signal: AbortSignal,
     image?: string,
     observe?: ProviderObserver,
+    control?: ProviderControl,
   ): Promise<{ output: T; usage?: unknown }> {
     signal.throwIfAborted();
     const client = this.clientFactory();
@@ -274,10 +293,16 @@ export class CodexProvider implements Provider {
         const terminal = new Promise<void>((done) => {
           terminalReceived = done;
         });
-        const timer = setTimeout(() => {
-          emit({ type: "timeout", layer: "provider" });
-          void stop(new Error("本次生成超过 180 秒；已停止，未自动重发。"));
-        }, this.timeoutMs);
+        const timer = control?.managedTiming
+          ? undefined
+          : setTimeout(() => {
+              emit({ type: "timeout", layer: "provider" });
+              void stop(
+                new Error(
+                  "本次生成达到 provider 期限；已请求中止，未自动重发。",
+                ),
+              );
+            }, this.timeoutMs);
         const finish = (error?: Error) => {
           if (settled) return;
           settled = true;

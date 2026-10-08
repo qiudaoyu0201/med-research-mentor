@@ -1,4 +1,5 @@
 import { selectedText } from "./research-selection.ts";
+import { measureReadableAnswer } from "./response-timing.ts";
 import { MessageAttachments } from "./research-attachments.tsx";
 import { useEffect, useRef, useState } from "react";
 import type { AssistantMessage, PaperBundle, Source } from "../shared/types.ts";
@@ -203,6 +204,26 @@ export function ResearchDiscussion({
   const messages = useRef<HTMLDivElement>(null);
   const [cancelling, setCancelling] = useState<string[]>([]);
   const cancelLocks = useRef(new Set<string>());
+  const measureAnswers = () => {
+    for (const turn of turns)
+      if (turn.status === "completed" && turn.reply?.content)
+        measureReadableAnswer(
+          turn.id,
+          messages.current?.querySelector(
+            `[data-turn-id="${CSS.escape(turn.id)}"] .rw-answer`,
+          ) ?? null,
+        );
+  };
+  useEffect(() => {
+    let second = 0;
+    const first = requestAnimationFrame(() => {
+      second = requestAnimationFrame(measureAnswers);
+    });
+    return () => {
+      cancelAnimationFrame(first);
+      cancelAnimationFrame(second);
+    };
+  }, [turns]);
   async function cancel(turn: ResearchTurn) {
     if (cancelLocks.current.has(turn.id)) return;
     cancelLocks.current.add(turn.id);
@@ -241,6 +262,7 @@ export function ResearchDiscussion({
       className="rp-messages rw-messages"
       aria-label="连续研究讨论"
       onScroll={(e) => {
+        requestAnimationFrame(() => requestAnimationFrame(measureAnswers));
         try {
           localStorage.setItem(scrollKey, String(e.currentTarget.scrollTop));
         } catch {}

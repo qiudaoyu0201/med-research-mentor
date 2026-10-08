@@ -197,6 +197,7 @@ export interface Profile {
   difficulties: string;
 }
 export interface TaskInput {
+  diagnosticScope?: "fragment-v1";
   paperId: string;
   module: Module;
   mode: Mode;
@@ -280,6 +281,7 @@ export interface Attempt {
   observation?: {
     firstResponseAt?: string;
     firstOutputAt?: string;
+    validatedOutputAt?: string;
     lastActivityAt?: string;
     outputUpdates: number;
     threadId?: string;
@@ -317,6 +319,16 @@ export interface BudgetState {
   revisions: string[];
   billingMode: "chatgpt" | "api";
   amount: null;
+  timing?: TaskTiming;
+}
+export interface TaskTiming {
+  version: "task-timing-v1";
+  scope: "explanation" | "fragment" | "full";
+  taskMs: number;
+  requestMs: number;
+  firstOutputMs: number;
+  idleMs: number;
+  diagnosisMs?: number;
 }
 export type AssistantAction =
   | "paper.read"

@@ -7,10 +7,10 @@ $resolvedPresentation = (Resolve-Path -LiteralPath $Presentation).Path
 $resolvedOutput = [System.IO.Path]::GetFullPath($OutputDirectory)
 $trainingRoot = [System.IO.Path]::GetFullPath((Join-Path $PSScriptRoot '..\runs\internal-training'))
 if (-not $resolvedOutput.StartsWith($trainingRoot + '\', [System.StringComparison]::OrdinalIgnoreCase)) {
-  throw '渲染目录必须位于独立内部训练目录。'
+  throw 'The render directory must be inside runs/internal-training.'
 }
 if (Test-Path -LiteralPath $resolvedOutput) {
-  throw '渲染目录已经存在；不覆盖旧验收截图。'
+  throw 'The render directory already exists; previous images must be preserved.'
 }
 New-Item -ItemType Directory -Path $resolvedOutput | Out-Null
 $existingPowerPoint = @(Get-Process POWERPNT -ErrorAction SilentlyContinue).Count -gt 0

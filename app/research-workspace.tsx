@@ -1,4 +1,5 @@
 import { useResearchLayout, Splitter } from "./research-layout.tsx";
+import { startResponseTiming } from "./response-timing.ts";
 import { ResearchPpt } from "./research-ppt.tsx";
 import { ResearchPlanPanel } from "./research-plan.tsx";
 import { ResearchSettings } from "./research-settings.tsx";
@@ -782,6 +783,7 @@ export function ResearchWorkspace() {
               conversationId: state.id,
             };
       retry.current = pending;
+      const bindTiming = startResponseTiming();
       const value = await researchApi<ResearchTurn>(
         `/api/conversations/${state.id}/messages`,
         {
@@ -801,6 +803,7 @@ export function ResearchWorkspace() {
             : {}),
         },
       );
+      bindTiming(value.id);
       await pendingAttachments.sent(
         submittedFiles.map((a) => a.id),
         submittedDraftKey,

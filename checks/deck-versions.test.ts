@@ -87,6 +87,37 @@ test("full speech supplements and manual edits preserve the exact deck and previ
   await assert.rejects(h.store.speech(saved.id, "speech-chat"), /版本已变化/);
 });
 
+test("manual full-speech check receives actual figures used by the saved deck", async () => {
+  const paper = structuredClone(sample);
+  const canvas = createCanvas(120, 80);
+  canvas.getContext("2d").fillRect(10, 10, 90, 60);
+  for (const source of paper.sources)
+    if (["xu-fig1", "xu-fig6"].includes(source.id))
+      source.image = canvas.toDataURL("image/png");
+  const h = harness([review], paper);
+  const images: (string | undefined)[] = [];
+  const generate = h.provider.generate.bind(h.provider);
+  h.provider.generate = async (i, x, s, signal, image) => {
+    images.push(image);
+    return generate(i, x, s, signal, image);
+  };
+  const base = await h.store.seed("figure-speech", paper.id);
+  const saved = await h.store.wait(
+    (
+      await h.store.start(base.id, "figure-speech", {
+        operation: "speech",
+        question: "核对原图与完整稿",
+        speechScript: speechText,
+      })
+    ).id,
+  );
+  assert.equal(saved.status, "completed", saved.error);
+  assert.equal(saved.budget?.attempts.length, 1);
+  assert.equal(saved.budget?.attempts[0].imageCount, 1);
+  assert.match(images[0]!, /^data:image/);
+  assert.deepEqual(saved.outline.slides, base.outline.slides);
+});
+
 test("blocking full speech stops after one repair and keeps the original usable", async () => {
   const blocking = {
     ...review,

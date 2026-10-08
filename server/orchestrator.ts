@@ -25,6 +25,7 @@ import { z } from "zod";
 import type { Provider } from "./provider.ts";
 import { save } from "./storage.ts";
 import { BudgetLedger } from "./budget.ts";
+import { taskTiming } from "./task-timing.ts";
 import { materialPacket, digest, selectionVersion } from "./materials.ts";
 import { foundationCatalog } from "./foundations.ts";
 import type { ResultCache } from "./cache.ts";
@@ -389,6 +390,21 @@ export class TaskManager {
           this.persist("runs", run.id, run),
         );
       run.budget = ledger.state;
+      if (input.diagnosticScope && !execution?.ledger)
+        ledger.state.limit = ledger.state.groupLimit = 4;
+      if (!execution?.ledger) {
+        ledger.state.timing = taskTiming(
+          input.diagnosticScope
+            ? "fragment"
+            : (input.modules ?? [input.module]).includes("ppt")
+              ? "full"
+              : "explanation",
+          input.slideCount ?? 6,
+        );
+        ledger.state.deadline = new Date(
+          Date.now() + ledger.state.timing.taskMs,
+        ).toISOString();
+      }
       const resultKey = cacheKey(
         input,
         { ...paper, sources: selected },
@@ -600,6 +616,11 @@ export class TaskManager {
           "\n" +
           skills.modules.find((m) => m.id === "medical-grounding-check")!.text +
           "\n若 deck 含 speechScript，联合核对完整稿与页面的事实、术语、页序、转场和结尾；仅提供逐页备注不能当作完整稿。";
+        const scopedChecking =
+          checking +
+          (run.input.diagnosticScope
+            ? "\n本次核对同时检查事实与解释：当前问题涉及的干预／测量原理、术语含义、比较的作用和从读数到判断的推理是否进入实际产物。只依据本次来源；合理的真实未知保留，不要求额外复现手册。不把缺少必要解释判为通过。"
+            : "");
         const task = {
           question: run.input.question,
           module: run.input.module,
@@ -619,18 +640,33 @@ export class TaskManager {
           learningIntent: run.input.learningIntent ?? null,
         };
         await set("teaching");
-        const baseSchema = groundedTeachingSchema(
-          sources,
-          run.input.speechScript,
-        );
+        // The auxiliary unit is a short introduction to a diagnostic deck,
+        // never a second copy of its notes. Normal product schemas stay intact.
+        const scopedSchema = () => {
+          const baseSchema = groundedTeachingSchema(
+            sources,
+            run.input.speechScript,
+          );
+          return run.input.diagnosticScope && run.input.module === "ppt"
+            ? baseSchema.extend({
+                unit: baseSchema.shape.unit.extend({
+                  sections: baseSchema.shape.unit.shape.sections.max(1),
+                  terms: baseSchema.shape.unit.shape.terms.max(3),
+                }),
+              })
+            : baseSchema;
+        };
         const generationSchema = skills.explanationTracing
-          ? baseSchema.extend({
+          ? scopedSchema().extend({
               explanationLinks: tracingSchema(skills.explanationTracing),
             })
-          : baseSchema;
+          : scopedSchema();
         let generated = await call(
           "teaching",
           teaching +
+            (run.input.diagnosticScope
+              ? "\n只完成当前完整片段，保留必要方法、比较、测量解释与证据边界。PPT 的 unit 只写一段简短导读；必要解释进入页面和逐页备注，不另写重复长讲解，不生成完整演讲稿。"
+              : "") +
             (run.input.speechScript
               ? "\n同时在 deck.speechScript 输出完整中文演讲稿（Markdown）：开场、按实际页序逐页讲述与转场、结尾。解释图件与方法，不机械复读 bullet，不补造结果；结构随研究类型和用户要求调整。"
               : ""),
@@ -677,8 +713,9 @@ export class TaskManager {
         await set("checking");
         let review = await call(
           "grounding",
-          checking,
+          scopedChecking,
           {
+            question: run.input.question,
             sources: materialPacket(sources, run.input.question),
             draft: generated.unit,
             deck: generated.deck,
@@ -727,8 +764,36 @@ export class TaskManager {
         }
         const requests = [...requestMap.values()];
         let supplemented = false;
+        const focusIds = review.issues
+          .filter(
+            (i) => !i.resolved && ["material", "teaching"].includes(i.type),
+          )
+          .flatMap((i) => i.evidence)
+          .filter((id) => sources.some((s) => s.id === id && !s.image));
+        const focusedPacket = materialPacket(
+          sources,
+          run.input.question,
+          focusIds,
+        );
+        const providedPaperIds = focusIds.filter((id) =>
+          focusedPacket.references.some(
+            (r) => r.id === id && !("fullText" in r && r.fullText === false),
+          ),
+        );
+        if (digest(focusedPacket) !== digest(task.sources)) {
+          task.sources = focusedPacket;
+          supplemented = true;
+        }
         for (const request of requests) {
           const paperSpecific =
+            review.issues.some(
+              (i) =>
+                i.id === request.id &&
+                i.type === "material" &&
+                i.evidence.some((id) =>
+                  sources.some((s) => s.id === id && s.kind === "paper"),
+                ),
+            ) ||
             /缺.*(原图|图注|方法原文|论文.*参数)|未提供.*(原图|图注|方法原文)|需(?:要)?(?:提供|补充).*(归一化与校准|稳定性依据)|(?:图注|所给材料|当前论文|本文).*(?:未明确|缺少|未提供).*(?:分母|基线|筛选|参数)|基线.*(?:哪个时间|何时|测量时间|逐.*配对)/s.test(
               request.question,
             );
@@ -741,6 +806,16 @@ export class TaskManager {
             (s) => !sources.some((x) => x.id === s.id),
           );
           let provided = matches.length > 0;
+          if (
+            paperSpecific &&
+            supplemented &&
+            review.issues.some(
+              (i) =>
+                i.id === request.id &&
+                i.evidence.some((id) => providedPaperIds.includes(id)),
+            )
+          )
+            provided = true;
           if (added.length) {
             try {
               materialPacket([...sources, ...added]);
@@ -754,11 +829,14 @@ export class TaskManager {
             ...request,
             kind: paperSpecific ? "paper" : "foundation",
             reason: provided
-              ? "已匹配可核验基础，须由修订及复核确认解释是否解决。"
+              ? "已补入可核验资料，须由修订及复核确认解释是否解决。"
               : "未匹配到可用资料，或相关资料超过额度。",
             paperId: paper.id,
             sourceVersion: paper.version,
-            matchedIds: matches.map((s) => s.id),
+            matchedIds:
+              paperSpecific && provided
+                ? providedPaperIds
+                : matches.map((s) => s.id),
             status: provided ? "provided" : "pending",
           });
         }
@@ -771,7 +849,7 @@ export class TaskManager {
               .filter((s) => !run.input.sourceIds.includes(s.id))
               .map((s) => s.id),
           });
-          task.sources = materialPacket(sources, run.input.question);
+          task.sources = materialPacket(sources, run.input.question, focusIds);
           await this.persist("runs", run.id, run);
         }
         if (
@@ -785,6 +863,9 @@ export class TaskManager {
           generated = await call(
             "revision",
             teaching +
+              (run.input.diagnosticScope
+                ? "\n保留片段范围：PPT unit 仅简短导读，解释集中在页面和逐页备注，不生成完整稿或重复长讲解。"
+                : "") +
               (run.input.speechScript
                 ? "\n保留并修订 deck.speechScript 完整中文演讲稿，包含开场、按页讲述、转场、结尾，与修改后的页面一致。"
                 : ""),
@@ -812,10 +893,10 @@ export class TaskManager {
                 "只修订一次。逐项审计当前问题的位置、来源和理解缺口后融入正文。已核实的对象、比较组、参照、单位、方向与证据边界依来源保留；首稿若有错误，给实际依据再纠正，不凭图注词义填造公式。核对所有新增或改变的事实。内部编号留在工作记录。",
             },
             skills.explanationTracing
-              ? groundedTeachingSchema(sources, run.input.speechScript).extend({
+              ? scopedSchema().extend({
                   explanationLinks: tracingSchema(skills.explanationTracing),
                 })
-              : groundedTeachingSchema(sources, run.input.speechScript),
+              : scopedSchema(),
           );
           if (!requestedDeck) generated = { ...generated, deck: null };
           if (skills.explanationTracing)
@@ -861,9 +942,9 @@ export class TaskManager {
           await set("rechecking");
           review = await call(
             "grounding-final",
-            checking + "\n" + revisionAuditInstruction,
+            scopedChecking + "\n" + revisionAuditInstruction,
             {
-              sources: materialPacket(sources, run.input.question),
+              sources: task.sources,
               draft: generated.unit,
               deck: generated.deck,
               feedback,

@@ -13,6 +13,7 @@ import { sample, profiles } from "../examples/bundle.ts";
 import { save, list } from "./storage.ts";
 import { ConversationStore } from "./conversation.ts";
 import { BudgetLedger } from "./budget.ts";
+import { taskTiming } from "./task-timing.ts";
 import {
   TaskManager,
   materialSources,
@@ -329,6 +330,12 @@ export class AssistantService {
     const ledger = new BudgetLedger(id, async () =>
       this.persist("turns", id, turn),
     );
+    ledger.state.timing = taskTiming(
+      message.module === "ppt" || /PPT|汇报|幻灯/i.test(message.question)
+        ? "full"
+        : "explanation",
+      message.slideCount ?? 6,
+    );
     const turn: AssistantTurn = {
       id,
       conversationId,
@@ -370,7 +377,9 @@ export class AssistantService {
       .run(taskKey(state.paperId, state.id), controller.signal, async () => {
         this.activeIds.add(id);
         // Waiting does not consume the execution deadline.
-        ledger.state.deadline = new Date(Date.now() + 480_000).toISOString();
+        ledger.state.deadline = new Date(
+          Date.now() + (ledger.state.timing?.taskMs ?? 480_000),
+        ).toISOString();
         await this.execute(turn, ledger, controller.signal, legacy, markReady);
       })
       .catch(async (error) => {

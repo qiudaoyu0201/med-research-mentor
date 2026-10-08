@@ -492,7 +492,7 @@ test("budget deadline preserves partial output and usage; interrupt acknowledgme
   assert.equal(attempt.status, "unknown");
   assert.equal(attempt.rawOutput, '{"text":');
   assert.equal(attempt.tokens.total, 22);
-  assert.equal(attempt.observation?.timeoutLayer, "budget");
+  assert.equal(attempt.observation?.timeoutLayer, "task-total");
   assert.equal(attempt.observation?.interruptAcknowledged, true);
   assert.equal(attempt.observation?.remoteTerminal, undefined);
   assert.equal(client.requests.filter((r) => r === "turn/start").length, 1);
@@ -523,10 +523,18 @@ test("external cancellation records a separate remote terminal event without acc
   assert.equal(attempt.observation?.turnId, "turn-fixture");
   assert.equal(attempt.tokens.total, 22);
 });
-test("provider deadline and transport failure are distinct from a confirmed remote terminal", async () => {
+test("managed request deadline and transport failure are distinct from a confirmed remote terminal", async () => {
   for (const mode of ["stall", "transport"] as const) {
     const client = new SimulatedClient(mode);
     const ledger = new BudgetLedger(mode, async () => {});
+    ledger.state.timing = {
+      version: "task-timing-v1",
+      scope: "fragment",
+      taskMs: 500,
+      requestMs: 60,
+      firstOutputMs: 100,
+      idleMs: 100,
+    };
     await assert.rejects(
       ledger.call(
         new CodexProvider(() => client, 60),
@@ -544,7 +552,7 @@ test("provider deadline and transport failure are distinct from a confirmed remo
     assert.equal(attempt.observation?.remoteTerminal, undefined);
     assert.equal(
       attempt.observation?.timeoutLayer,
-      mode === "stall" ? "provider" : undefined,
+      mode === "stall" ? "request-total" : undefined,
     );
     assert.equal(
       attempt.observation?.events.some((e) => e.type === "closed"),

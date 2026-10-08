@@ -17,6 +17,7 @@ import type {
 } from "../shared/research-plan.ts";
 import { planJobDone } from "../shared/research-plan.ts";
 import { BudgetLedger } from "./budget.ts";
+import { taskTiming } from "./task-timing.ts";
 import { digest } from "./materials.ts";
 import type { Provider } from "./provider.ts";
 import { TaskScheduler } from "./scheduler.ts";
@@ -414,7 +415,7 @@ export class ResearchPlans {
       targetSourceRefs: [],
     };
   }
-  async start(id: string, raw: unknown) {
+  async start(id: string, raw: unknown, execution?: { signal?: AbortSignal }) {
     const input = planJobInputSchema.parse(raw),
       requestHash = digest(input);
     return this.locked(id, async () => {
@@ -456,6 +457,13 @@ export class ResearchPlans {
       const frozen = await this.capability(),
         jobId = randomUUID();
       const ledger = new BudgetLedger(jobId, async () => {});
+      ledger.state.timing = taskTiming(
+        input.requestedScope === "full-plan" ? "full" : "fragment",
+        8,
+      );
+      ledger.state.deadline = new Date(
+        Date.now() + ledger.state.timing.taskMs,
+      ).toISOString();
       ledger.state.limit = 2;
       ledger.state.groupLimit = 2;
       const j: StoredJob = {
@@ -474,24 +482,34 @@ export class ResearchPlans {
       };
       await this.persist("research-plan-jobs", j.id, j);
       this.jobs.set(j.id, j);
-      this.dispatch(j, input);
+      this.dispatch(j, input, execution?.signal);
       return this.job(j.id);
     });
   }
-  private dispatch(job: StoredJob, input?: PlanJobInput) {
+  private dispatch(
+    job: StoredJob,
+    input?: PlanJobInput,
+    external?: AbortSignal,
+  ) {
     const controller = new AbortController();
+    const signal = external
+      ? AbortSignal.any([controller.signal, external])
+      : controller.signal;
     this.controllers.set(job.id, controller);
     const completion = this.scheduler
-      .run(`plan:${job.planId}`, controller.signal, () =>
-        this.execute(job, controller.signal, input),
-      )
+      .run(`plan:${job.planId}`, signal, () => {
+        job.budget.deadline = new Date(
+          Date.now() + (job.budget.timing?.taskMs ?? 480_000),
+        ).toISOString();
+        return this.execute(job, signal, input);
+      })
       .catch(async (error) => {
-        job.status = controller.signal.aborted
+        job.status = signal.aborted
           ? "cancelled"
           : error instanceof ResearchConflict
             ? "conflict"
             : "failed";
-        job.error = controller.signal.aborted
+        job.error = signal.aborted
           ? "已停止；保存版本及已生成草稿保留。"
           : error instanceof Error
             ? error.message

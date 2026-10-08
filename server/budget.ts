@@ -3,6 +3,7 @@ import type { Attempt, BudgetState, TokenUsage } from "../shared/types.ts";
 import type { Provider, ProviderObserver } from "./provider.ts";
 import { ProviderFailure } from "./provider.ts";
 import type { z } from "zod";
+import { watchRequest, TaskDeadline } from "./task-timing.ts";
 
 // Each provider turn uses a fresh thread. Prefer its increment, never add cumulative updates.
 export function normalizeUsage(raw: any): TokenUsage {
@@ -63,6 +64,7 @@ export class BudgetLedger {
       skillHash: string;
       onReserved?: (attempt: Attempt) => Promise<void>;
       observe?: ProviderObserver;
+      managedTiming?: boolean;
     },
   ) {
     signal.throwIfAborted();
@@ -116,7 +118,21 @@ export class BudgetLedger {
       await this.persist();
       throw new Error(attempt.error);
     }
-    const timed = AbortSignal.any([signal, AbortSignal.timeout(deadline)]);
+    // A counted training wrapper inherits the upstream signal instead of
+    // competing with another fixed timer. Direct calls get one ledger watchdog.
+    let watch: ReturnType<typeof watchRequest> | undefined;
+    const timed = options.managedTiming
+      ? signal
+      : (watch = watchRequest(
+          signal,
+          this.state.deadline,
+          this.state.timing ?? {
+            requestMs: deadline,
+            firstOutputMs: deadline,
+            idleMs: deadline,
+          },
+          (event) => observe(event),
+        )).signal;
     const started = Date.now();
     let abortListener: (() => void) | undefined;
     let observationWrites = Promise.resolve();
@@ -124,6 +140,7 @@ export class BudgetLedger {
     let observationClosed = false;
     const observe: ProviderObserver = (event) => {
       if (observationClosed) return;
+      watch?.observe(event);
       const observation = (attempt.observation ??= {
         outputUpdates: 0,
         events: [],
@@ -177,6 +194,7 @@ export class BudgetLedger {
         timed,
         options.image,
         observe,
+        { managedTiming: true },
       ),
     );
     // An abort must give cooperative providers time to capture interrupt/terminal events.
@@ -190,11 +208,16 @@ export class BudgetLedger {
         pending,
         new Promise<never>((_resolve, reject) => {
           abortListener = () => {
-            observe({
-              type: signal.aborted ? "cancel" : "timeout",
-              at: new Date().toISOString(),
-              layer: signal.aborted ? "external" : "budget",
-            });
+            if (signal.aborted)
+              observe({
+                type:
+                  signal.reason instanceof TaskDeadline ? "timeout" : "cancel",
+                at: new Date().toISOString(),
+                layer:
+                  signal.reason instanceof TaskDeadline
+                    ? signal.reason.layer
+                    : "external",
+              });
             const grace = setTimeout(() => reject(timed.reason), 5500);
             void settled.then(() => {
               clearTimeout(grace);
@@ -210,15 +233,20 @@ export class BudgetLedger {
       attempt.tokens = normalizeUsage(attempt.usage);
       attempt.outputChars = JSON.stringify(result.output).length;
       attempt.status = "succeeded";
+      (attempt.observation ??= {
+        outputUpdates: 0,
+        events: [],
+      }).validatedOutputAt = new Date().toISOString();
       return result;
     } catch (error) {
-      attempt.status = signal.aborted
-        ? "cancelled"
-        : timed.aborted || !(error instanceof ProviderFailure)
-          ? "unknown"
-          : error.kind === "format"
-            ? "failed"
-            : "unknown";
+      attempt.status =
+        signal.aborted && !(signal.reason instanceof TaskDeadline)
+          ? "cancelled"
+          : timed.aborted || !(error instanceof ProviderFailure)
+            ? "unknown"
+            : error.kind === "format"
+              ? "failed"
+              : "unknown";
       attempt.error = error instanceof Error ? error.message : "生成失败";
       if (error instanceof ProviderFailure) {
         if (error.rawOutput !== undefined) {
@@ -234,6 +262,7 @@ export class BudgetLedger {
     } finally {
       if (abortListener) timed.removeEventListener("abort", abortListener);
       observationClosed = true;
+      watch?.close();
       attempt.durationMs = Date.now() - started;
       await observationWrites.catch(() => {});
       await this.persist();

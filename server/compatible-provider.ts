@@ -1,6 +1,10 @@
 import { createHash } from "node:crypto";
 import { z } from "zod";
-import { ProviderFailure, type Provider } from "./provider.ts";
+import {
+  ProviderFailure,
+  type Provider,
+  type ProviderObserver,
+} from "./provider.ts";
 import type { CompatibleConfiguration } from "./model-config.ts";
 
 // One request per attempt; transport/format failures never trigger a hidden retry.
@@ -54,6 +58,7 @@ export class CompatibleProvider implements Provider {
     schema: z.ZodType<T>,
     signal: AbortSignal,
     image?: string,
+    observe?: ProviderObserver,
   ) {
     signal.throwIfAborted();
     if (
@@ -134,6 +139,7 @@ export class CompatibleProvider implements Provider {
       );
     }
     signal.throwIfAborted();
+    observe?.({ type: "response", at: new Date().toISOString() });
     if (!response.ok)
       throw new ProviderFailure(
         `模型接口返回 HTTP ${response.status}；未自动重发。`,
@@ -152,6 +158,23 @@ export class CompatibleProvider implements Provider {
     signal.throwIfAborted();
     const choice = result?.choices?.[0],
       content = choice?.message?.content;
+    if (typeof content === "string")
+      observe?.({
+        type: "output",
+        at: new Date().toISOString(),
+        text: content,
+      });
+    if (result?.usage)
+      observe?.({
+        type: "usage",
+        at: new Date().toISOString(),
+        usage: result.usage,
+      });
+    observe?.({
+      type: "terminal",
+      at: new Date().toISOString(),
+      status: choice?.finish_reason === "stop" ? "completed" : "failed",
+    });
     if (
       choice?.message?.tool_calls?.length ||
       choice?.message?.function_call ||

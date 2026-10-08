@@ -1,5 +1,9 @@
 import { z } from "zod";
-import type { Provider, ProviderObserver } from "./provider.ts";
+import type {
+  Provider,
+  ProviderObserver,
+  ProviderControl,
+} from "./provider.ts";
 import type { BudgetState } from "../shared/types.ts";
 import { BudgetLedger } from "./budget.ts";
 import { digest } from "./materials.ts";
@@ -128,6 +132,7 @@ export class TrainingProvider implements Provider {
     signal: AbortSignal,
     image?: string,
     observe?: ProviderObserver,
+    control?: ProviderControl,
   ) {
     reserveUnit(this.batch, 1, this.cycleUsed(), 1);
     return this.ledger
@@ -147,6 +152,7 @@ export class TrainingProvider implements Provider {
             settings: this.settings,
           }),
         observe,
+        managedTiming: control?.managedTiming,
       })
       .catch(async (error) => {
         const last = this.batch.budget.attempts.at(-1);

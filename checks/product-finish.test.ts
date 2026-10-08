@@ -126,6 +126,37 @@ test("long ordinary paper includes late methods and explicit exact excerpt range
     );
 });
 
+test("material requests restore complete selected evidence without exceeding the shared packet allowance", () => {
+  const sources = Array.from({ length: 12 }, (_, i) => ({
+    id: `p-${i}`,
+    title: `PDF 第 ${i + 1} 页`,
+    page: i + 1,
+    kind: "paper" as const,
+    locator: `PDF ${i + 1}`,
+    verified: false,
+    text:
+      "Generic evidence. ".repeat(250) +
+      `The intervention identity is at the end of page ${i}.`,
+  }));
+  const original = materialPacket(sources, "complete presentation");
+  assert.ok(!original.blocks[4].text.includes("identity"));
+  const restored = materialPacket(sources, "complete presentation", ["p-4"]);
+  const ref = restored.references.find((r) => r.id === "p-4")!;
+  assert.equal(
+    restored.blocks.find((b) => b.hash === ref.blockHash)!.text,
+    sources[4].text,
+  );
+  assert.ok(restored.blocks.reduce((n, b) => n + b.text.length, 0) <= 22000);
+  assert.ok(restored.references.some((r) => "visibleRanges" in r));
+  const oversized = [
+    { ...sources[0], text: "x".repeat(11000) },
+    ...sources.slice(1),
+  ];
+  const bounded = materialPacket(oversized, "complete presentation", ["p-0"]);
+  assert.ok(bounded.blocks.reduce((n, b) => n + b.text.length, 0) <= 22000);
+  assert.ok("visibleRanges" in bounded.references[0]);
+});
+
 test("valid JSON with invalid nested shape is quarantined before startup consumers; workspace restores its backup", async () => {
   const dir = await mkdtemp(join(tmpdir(), "tutor-shapes-")),
     store = new RecordStorage(dir);
