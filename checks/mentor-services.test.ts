@@ -1,7 +1,7 @@
 import test from "node:test";
 import assert from "node:assert/strict";
 import { SourceTranslations } from "../server/source-translation.ts";
-import { TutorResearch } from "../server/tutor-research.ts";
+import { TutorResearch, needsBackgroundDecision } from "../server/tutor-research.ts";
 import { TaskScheduler } from "../server/scheduler.ts";
 import { BudgetLedger } from "../server/budget.ts";
 import type { Provider } from "../server/provider.ts";
@@ -233,6 +233,14 @@ test("background evidence retains counted planning, abstract provenance and sour
   await restored.restore((async () => [...h.records.values()]) as typeof list);
   assert.equal(restored.sources(paper).length, 1);
   assert.equal(restored.sources({ ...paper, version: "v2" }).length, 0);
+});
+
+test("reading lookup admission allows bounded help while respecting explicit paper-only requests", () => {
+  const base = { clientMessageId: "lookup", mode: "live" as const, question: "请查资料解释这个机制" };
+  assert.equal(needsBackgroundDecision(base), true);
+  assert.equal(needsBackgroundDecision({ ...base, question: "只用原文解释这个机制" }), false);
+  assert.equal(needsBackgroundDecision({ ...base, module: "ppt" }), false);
+  assert.equal(needsBackgroundDecision({ ...base, question: "继续" }), false);
 });
 
 test("cancelled background search cannot publish supplemental evidence", async () => {

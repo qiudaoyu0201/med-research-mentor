@@ -54,7 +54,7 @@ export function explanationCandidateRules(
 export interface TrainingBatch {
   id: string;
   phase: "M1" | "M2" | "M3" | "calibration";
-  status: "running" | "complete" | "stopped";
+  status: "running" | "complete" | "stopped" | "awaiting-continuation";
   budget: BudgetState;
   stopReason?: string;
   cycleLimit?: number;

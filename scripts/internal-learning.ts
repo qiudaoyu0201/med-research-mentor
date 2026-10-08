@@ -37,7 +37,7 @@ import {
   learningCalibration,
   reserveLearningUnit,
 } from "../server/learning-protocol.ts";
-import { beginLearningLoop, loopNeedsRemediation } from "../server/learning-loop.ts";
+import { beginLearningLoop, learningLoopClosed, loopNeedsRemediation } from "../server/learning-loop.ts";
 const stage = process.argv[2] ?? "run";
 if (!["calibrate", "run"].includes(stage))
   throw new Error("学习入口：calibrate / run");
@@ -195,7 +195,7 @@ try {
     hash: string;
     batches: TrainingBatch[];
     calibration: { id: string; matched: boolean; evaluation: unknown }[];
-    status: "calibrating" | "ready" | "running" | "complete" | "stopped";
+    status: "calibrating" | "ready" | "running" | "complete" | "stopped" | "awaiting-learning-closure";
     results: {
       taskId: string;
       side: string;
@@ -204,6 +204,7 @@ try {
       reason?: string;
       raw?: unknown;
       evaluation?: unknown;
+      learningLoop?: ReturnType<typeof beginLearningLoop>;
     }[];
     admission?: unknown[];
   }
@@ -482,9 +483,21 @@ try {
           await persist();
           console.log("learning", specification.id, side, branch, item.status);
         }
-      batch.status = "complete";
-      if (stage === "run" && report.results.length === 12)
+      const loops = report.results
+        .map((item: any) => item.learningLoop)
+        .filter(Boolean);
+      // Twelve initial evaluations are not a completed learning experiment.
+      // Keep the batch resumable until every branch has an independent transfer.
+      if (stage === "calibrate") {
+        batch.status = "complete";
+        report.status = "ready";
+      } else if (report.results.length === 12 && loops.every(learningLoopClosed)) {
+        batch.status = "complete";
         report.status = "complete";
+      } else {
+        batch.status = "awaiting-continuation" as any;
+        report.status = "awaiting-learning-closure";
+      }
     } catch (error) {
       batch.status = "stopped";
       report.status = "stopped";

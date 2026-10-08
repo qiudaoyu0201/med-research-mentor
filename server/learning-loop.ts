@@ -9,6 +9,7 @@ export interface LearningLoopRecord {
   remedial?: { exposureId: string; exposureHash: string; reason: string };
   correction?: { mode: "assisted"; answerHash: string; evaluationHash: string };
   transfer?: { taskId: string; mode: "independent"; answerHash: string; evaluationHash: string };
+  next?: "remedial-teaching" | "independent-transfer";
   status: "initial-only" | "remediated" | "transferred" | "blocked";
 }
 
@@ -78,4 +79,8 @@ export function addIndependentTransfer(
 
 export function loopNeedsRemediation(evaluation: { valid: boolean; review: { checks: { passed: boolean }[] } }) {
   return !evaluation.valid || evaluation.review.checks.some((check) => !check.passed);
+}
+
+export function learningLoopClosed(loop: LearningLoopRecord) {
+  return loop.status === "transferred" && !!loop.transfer;
 }
