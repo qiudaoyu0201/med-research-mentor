@@ -1,3 +1,4 @@
+import { reviewCrossFunction, pendingProductValidation } from "../server/cross-function-review.ts";
 import {
   readFile,
   writeFile,
@@ -226,6 +227,7 @@ export async function main(command = process.argv[2] ?? "status") {
             report.contract.parent.combined +
             report.batch.budget.attempts.length,
           units: report.units,
+          pendingStages: report.pendingStages ?? ["legacy-report:validation-not-recorded"],
           error: report.error,
         },
         null,
@@ -240,12 +242,12 @@ export async function main(command = process.argv[2] ?? "status") {
     );
   if (
     command === "plan" &&
-    (report.status !== "completed" || report.planExtension)
+    (!["completed", "pending-validation"].includes(report.status) || report.planExtension)
   )
     throw new Error("方案交叉验收仅能在已完成带读批次后显式派发一次。");
   if (
     command === "compare" &&
-    (report.status !== "completed" || report.comparisonCorrection)
+    (!["completed", "pending-validation"].includes(report.status) || report.comparisonCorrection)
   )
     throw new Error("补全最终材料的比较仅可显式派发一次，不覆盖原始比较。");
   if (command === "plan-repaired") {
@@ -395,6 +397,22 @@ export async function main(command = process.argv[2] ?? "status") {
       store.save(group, id, data);
     const manager = new TaskManager(counted, persistProduct);
     const outcomes: Record<string, TaskRun> = {};
+    report.crossArtifacts ??= {};
+    report.crossChecks ??= [];
+    report.crossSources = paper.sources.map(({ id, text, locator, image }) => ({ id, text, locator, ...(image ? { image } : {}) }));
+    report.pendingStages = pendingProductValidation({ artifacts: report.crossArtifacts, sources: report.crossSources }, report.crossChecks);
+    await persist();
+    const crossCheck = async () => {
+      assertAllowance(report.batch, 1);
+      counted.context = "current-products-cross-check";
+      const input = { artifacts: report.crossArtifacts, sources: paper.sources.map(({ id, text, locator, image }) => ({ id, text, locator, ...(image ? { image } : {}) })) };
+      const check = await reviewCrossFunction(counted, input, controller.signal);
+      report.crossChecks.push(check);
+      await store.save("results", `cross-check-${report.crossChecks.length}`, { input, review: check });
+      await persist();
+      if (!check.evaluation.valid || !check.evaluation.passed)
+        throw new Error("当前产物交叉复核未通过，保留结果且不标记完整完成。");
+    };
     if (command === "run") {
       assertAllowance(report.batch, 12);
       for (const [side, rules] of [
@@ -432,6 +450,7 @@ export async function main(command = process.argv[2] ?? "status") {
           return created;
         });
         outcomes[side] = run;
+        if (side === "candidate" && run.status === "completed" && run.result) report.crossArtifacts.reading = { unit: run.result, deck: null };
         report.units.push({
           side,
           kind: "reading",
@@ -488,8 +507,8 @@ export async function main(command = process.argv[2] ?? "status") {
         mapping: { A: "candidate", B: "baseline" },
       });
       // Reserve a full product PPT loop before dispatch. Never truncate a paid unit to hide cost.
-      if (report.batch.budget.attempts.length + 6 <= 18) {
-        assertAllowance(report.batch, 6);
+      if (report.batch.budget.attempts.length + 7 <= 18) {
+        assertAllowance(report.batch, 7);
         counted.context = "candidate-ppt-three-agent";
         const run = await withRuleSnapshot(candidate, async () => {
           const created = await manager.start(
@@ -519,6 +538,11 @@ export async function main(command = process.argv[2] ?? "status") {
           error: run.error,
         });
         outcomes.ppt = run;
+        if (run.status === "completed" && run.deck) {
+          report.crossArtifacts.ppt = { unit: run.result, deck: run.deck };
+          await persist();
+          await crossCheck();
+        } else throw new Error("PPT 生成未完成，保留待验证阶段。");
         await persist();
       }
     } else if (command === "plan" || command === "plan-repaired") {
@@ -601,36 +625,9 @@ export async function main(command = process.argv[2] ?? "status") {
         (u: any) => u.side === "candidate" && u.kind === "reading",
       );
       const readingRun = await store.read<TaskRun>("runs", reading.runId);
-      assertAllowance(report.batch, 1);
-      counted.context = "cross-reading-plan-grounding";
-      const cross = await counted.generate(
-        "你是独立医学科研核对者。回到sources核对讲解与课题草案；不能因二者相互一致就判事实为真。核对原论文观察、机制假设、新计划预期结果是否混淆，以及设计是否真正区分供体存留和宿主继发衰老。指出具体段落与原文依据。未知条件如实保留，不编造结论。只做内部审查，不宣称科学完整或真人学习效果。",
-        {
-          sources: paper.sources,
-          reading: readingRun.result,
-          plan: result.current.versions.find((v) => v.id === version)?.content,
-        },
-        z.object({
-          issues: z.array(
-            z.object({
-              location: z.string(),
-              sourceIds: z.array(z.string()),
-              severity: z.enum(["blocking", "warning"]),
-              explanation: z.string(),
-            }),
-          ),
-          supportedConnections: z.array(z.string()),
-          limitations: z.array(z.string()),
-        }),
-        controller.signal,
-      );
-      if (
-        cross.output.issues.some((i) =>
-          i.sourceIds.some((id) => !paper.sources.some((s) => s.id === id)),
-        )
-      )
-        throw new Error("交叉核对引用了未提供来源。");
-      await store.save("results", "reading-plan-cross-check", cross);
+      report.crossArtifacts.reading = { unit: readingRun.result, deck: null };
+      report.crossArtifacts.proposal = { content: result.current.versions.find((v) => v.id === version)?.content };
+      await crossCheck();
       report.planExtension.completedAt = new Date().toISOString();
     } else if (command === "plan-revise") {
       assertAllowance(report.batch, 2);
@@ -697,7 +694,14 @@ export async function main(command = process.argv[2] ?? "status") {
         join(directory, "candidate-plan.docx"),
         plans.exportDocx(plan.id, current.currentVersion!),
       );
-      report.planRevision.completedAt = new Date().toISOString();
+      report.crossArtifacts.reading = { unit: readingRun.result, deck: null };
+      report.crossArtifacts.proposal = { content: current.versions.find((v) => v.id === current.currentVersion)?.content };
+      report.planRevision.productCompletedAt = new Date().toISOString();
+      // Do not raise the historical 18-call ceiling or reuse the pre-revision review.
+      if (report.batch.budget.attempts.length < report.batch.budget.limit) {
+        await crossCheck();
+        report.planRevision.completedAt = new Date().toISOString();
+      } else report.planRevision.pendingReason = "修订产物已保存；当前额度不足以独立交叉复核，须进入继承成本的新实验。";
     } else {
       assertAllowance(report.batch, 1);
       const readings = await Promise.all(
@@ -758,7 +762,8 @@ export async function main(command = process.argv[2] ?? "status") {
       });
       report.comparisonCorrection.completedAt = new Date().toISOString();
     }
-    report.status = "completed";
+    report.pendingStages = pendingProductValidation({ artifacts: report.crossArtifacts, sources: paper.sources.map(({ id, text, locator, image }) => ({ id, text, locator, ...(image ? { image } : {}) })) }, report.crossChecks);
+    report.status = report.pendingStages.length ? "pending-validation" : "completed";
     report.batch.status = "complete";
     report.scope =
       "真实产品三角色流程及同源A/B内部诊断；产物范围为冻结论文第1–2页，非全文、非真人试验。";
@@ -769,6 +774,8 @@ export async function main(command = process.argv[2] ?? "status") {
     report.batch.stopReason = String(error);
     process.exitCode = 1;
   } finally {
+    if (report.crossArtifacts && report.crossSources)
+      report.pendingStages = pendingProductValidation({ artifacts: report.crossArtifacts, sources: report.crossSources }, report.crossChecks ?? []);
     report.endedAt = new Date().toISOString();
     report.combinedAttempts =
       historical.combined + report.batch.budget.attempts.length;

@@ -1,3 +1,4 @@
+import { figureFamiliarity } from "./figure-familiarity.ts";
 import { randomUUID, createHash } from "node:crypto";
 import type {
   TaskInput,
@@ -629,6 +630,7 @@ export class TaskManager {
             : paper.scope,
           sources: materialPacket(sources, run.input.question),
           taughtConcepts: run.input.taughtConcepts,
+          figureFamiliarity: figureFamiliarity(run.input.taughtConcepts, run.input.question),
           previous: run.input.previous || null,
           modules: run.input.modules ?? [run.input.module],
           slideCount: run.input.slideCount ?? null,

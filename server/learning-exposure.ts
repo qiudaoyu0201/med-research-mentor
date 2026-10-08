@@ -40,6 +40,25 @@ export function assertLearningGate(
   )
     throw new Error("候选开发、留出或实际文件验收未完成，学习试验未发起。");
 }
+export function assertCleanLearningArtifact(value: unknown) {
+  if (!value || typeof value !== "object") return;
+  for (const [key, child] of Object.entries(value)) {
+    if (
+      [
+        "run",
+        "roles",
+        "feedback",
+        "review",
+        "evaluation",
+        "budget",
+        "previousIssues",
+        "materialRequests",
+      ].includes(key)
+    )
+      throw new Error("教学曝光包含任务或评价工作记录。");
+    assertCleanLearningArtifact(child);
+  }
+}
 export function lessonExposure(
   products: LearningProduct[],
   caseId: string,
@@ -59,26 +78,7 @@ export function lessonExposure(
   )
     throw new Error("两侧实际教学图件不同，不能合并材料控制。");
   const product = products.find((p) => p.id === caseId && p.side === side);
-  const assertCleanArtifact = (value: unknown) => {
-    if (!value || typeof value !== "object") return;
-    for (const [key, child] of Object.entries(value)) {
-      if (
-        [
-          "run",
-          "roles",
-          "feedback",
-          "review",
-          "evaluation",
-          "budget",
-          "previousIssues",
-          "materialRequests",
-        ].includes(key)
-      )
-        throw new Error("教学曝光包含任务或评价工作记录。");
-      assertCleanArtifact(child);
-    }
-  };
-  assertCleanArtifact(product?.artifact);
+  assertCleanLearningArtifact(product?.artifact);
   const text = JSON.stringify(pair[0]!.sources);
   const materialPayload = {
     text,

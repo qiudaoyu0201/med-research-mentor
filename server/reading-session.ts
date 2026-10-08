@@ -82,6 +82,22 @@ export function readingAction(
   if (/详细|深入|展开|看不懂|不理解|基础|英文.*不懂|解释|为什么|怎么理解|什么是|方法|创新/.test(q)) return "deepen";
   if (/^(继续|接着|下一|往下)/.test(q)) return "continue";
 }
+
+// Extend a page-boundary unit only when the extracted text supplies an explicit
+// continuation cue. Keep the existing per-source ranges and historical cursors.
+export function extendReadingAcrossPage(paper: PaperBundle, ranges: ReadingRange[], next: ReadingRange | undefined, maxChars = 9600) {
+  const last = ranges.at(-1);
+  if (!last || !next || ranges.reduce((n, r) => n + r.end - r.start, 0) + next.end - next.start > maxChars) return ranges;
+  const left = paper.sources.find((s) => s.id === last.sourceId), right = paper.sources.find((s) => s.id === next.sourceId);
+  if (!left || !right || !left.page || right.page !== left.page + 1 || last.end !== left.text.length || next.start !== 0 ||
+    (left.section && right.section && left.section !== right.section)) return ranges;
+  const tail = left.text.slice(Math.max(last.start, last.end - 500)).trim(), head = right.text.slice(0, Math.min(next.end, 500)).trim();
+  if (/^(?:\d+[.\s]+)?(?:(?:references|acknowledg\w*|methods|materials and methods|discussion|supplementary)\b|参考文献|致谢|方法|讨论)/i.test(head)) return ranges;
+  const figureNumbers = (text: string) => [...text.matchAll(/(?:Fig(?:ure)?\.?|图)\s*(\d+)/gi)].map((m) => m[1]);
+  const continuation = /[a-z,;–—-]$/i.test(tail) && /^[a-z]/.test(head);
+  const linkedFigure = figureNumbers(tail).some((number) => figureNumbers(head).includes(number));
+  return continuation || linkedFigure ? [...ranges, next] : ranges;
+}
 export function prepareReading(
   paper: PaperBundle,
   previous: ReadingSession | undefined,
@@ -187,6 +203,8 @@ export function prepareReading(
       ? state.lastRanges
       : units.slice(cursor, cursor + (action === "long" ? 3 : 1));
   if (!ranges.length) ranges = units.slice(0, 1);
+  if (!summary && action !== "deepen")
+    ranges = extendReadingAcrossPage(paper, ranges, units[cursor + ranges.length], action === "long" ? 16000 : 9600);
   // Multiple excerpts of the same source are joined without pretending to cover the gap.
   let readingChars = ranges.reduce((n, r) => n + r.end - r.start, 0);
   const contextRanges = summary

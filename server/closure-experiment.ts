@@ -1,3 +1,4 @@
+import { assertClosureProducts } from "./closure-product-gate.ts";
 import { readFile, mkdir, open } from "node:fs/promises";
 import { join } from "node:path";
 import { createHash } from "node:crypto";
@@ -49,11 +50,13 @@ export interface ClosureManifest {
   version: "closure-experiment-v1";
   id: string;
   history: FrozenFile;
+  crossValidation?: FrozenFile;
   /** Each input is a frozen ClosureInput, not a regenerated learner answer. */
   phases: {
     id: string;
     kind: "reading" | "ppt" | "proposal";
     input: FrozenFile;
+    product?: FrozenFile;
     files: FrozenFile[];
   }[];
 }
@@ -131,6 +134,7 @@ async function loadContract(manifest: ClosureManifest, provider: Provider) {
     )
   )
     throw new Error("闭环计划必须保留阅读、汇报、研究方案三类阶段及唯一编号。");
+  if (manifest.crossValidation || manifest.phases.some((p) => p.product)) await assertClosureProducts(manifest);
   const historicalAttempts = inheritedClosureAttempts(
     JSON.parse((await frozenBytes(manifest.history)).toString()),
   );

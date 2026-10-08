@@ -1,3 +1,4 @@
+import { deliveredFigureBasics } from "./figure-familiarity.ts";
 import { randomUUID } from "node:crypto";
 import { containsRenderedQuote } from "../shared/markdown.ts";
 import { needsBackgroundDecision, type TutorResearch } from "./tutor-research.ts";
@@ -1258,6 +1259,7 @@ export class AssistantService {
         const names = new Map(state.taughtConcepts.map((c) => [c.name, c]));
         for (const term of run.result?.terms ?? [])
           names.set(term.name, { name: term.name, unitId: run.id });
+        for (const name of deliveredFigureBasics(run)) names.set(name, { name, unitId: run.id });
         state.taughtConcepts = [...names.values()];
         const resolvedIds = new Set([
           ...(run.review?.issues.filter((i) => i.resolved).map((i) => i.id) ??

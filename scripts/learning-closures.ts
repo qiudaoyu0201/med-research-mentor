@@ -1,3 +1,4 @@
+import { assertClosureProducts } from "../server/closure-product-gate.ts";
 import { mkdir, open, readFile, unlink } from "node:fs/promises";
 import { resolve, join, relative, isAbsolute } from "node:path";
 import { pathToFileURL } from "node:url";
@@ -50,6 +51,7 @@ export async function main() {
     const manifest: ClosureManifest = JSON.parse(
       await readFile(resolve(manifestPath), "utf8"),
     );
+    await assertClosureProducts(manifest);
     const provider = createProvider();
     const persist = (state: ClosureExperiment) =>
       store.save("closure-experiments", "report", state);
