@@ -196,6 +196,17 @@ export function textValues(value: unknown): string[] {
     return Object.values(value).flatMap(textValues);
   return [];
 }
+function locationMatches(text: string, location: string) {
+  if (text.includes(location)) return true;
+  // Providers sometimes quote a sentence when returning a location. Accept
+  // only removable presentation wrappers; the substantive text must remain
+  // present in the artifact after whitespace normalization.
+  const clean = (value: string) => value
+    .trim()
+    .replace(/^[“”"'「『《]+|[“”"'」』》]+$/g, "")
+    .replace(/\s+/g, " ");
+  return clean(text).includes(clean(location));
+}
 export function validateReview(
   criteria: string[],
   artifact: unknown,
@@ -212,7 +223,7 @@ export function validateReview(
       continue;
     }
     const c = matches[0];
-    if (!strings.some((s) => s.includes(c.location)))
+    if (!strings.some((s) => locationMatches(s, c.location)))
       invalid.push(`评价位置无效：${criterion}`);
     if (c.sourceIds.some((id) => !sourceIds.includes(id)))
       invalid.push(`评价来源无效：${criterion}`);

@@ -121,6 +121,24 @@ test("independent evaluator rejects bogus locations, missing, duplicate and unkn
     assert.ok(result.findings.some((f) => /无效|缺少|重复|未知/.test(f)));
   }
 });
+test("evaluator location accepts presentation quotes while retaining substantive artifact binding", () => {
+  const check = {
+    criterion: "boundary",
+    passed: false,
+    location: "真实句子",
+    sourceIds: ["s"],
+    explanation: "错误",
+  };
+  const result = validateReview(["boundary"], { text: "这是一个真实句子。" }, ["s"], {
+    checks: [{ ...check, location: "“这是一个真实句子。”" }],
+  });
+  assert.equal(result.valid, true);
+  assert.equal(result.passed, false);
+  const bad = validateReview(["boundary"], { text: "这是一个真实句子。" }, ["s"], {
+    checks: [{ ...check, location: "“这是另一个句子。”" }],
+  });
+  assert.equal(bad.valid, false);
+});
 test("factual evaluation needs actual citations and omissions cannot default to passing", () => {
   const check = {
     criterion: factualCriterion,
