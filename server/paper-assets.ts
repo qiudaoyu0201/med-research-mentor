@@ -1,5 +1,6 @@
 import { readFile } from "node:fs/promises";
 import { getDocument } from "pdfjs-dist/legacy/build/pdf.mjs";
+import { pdfRuntime } from "./pdf-runtime.ts";
 import { createCanvas } from "@napi-rs/canvas";
 import type { PaperBundle, Source } from "../shared/types.ts";
 import { digest } from "./materials.ts";
@@ -87,13 +88,13 @@ export async function registerFigureEvidence(
     file: Buffer.from(bytes).toString("base64"),
     page: spec.page,
     scale: 1.3,
-    renderer: "pdf-page-v1",
+    renderer: "pdf-page-v2-jbig2",
   });
   try {
     added[0].image = await read<string>("material-cache", key);
   } catch (error: any) {
     if (!missingRecord(error)) throw error;
-    const task = getDocument({ data: bytes, useSystemFonts: true });
+    const task = getDocument({ ...pdfRuntime, data: bytes });
     try {
       const pdf = await task.promise,
         pdfPage = await pdf.getPage(spec.page),

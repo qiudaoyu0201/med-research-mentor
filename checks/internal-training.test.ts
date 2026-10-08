@@ -138,6 +138,11 @@ test("evaluator location accepts presentation quotes while retaining substantive
     checks: [{ ...check, location: "“这是另一个句子。”" }],
   });
   assert.equal(bad.valid, false);
+  for (const location of ["“”", "\n", "\"\""]) {
+    assert.equal(validateReview(["boundary"], { text: "真实句子" }, ["s"], {
+      checks: [{ ...check, location }],
+    }).valid, false);
+  }
 });
 test("factual evaluation needs actual citations and omissions cannot default to passing", () => {
   const check = {

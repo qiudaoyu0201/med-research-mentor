@@ -382,7 +382,7 @@ shapes.sessions = object({
   progress: arrayObjects,
 });
 export function validRecordShape(group: string, value: unknown, id?: string) {
-  if (group === "material-cache" && id?.endsWith("-pdf-figures-v2"))
+  if (group === "material-cache" && /-pdf-figures-v[23]$/.test(id ?? ""))
     return object({
       pages: strings,
       parseStatus: str,

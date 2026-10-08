@@ -1,4 +1,5 @@
 import { getDocument } from "pdfjs-dist/legacy/build/pdf.mjs";
+import { pdfRuntime, pdfExtractionVersion } from "./pdf-runtime.ts";
 import { readFile } from "node:fs/promises";
 import { createHash } from "node:crypto";
 import { read, save, missingRecord } from "./storage.ts";
@@ -13,7 +14,7 @@ export async function parsePdf(
   if (Buffer.from(bytes.subarray(0, 1024)).indexOf("%PDF-") < 0)
     throw new Error("文件不是有效 PDF，原文件已保留。");
   const hash = createHash("sha256").update(bytes).digest("hex");
-  const key = `${hash}-pdf-figures-v2`;
+  const key = `${hash}-${pdfExtractionVersion}`;
   let cached:
     | {
         pages: string[];
@@ -53,7 +54,7 @@ export async function parsePdf(
         })),
       ],
     };
-  const task = getDocument({ data: bytes, useSystemFonts: true });
+  const task = getDocument({ ...pdfRuntime, data: bytes });
   const paper: PaperBundle = {
     id,
     title,

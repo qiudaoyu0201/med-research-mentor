@@ -2,6 +2,7 @@ import { readFile } from "node:fs/promises";
 import { join } from "node:path";
 import { createCanvas, loadImage } from "@napi-rs/canvas";
 import { getDocument } from "pdfjs-dist/legacy/build/pdf.mjs";
+import { pdfRuntime } from "./pdf-runtime.ts";
 import type { PaperBundle, Source } from "../shared/types.ts";
 import { root, read, save, safeId, missingRecord } from "./storage.ts";
 import { samplePdf } from "./sample.ts";
@@ -58,7 +59,7 @@ export async function saveDisplayAsset(
     page: source.page,
     purpose,
     targetWidth: 3200,
-    renderer: "display-v1",
+    renderer: "display-v2-jbig2",
     ...(source.imageRegion ? { region: source.imageRegion } : {}),
     ...(crop ? { crop } : {}),
   });
@@ -71,6 +72,7 @@ export async function saveDisplayAsset(
   let asset: DisplayAsset;
   if (purpose === "page") {
     const task = getDocument({
+      ...pdfRuntime,
       data: new Uint8Array(bytes),
       useSystemFonts: true,
     });

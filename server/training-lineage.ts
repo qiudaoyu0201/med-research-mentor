@@ -51,6 +51,18 @@ export async function trainingLineage(directory: string) {
   };
 }
 
+// Cost reconciliation is separate from dispatch authorization. In particular,
+// changing a directory must never turn an existing experiment into a free root.
+export function assertTrainingDispatchLineage(
+  directory: string,
+  lineage: { previousDirectory: string | null; reportHash: string | null; attempts: number },
+) {
+  if (!lineage.previousDirectory && resolve(directory) !== resolve("runs/internal-training/cycle-1"))
+    throw new Error("新训练目录必须显式关联前序账本，不能从零重置历史成本。");
+  if (lineage.previousDirectory && (!lineage.reportHash || !Number.isSafeInteger(lineage.attempts) || lineage.attempts < 0))
+    throw new Error("前序账本关联无效，禁止派发。");
+}
+
 export async function iterationLineage(
   directory: string,
 ): Promise<IterationQuota> {

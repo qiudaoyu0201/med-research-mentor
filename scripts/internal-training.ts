@@ -2,6 +2,7 @@ import { mkdir, readFile, writeFile, open, copyFile } from "node:fs/promises";
 import { z } from "zod";
 import {
   trainingLineage,
+  assertTrainingDispatchLineage,
   iterationLineage,
 } from "../server/training-lineage.ts";
 import {
@@ -138,6 +139,7 @@ try {
       .digest("hex");
   const papers: PaperBundle[] = [];
   const lineage = await trainingLineage(directory);
+  assertTrainingDispatchLineage(directory, lineage);
   const quota = iteration ? await iterationLineage(directory) : undefined;
   if (quota) {
     // One append-only lineage per authorization; sibling directories cannot reset the allowance.
@@ -197,7 +199,8 @@ try {
     let paper: PaperBundle;
     try {
       paper = await storage.read<PaperBundle>("frozen-papers", input.id);
-      if (paper.version !== `${hash}-pdf-figures-v2`)
+      const { pdfExtractionVersion } = await import("../server/pdf-runtime.ts");
+      if (paper.version !== `${hash}-${pdfExtractionVersion}`)
         throw new Error("冻结解析版本变化");
     } catch (error: any) {
       if (error.code !== "ENOENT") throw error;

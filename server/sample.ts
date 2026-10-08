@@ -2,6 +2,7 @@ import { readFile } from "node:fs/promises";
 import { resolve } from "node:path";
 import { createHash } from "node:crypto";
 import { getDocument } from "pdfjs-dist/legacy/build/pdf.mjs";
+import { pdfRuntime } from "./pdf-runtime.ts";
 import { createCanvas } from "@napi-rs/canvas";
 import { sample } from "../examples/bundle.ts";
 import { parsePdf } from "./pdf.ts";
@@ -59,9 +60,10 @@ export async function localSample() {
   result.sources.push(...parsed.sources);
   const evidence = figureOneEvidence(parsed.sources);
   result.sources.push(...evidence);
-  result.version += "-fig1-v2-" + digest(evidence).slice(0, 12);
+  result.version += "-fig1-v3-" + digest(evidence).slice(0, 12);
   // 原始整页保留图件与图注；用户仍可在阅读器圈选单个面板。
   const task = getDocument({
+    ...pdfRuntime,
     data: new Uint8Array(bytes),
     useSystemFonts: true,
   });
@@ -71,7 +73,7 @@ export async function localSample() {
       const source = result.sources.find((s) => s.id === id)!;
       const imageKey =
         createHash("sha256").update(bytes).digest("hex") +
-        `-page-${source.page}-scale13-v1`;
+        `-page-${source.page}-scale13-v2-jbig2`;
       try {
         source.image = await read<string>("material-cache", imageKey);
         source.locator += "；图像为图件所在原页";

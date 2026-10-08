@@ -4,8 +4,18 @@ import { mkdir, mkdtemp, writeFile, rm } from "node:fs/promises";
 import { resolve, join } from "node:path";
 import {
   trainingLineage,
+  assertTrainingDispatchLineage,
   iterationLineage,
 } from "../server/training-lineage.ts";
+
+test("a renamed training directory cannot silently create a zero-cost root", () => {
+  const empty = { previousDirectory: null, reportHash: null, attempts: 0 };
+  assert.doesNotThrow(() => assertTrainingDispatchLineage("runs/internal-training/cycle-1", empty));
+  assert.throws(() => assertTrainingDispatchLineage("runs/internal-training/cycle-4", empty), /从零/);
+  assert.doesNotThrow(() => assertTrainingDispatchLineage("runs/internal-training/cycle-4", {
+    previousDirectory: "runs/internal-training/cycle-3", reportHash: "hash", attempts: 4,
+  }));
+});
 
 test("new protocols retain prior unknown attempt cost and reject concurrent or duplicate ledgers", async () => {
   const root = resolve("runs/internal-training");

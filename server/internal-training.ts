@@ -197,15 +197,16 @@ export function textValues(value: unknown): string[] {
   return [];
 }
 function locationMatches(text: string, location: string) {
-  if (text.includes(location)) return true;
   // Providers sometimes quote a sentence when returning a location. Accept
   // only removable presentation wrappers; the substantive text must remain
   // present in the artifact after whitespace normalization.
   const clean = (value: string) => value
     .trim()
     .replace(/^[“”"'「『《]+|[“”"'」』》]+$/g, "")
-    .replace(/\s+/g, " ");
-  return clean(text).includes(clean(location));
+    .replace(/\s+/g, " ")
+    .trim();
+  const needle = clean(location);
+  return needle.length > 0 && (text.includes(location) || clean(text).includes(needle));
 }
 export function validateReview(
   criteria: string[],
