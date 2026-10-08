@@ -37,7 +37,8 @@ import {
   learningCalibration,
   reserveLearningUnit,
 } from "../server/learning-protocol.ts";
-import { beginLearningLoop, learningLoopClosed, loopNeedsRemediation } from "../server/learning-loop.ts";
+import { beginLearningLoop, allLearningLoopsClosed } from "../server/learning-loop.ts";
+import { trainingDeliveryFiles } from "../server/training-delivery.ts";
 const stage = process.argv[2] ?? "run";
 if (!["calibrate", "run"].includes(stage))
   throw new Error("学习入口：calibrate / run");
@@ -76,20 +77,20 @@ for (const file of accepted!.files) {
   )
     throw new Error("验收后的实际文件发生变化，学习试验未发起。");
 }
-if (!accepted!.files.length) throw new Error("缺少实际 PPT 与完整稿文件验收。");
+if (!accepted!.files.length) throw new Error("缺少实际汇报交付文件验收。");
 for (const product of products.results.filter(
   (p) => p.status === "generated" && p.exportPath,
 )) {
-  const required = [
-    product.exportPath!,
-    product.exportPath!.replace(/\.pptx$/i, "-speech.md"),
-  ];
+  const required = trainingDeliveryFiles(product);
   if (
-    !required.every((path) =>
-      accepted!.files.some((file) => resolve(file.path) === resolve(path)),
+    !required.every((entry) =>
+      accepted!.files.some((file) => resolve(file.path) === resolve(entry.path)),
     )
   )
-    throw new Error("实际已交付 PPT 或完整稿没有对应文件验收记录。");
+    throw new Error("实际已交付 PPT 或独立讲述文件没有对应验收记录。");
+  for (const entry of required)
+    if ("text" in entry && await readFile(entry.path, "utf8") !== entry.text)
+      throw new Error("独立讲述文件与实际教学版本不一致。");
 }
 const protocol = await store.read<{
   fingerprint: unknown;
@@ -472,30 +473,24 @@ try {
           // Persist the explicit hand-off point. A later continuation may add
           // remedial teaching and transfer; this run must not call the initial
           // evaluation a learning success by itself.
-          (item as any).learningLoop = beginLearningLoop(
+          item.learningLoop = beginLearningLoop(
             task,
             observation,
             item.evaluation,
           );
-          (item as any).learningLoop.next = loopNeedsRemediation(item.evaluation as any)
-            ? "remedial-teaching"
-            : "independent-transfer";
           await persist();
           console.log("learning", specification.id, side, branch, item.status);
         }
-      const loops = report.results
-        .map((item: any) => item.learningLoop)
-        .filter(Boolean);
       // Twelve initial evaluations are not a completed learning experiment.
       // Keep the batch resumable until every branch has an independent transfer.
       if (stage === "calibrate") {
         batch.status = "complete";
         report.status = "ready";
-      } else if (report.results.length === 12 && loops.every(learningLoopClosed)) {
+      } else if (allLearningLoopsClosed(report.results, 12)) {
         batch.status = "complete";
         report.status = "complete";
       } else {
-        batch.status = "awaiting-continuation" as any;
+        batch.status = "awaiting-continuation";
         report.status = "awaiting-learning-closure";
       }
     } catch (error) {

@@ -6,12 +6,15 @@ import type {
 import { save, list } from "./storage.ts";
 
 export function normalizeConversationState(raw: ConversationState): ConversationState {
+  raw = structuredClone(raw);
   // Older records predate purposes, summaries, learning preferences and some
   // arrays. Fill only structural defaults; never infer a paper, source version,
   // cursor or learning result from a legacy record.
   return {
     ...structuredClone(raw),
-    purpose: raw.purpose ?? (raw.paperId ? "reading" : undefined),
+    // A legacy paper conversation may contain both reading and PPT tasks.
+    // Preserve unknown purpose instead of inventing a historical classification.
+    purpose: raw.purpose,
     version: Number.isSafeInteger(raw.version) ? raw.version : 0,
     title: raw.title ?? "新讨论",
     titleEdited: raw.titleEdited ?? false,

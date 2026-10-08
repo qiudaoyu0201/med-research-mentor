@@ -19,10 +19,12 @@ test("legacy conversations receive structural defaults without inventing evidenc
     summaries: [],
   } as any;
   const next = normalizeConversationState(legacy);
-  assert.equal(next.purpose, "reading");
+  assert.equal(next.purpose, undefined);
   assert.equal(next.sourceVersion, null);
   assert.deepEqual(next.learningRecords, []);
   assert.equal(next.readingSession, undefined);
+  next.taughtConcepts.push({ name: "new", unitId: "new" });
+  assert.deepEqual(legacy.taughtConcepts, []);
 });
 
 test("restore persists a migrated legacy record once and keeps its identity", async () => {
@@ -36,4 +38,7 @@ test("restore persists a migrated legacy record once and keeps its identity", as
   }]) as any);
   assert.equal(saved.length, 1);
   assert.equal(store.get("legacy").id, "legacy");
+  const migrated = store.get("legacy");
+  await store.restore((async () => [migrated]) as any);
+  assert.equal(saved.length, 1);
 });

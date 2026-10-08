@@ -101,6 +101,7 @@ try {
     sources?: { id: string; text: string; locator: string }[];
     evaluation?: Evaluation;
     exportPath?: string;
+    delivery?: import("../server/learning-exposure.ts").LearningProduct["delivery"];
     error?: string;
     startedAt?: string;
     providerMs: number;
@@ -886,6 +887,14 @@ try {
                       resolve("exports", `${exported.id}.pptx`),
                       result.exportPath,
                     );
+                    const { trainingGuidance } = await import("../server/training-delivery.ts");
+                    const guidancePath = join(directory, `${test.id}-${side}-guidance.md`);
+                    await writeFile(guidancePath, trainingGuidance(version.outline));
+                    result.delivery = {
+                      version: "separate-guidance-v1",
+                      guidancePath,
+                      ...(version.outline.speechScript ? { speechPath: join(directory, `${test.id}-${side}-speech.md`) } : {}),
+                    };
                     if (version.outline.speechScript)
                       await writeFile(
                         join(directory, `${test.id}-${side}-speech.md`),

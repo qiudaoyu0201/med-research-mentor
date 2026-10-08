@@ -13,7 +13,7 @@ test("learning loop keeps remedial correction separate from independent transfer
   assert.equal(loop.status, "initial-only");
   addRemedialTeaching(loop, teaching, "缺少测量边界");
   addAssistedCorrection(loop, answer("assisted"), { passed: true });
-  addIndependentTransfer(loop, task("b"), answer("independent"), { passed: true });
+  addIndependentTransfer(loop, { ...task("b"), question: "新的测量设计" }, answer("independent"), { passed: true });
   assert.equal(loop.status, "transferred");
   assert.equal(loop.correction?.mode, "assisted");
   assert.equal(loop.transfer?.mode, "independent");

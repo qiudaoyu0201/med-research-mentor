@@ -14,6 +14,11 @@ export interface LearningProduct {
   sources?: { id: string; text: string; locator: string }[];
   evaluation?: { valid: boolean; passed: boolean };
   exportPath?: string;
+  delivery?: {
+    version: "separate-guidance-v1";
+    guidancePath: string;
+    speechPath?: string;
+  };
   run?: { input?: { visibleImage?: string } };
 }
 export function assertLearningGate(
