@@ -4,6 +4,32 @@ import type {
   LearningPreferences,
 } from "../shared/types.ts";
 import { save, list } from "./storage.ts";
+
+export function normalizeConversationState(raw: ConversationState): ConversationState {
+  // Older records predate purposes, summaries, learning preferences and some
+  // arrays. Fill only structural defaults; never infer a paper, source version,
+  // cursor or learning result from a legacy record.
+  return {
+    ...structuredClone(raw),
+    purpose: raw.purpose ?? (raw.paperId ? "reading" : undefined),
+    version: Number.isSafeInteger(raw.version) ? raw.version : 0,
+    title: raw.title ?? "新讨论",
+    titleEdited: raw.titleEdited ?? false,
+    projectId: raw.projectId ?? null,
+    createdAt: raw.createdAt ?? new Date(0).toISOString(),
+    updatedAt: raw.updatedAt ?? raw.createdAt ?? new Date(0).toISOString(),
+    goal: raw.goal ?? "",
+    profileId: raw.profileId ?? "beginner",
+    taughtConcepts: Array.isArray(raw.taughtConcepts) ? raw.taughtConcepts : [],
+    userProgress: Array.isArray(raw.userProgress) ? raw.userProgress : [],
+    learningRecords: Array.isArray(raw.learningRecords) ? raw.learningRecords : [],
+    openQuestions: Array.isArray(raw.openQuestions) ? raw.openQuestions : [],
+    taskGroups: Array.isArray(raw.taskGroups) ? raw.taskGroups : [],
+    artifacts: Array.isArray(raw.artifacts) ? raw.artifacts : [],
+    recentTurnIds: Array.isArray(raw.recentTurnIds) ? raw.recentTurnIds : [],
+    summaries: Array.isArray(raw.summaries) ? raw.summaries : [],
+  };
+}
 export class ConversationStore {
   states = new Map<string, ConversationState>();
   private writing = new Set<string>();
@@ -14,8 +40,12 @@ export class ConversationStore {
     private defaults: () => LearningPreferences | undefined = () => undefined,
   ) {}
   async restore(loader: typeof list = list) {
-    for (const state of await loader<ConversationState>("conversations"))
-      this.states.set(state.id, state);
+    for (const state of await loader<ConversationState>("conversations")) {
+      const normalized = normalizeConversationState(state);
+      this.states.set(normalized.id, normalized);
+      if (JSON.stringify(normalized) !== JSON.stringify(state))
+        await this.persist("conversations", normalized.id, normalized);
+    }
   }
   async create(
     input: {
