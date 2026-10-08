@@ -25,6 +25,7 @@ export interface SourceSelector {
   paperId: string;
   sourceVersion: string;
   sourceId: string;
+  range?: { start: number; end: number };
 }
 export interface SourceRef extends Partial<SourceSelector> {
   sourceType?: "local" | "pubmed";

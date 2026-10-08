@@ -37,6 +37,7 @@ import {
   learningCalibration,
   reserveLearningUnit,
 } from "../server/learning-protocol.ts";
+import { beginLearningLoop, loopNeedsRemediation } from "../server/learning-loop.ts";
 const stage = process.argv[2] ?? "run";
 if (!["calibrate", "run"].includes(stage))
   throw new Error("学习入口：calibrate / run");
@@ -467,6 +468,17 @@ try {
           item.status = observation.unsupportedVisibleIds.length
             ? "unsupported-visible-ids"
             : "evaluated";
+          // Persist the explicit hand-off point. A later continuation may add
+          // remedial teaching and transfer; this run must not call the initial
+          // evaluation a learning success by itself.
+          (item as any).learningLoop = beginLearningLoop(
+            task,
+            observation,
+            item.evaluation,
+          );
+          (item as any).learningLoop.next = loopNeedsRemediation(item.evaluation as any)
+            ? "remedial-teaching"
+            : "independent-transfer";
           await persist();
           console.log("learning", specification.id, side, branch, item.status);
         }

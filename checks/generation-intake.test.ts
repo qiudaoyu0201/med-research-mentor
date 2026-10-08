@@ -47,7 +47,7 @@ test("reference intake covers every selected paper before spending remaining sou
   assert.ok(total <= 18000);
 });
 
-test("unavailable, empty, oversized and too many references fail before draft submission", () => {
+test("unavailable, empty and too many references fail before draft submission; oversized text is bounded into excerpts", () => {
   assert.throws(
     () => selectPlanSources([paper("existing", [100])], ["deleted"]),
     /已不存在/,
@@ -56,14 +56,12 @@ test("unavailable, empty, oversized and too many references fail before draft su
     () => selectPlanSources([paper("empty", [0])], ["empty"]),
     /empty/,
   );
-  assert.throws(
-    () =>
-      selectPlanSources(
-        [paper("ok", [100]), paper("huge", [18001])],
-        ["ok", "huge"],
-      ),
-    /huge/,
+  const oversized = selectPlanSources(
+    [paper("ok", [100]), paper("huge", [18001])],
+    ["ok", "huge"],
+    "huge method",
   );
+  assert.ok(oversized.some((source) => source.paperId === "huge" && source.range));
   const papers = Array.from({ length: 13 }, (_, i) =>
     paper(`paper-${i}`, [100]),
   );

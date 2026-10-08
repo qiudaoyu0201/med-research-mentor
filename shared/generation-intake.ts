@@ -5,6 +5,7 @@ import type { SourceSelector } from "./research-plan.ts";
 export function selectPlanSources(
   papers: PaperBundle[],
   selectedIds: string[],
+  request = "",
 ): SourceSelector[] {
   const ids = [...new Set(selectedIds)];
   if (ids.length > 12)
@@ -17,6 +18,17 @@ export function selectPlanSources(
     return paper;
   });
   const allowance = Math.floor(18000 / Math.max(1, selected.length));
+  // Rank actual bounded excerpts. Lexical relevance is a retrieval heuristic,
+  // not a scientific relevance verdict; retain locators and exact offsets.
+  const terms = [...new Set(request.toLowerCase().match(/[a-z][a-z0-9-]{2,}|[\u4e00-\u9fff]{2,}/g) ?? [])]
+    .flatMap((term) => /[\u4e00-\u9fff]/.test(term)
+      ? Array.from({ length: term.length - 1 }, (_, i) => term.slice(i, i + 2))
+      : [term]);
+  const score = (text: string) => {
+    const lower = text.toLowerCase();
+    return terms.reduce((n, term) => n + (lower.includes(term) ? 4 : 0), 0) +
+      (/methods?|materials?|实验设计|研究方法|对照组/i.test(text) ? 2 : 0);
+  };
   const queues = selected.map((paper) => ({
     paper,
     used: 0,
@@ -24,9 +36,18 @@ export function selectPlanSources(
       (s) =>
         s.kind === "paper" &&
         !s.image &&
-        s.text.trim() &&
-        s.text.length <= allowance,
-    ),
+        s.text.trim(),
+    ).flatMap((s) => {
+      if (s.text.length <= allowance) return [{ source: s, text: s.text, range: undefined as SourceSelector["range"] }];
+      const chunks = [];
+      const size = Math.min(allowance, 4000);
+      for (let start = 0; start < s.text.length; start += size) {
+        const end = Math.min(start + size, s.text.length);
+        const text = s.text.slice(start, end);
+        if (text.trim()) chunks.push({ source: s, text, range: { start, end } });
+      }
+      return chunks;
+    }).sort((a, b) => score(b.text) - score(a.text)),
   }));
   const missing = queues.filter((q) => !q.sources.length);
   if (missing.length)
@@ -46,7 +67,8 @@ export function selectPlanSources(
       sources.push({
         paperId: queue.paper.id,
         sourceVersion: queue.paper.version,
-        sourceId: source.id,
+        sourceId: source.source.id,
+        ...(source.range ? { range: source.range } : {}),
       });
       queue.used += source.text.length;
       added = true;

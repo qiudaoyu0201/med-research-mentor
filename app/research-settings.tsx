@@ -166,7 +166,7 @@ export function ResearchSettings({
       </label>
       {defaults && (
         <fieldset disabled={working}>
-          <legend>新论文默认设置</legend>
+          <legend>默认讲解与辅助功能</legend>
           <label>
             默认讲解程度
             <select
@@ -190,6 +190,7 @@ export function ResearchSettings({
               ))}
             </select>
           </label>
+          <small>默认讲解程度仅用于新建聊天。当前聊天可在下面单独调整。</small>
           <label>
             <input
               type="checkbox"
@@ -225,9 +226,9 @@ export function ResearchSettings({
               }
             }}
           >
-            保存默认设置
+            保存设置
           </button>
-          <small>对新建论文聊天生效。当前聊天可在下面单独调整。</small>
+          <small>联网补充和减少重复解释是全局开关，保存后从下一次请求起生效，包括已有聊天。</small>
         </fieldset>
       )}
       <label>

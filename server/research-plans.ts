@@ -220,13 +220,18 @@ export class ResearchPlans {
       const source = paper.sources.find((x) => x.id === s.sourceId);
       if (!source || !source.text.trim())
         throw new Error("来源不存在或没有可见文字。");
+      if (s.range && s.range.end > source.text.length)
+        throw new Error("来源字符范围超出原文。");
+      const excerpt = s.range ? source.text.slice(s.range.start, s.range.end) : source.text;
+      if (!excerpt.trim()) throw new Error("来源片段没有可见文字。");
       const identity = {
         paperId: s.paperId,
         sourceVersion: s.sourceVersion,
         sourceId: s.sourceId,
         kind: source.kind,
-        locator: source.locator,
-        excerpt: source.text,
+        ...(s.range ? { range: s.range } : {}),
+        locator: s.range ? `${source.locator} · 提取字符 ${s.range.start}–${s.range.end}` : source.locator,
+        excerpt,
         verified: source.verified,
       };
       refs.push({
@@ -267,6 +272,7 @@ export class ResearchPlans {
           paperId: r.paperId,
           sourceId: r.sourceId,
           sourceVersion: r.sourceVersion,
+          ...(r.range ? { range: r.range } : {}),
         };
       }),
       learningPreferences: { verbosity: "standard", focus: "balanced" },
@@ -679,7 +685,11 @@ export class ResearchPlans {
         this.provider,
         "literature-query",
         "将医学课题转成有边界的 PubMed 英文概念／关键词检索式，保留主要研究对象及关系，不凭空改变课题。不联网，不编文献。只返回 query 和 reason JSON。",
-        { question: plan.topic.question, conditions: plan.topic.conditions },
+        {
+          question: plan.topic.question,
+          conditions: plan.topic.conditions,
+          currentInstructions: job.context.requestGuidance.currentInstructions,
+        },
         z
           .object({
             query: z.string().trim().min(1).max(800),

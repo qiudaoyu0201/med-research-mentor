@@ -179,6 +179,16 @@ test("带读连续三单元、深化和总结绑定真实范围；焦点与明�
     /版本/,
   );
 });
+test("带读中的局部总结、重点解释和方法问题不擅自跳到结果页", () => {
+  const state = completeReading(
+    prepareReading(paper, undefined, "start", "开始"),
+    "local-1",
+  );
+  assert.equal(readingAction({ clientMessageId: "x", mode: "live", question: "重点解释这个结果为什么成立" }, state), "deepen");
+  assert.equal(readingAction({ clientMessageId: "x", mode: "live", question: "请总结这一个实验的结果" }, state), "deepen");
+  assert.equal(readingAction({ clientMessageId: "x", mode: "live", question: "总结目前所读内容" }, state), "summary");
+  assert.equal(readingAction({ clientMessageId: "x", mode: "live", question: "先看方法" }, state), "jump");
+});
 test("部分长页覆盖具有内容哈希和字符范围，专题回主线不丢位置", () => {
   const long = {
     ...paper,

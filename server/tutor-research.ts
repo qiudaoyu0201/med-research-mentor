@@ -4,8 +4,18 @@ import { digest } from "./materials.ts";
 import { list, save } from "./storage.ts";
 import type { Provider } from "./provider.ts";
 import type { BudgetLedger } from "./budget.ts";
-import type { PaperBundle, Source } from "../shared/types.ts";
+import type { AssistantMessage, PaperBundle, Source } from "../shared/types.ts";
 import type { SourceRef } from "../shared/research-plan.ts";
+
+// A cheap admission check; the counted model decision below still decides
+// whether the supplied paper actually needs external background evidence.
+export function needsBackgroundDecision(message: AssistantMessage) {
+  return message.mode === "live" &&
+    (!message.module || message.module === "paper" || message.module === "figure") &&
+    !message.exportRunId && !message.deckEdit &&
+    !/不要联网|不联网|不用查|仅用原文|只用原文/.test(message.question) &&
+    /检索|查找|查资料|查文献|联网|原理|机制|背景|为什么|怎么理解|什么是|看不懂|不理解/.test(message.question);
+}
 
 interface ResearchRecord {
   id: string;

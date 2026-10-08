@@ -32,6 +32,8 @@ export const topicInputSchema = z
             paperId: researchId,
             sourceVersion: text(200),
             sourceId: text(200),
+            range: z.object({ start: z.number().int().min(0), end: z.number().int().positive() }).strict()
+              .refine((r) => r.end > r.start, { message: "来源字符范围无效" }).optional(),
           })
           .strict(),
       )

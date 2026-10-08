@@ -238,24 +238,21 @@ export function PptGeneration({
     }
     void researchApi<ConversationState[]>("/api/conversations")
       .then(async (all) => {
-        const matches = chronological(
-          all.filter(
-            (c) => c.paperId === paperId && c.purpose === "ppt-generation",
-          ),
-        );
+        const histories = chronological(all.filter((c) => c.paperId === paperId));
+        const matches = histories.filter((c) => c.purpose === "ppt-generation");
         const c =
           matches.find((c) => c.id === pending.current?.conversationId) ??
           matches.at(-1);
-        if (!c || token !== epoch.current) return;
+        if (token !== epoch.current) return;
         const [decks, turns] = await Promise.all([
           Promise.all(
-            matches.map((item) =>
+            histories.map((item) =>
               researchApi<DeckVersion[]>(
                 `/api/deck-versions?conversationId=${item.id}&paperId=${paperId}`,
               ),
             ),
           ),
-          researchApi<AssistantTurn[]>(`/api/conversations/${c.id}/turns`),
+          c ? researchApi<AssistantTurn[]>(`/api/conversations/${c.id}/turns`) : Promise.resolve([]),
         ]);
         if (token !== epoch.current) return;
         conversation.current = c;
@@ -743,7 +740,8 @@ export function PlanGeneration({
     let accepted = false;
     try {
       if (!pending.current) {
-        const sources = selectPlanSources(papers, form.paperIds);
+        const sources = selectPlanSources(papers, form.paperIds,
+          `${form.question}\n${form.conditions}\n${form.instruction}`);
         const p = await researchApi<ResearchPlan>("/api/research-plans", {
           question: form.question,
           conditions: form.conditions,
@@ -967,6 +965,19 @@ export function PlanGeneration({
             </div>
           )}
           {!ready && <p>当前草案尚未完成核对，保留供查看。</p>}
+          {version.review && (
+            <section aria-label="需与导师讨论">
+              <h3>需与导师讨论</h3>
+              {version.review.issues.map((issue) => (
+                <p key={issue.id}>
+                  {version.content.sections.find((s) => s.id === issue.sectionId)?.title ?? "整体方案"}
+                  {issue.severity === "blocking" ? " · 尚需修正：" : "："}
+                  {issue.message}
+                </p>
+              ))}
+              {version.review.limitations.map((text, index) => <p key={index}>{text}</p>)}
+            </section>
+          )}
           {version.content.sections.map((s) => (
             <section key={s.id}>
               <h3>{s.title}</h3>

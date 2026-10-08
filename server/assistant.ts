@@ -1,6 +1,6 @@
 import { randomUUID } from "node:crypto";
 import { containsRenderedQuote } from "../shared/markdown.ts";
-import type { TutorResearch } from "./tutor-research.ts";
+import { needsBackgroundDecision, type TutorResearch } from "./tutor-research.ts";
 import {
   readingAction,
   prepareReading,
@@ -666,13 +666,7 @@ export class AssistantService {
       if (reading) paper = withFoundationSources(reading.paper);
       const useLookup =
         this.tutor?.settings().webLookup &&
-        message.mode === "live" &&
-        !message.module &&
-        !reading &&
-        !message.exportRunId &&
-        /检索|查找|查资料|文献|原理|机制|背景|为什么|怎么理解|什么是/.test(
-          message.question,
-        );
+        needsBackgroundDecision(message);
       let supplementaryIds: string[] = [];
       if (useLookup) {
         try {

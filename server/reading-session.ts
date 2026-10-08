@@ -69,11 +69,17 @@ export function readingAction(
       : undefined;
   const q = message.question.trim();
   if (/重新开始.*(?:读|讲)|从头开始带读/.test(q)) return "start";
-  if (/总结|归纳/.test(q)) return "summary";
   if (/回.*主线|回.*原来.*位置/.test(q)) return "resume";
+  // Local questions and preference changes must not move the reading cursor.
+  // Only an explicit navigation request can enter a different paper section.
+  if (/(?:跳到|转到|先看|先读|先讲|跳过)[^。！？\n]{0,20}(?:背景|引言|目的|方法|实验|结果|讨论|创新|局限)/.test(q))
+    return "jump";
+  if (/(?:总结|归纳).*(?:全文|整篇|整篇论文|已读|读过|目前所读)/.test(q) || /^(?:请|帮我)?(?:总结|归纳)(?:一下)?[。！! ]*$/.test(q))
+    return "summary";
+  if (/这个|这一个|这段|这一段|当前|刚才|上一轮|上一个|上述|重点|总结|归纳/.test(q))
+    return "deepen";
   if (/一次.*多讲|多讲些|完整讲|从头.*讲/.test(q)) return "long";
-  if (/重点|跳到|先看|讲.*方法|创新/.test(q)) return "jump";
-  if (/详细|深入|展开|看不懂|不理解|基础|英文.*不懂/.test(q)) return "deepen";
+  if (/详细|深入|展开|看不懂|不理解|基础|英文.*不懂|解释|为什么|怎么理解|什么是|方法|创新/.test(q)) return "deepen";
   if (/^(继续|接着|下一|往下)/.test(q)) return "continue";
 }
 export function prepareReading(
@@ -133,7 +139,9 @@ export function prepareReading(
     state.topic = null;
   }
   if (action === "jump") {
-    const terms = /方法|实验/.test(question)
+    const terms = /背景|引言|目的/.test(question)
+      ? /introduction|background|背景|引言/i
+      : /方法|实验/.test(question)
       ? /method|material|方法|实验设计/i
       : /创新|局限/.test(question)
         ? /discussion|limitation|讨论|局限/i
@@ -231,7 +239,7 @@ export function prepareReading(
       );
     if (image && readingChars + image.text.length <= 18000) sources.push(image);
   }
-  const goal = `${question}\n中文带读：${summary ? "仅总结已经交付的范围，标明未覆盖部分" : action === "deepen" ? "深入解释当前片段，不推进下一片段" : action === "start" ? "先说明研究问题、对象和阅读方向，再讲清第一个单元" : "讲清本次新原文单元，已讲概念只作必要衔接，不重复上一轮全文"}。${summary && state.delivered.length > ranges.length ? `本次从已交付范围中选取${ranges.length}个片段用于回顾，未重载全部已读原文；概括研究主线与关键证据，明确缺少的部分，不称逐项核验的全文总结。` : ""}英文术语首次给英文与通俗中文解释，区分原意、基础补充与推断，不称已读全文。当前位置：${ranges.map((r) => r.locator).join("；")}。${contextRanges.length ? `同时提供了前情原文供衔接与核对，前情范围 ${contextRanges.map((r) => r.locator).join("；")}。` : ""}`;
+  const goal = `${question}\n中文带读：${summary ? "仅总结已经交付的范围，标明未覆盖部分" : action === "deepen" ? "按用户本次要求解释或概括当前片段，不强行展开，不推进下一片段" : action === "start" ? "先说明研究问题、对象和阅读方向，再讲清第一个单元" : "讲清本次新原文单元，已讲概念只作必要衔接，不重复上一轮全文"}。${summary && state.delivered.length > ranges.length ? `本次从已交付范围中选取${ranges.length}个片段用于回顾，未重载全部已读原文；概括研究主线与关键证据，明确缺少的部分，不称逐项核验的全文总结。` : ""}英文术语首次给英文与通俗中文解释，区分原意、基础补充与推断，不称已读全文。当前位置：${ranges.map((r) => r.locator).join("；")}。${contextRanges.length ? `同时提供了前情原文供衔接与核对，前情范围 ${contextRanges.map((r) => r.locator).join("；")}。` : ""}`;
   return {
     action,
     ranges,
