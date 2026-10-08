@@ -1,6 +1,7 @@
 import { useEffect, useRef, useState } from "react";
 import type { ConversationState, Profile } from "../shared/types.ts";
 import { researchApi } from "./research-api.ts";
+import type { LearningPreferences } from "../shared/types.ts";
 import type { ResearchFont, ResearchTheme } from "./research-theme.ts";
 import {
   focusLabels,
@@ -45,12 +46,24 @@ export function ResearchSettings({
     }>();
   const [error, setError] = useState(""),
     [working, setWorking] = useState(false);
+  const [defaults, setDefaults] = useState<{
+    learningPreferences: LearningPreferences;
+    webLookup: boolean;
+    rememberTerms: boolean;
+  }>();
   const learning =
     conversation?.learningPreferences ??
     legacyPreferences(conversation?.explanationDepth);
   useEffect(() => {
     dialog.current?.showModal();
     let closed = false;
+    void researchApi<NonNullable<typeof defaults>>("/api/tutor-settings")
+      .then((v) => {
+        if (!closed) setDefaults(v);
+      })
+      .catch((err) => {
+        if (!closed) setError(err.message);
+      });
     void researchApi<{ profiles: Profile[] }>("/api/bootstrap")
       .then((v) => {
         if (!closed) setProfiles(v.profiles);
@@ -151,6 +164,72 @@ export function ResearchSettings({
           ))}
         </select>
       </label>
+      {defaults && (
+        <fieldset disabled={working}>
+          <legend>新论文默认设置</legend>
+          <label>
+            默认讲解程度
+            <select
+              aria-label="新论文默认讲解程度"
+              value={defaults.learningPreferences.verbosity}
+              onChange={(e) =>
+                setDefaults({
+                  ...defaults,
+                  learningPreferences: {
+                    ...defaults.learningPreferences,
+                    verbosity: e.target
+                      .value as LearningPreferences["verbosity"],
+                  },
+                })
+              }
+            >
+              {Object.entries(verbosityLabels).map(([key, value]) => (
+                <option key={key} value={key}>
+                  {value}
+                </option>
+              ))}
+            </select>
+          </label>
+          <label>
+            <input
+              type="checkbox"
+              checked={defaults.webLookup}
+              onChange={(e) =>
+                setDefaults({ ...defaults, webLookup: e.target.checked })
+              }
+            />
+            按需联网补充医学资料
+          </label>
+          <label>
+            <input
+              type="checkbox"
+              checked={defaults.rememberTerms}
+              onChange={(e) =>
+                setDefaults({ ...defaults, rememberTerms: e.target.checked })
+              }
+            />
+            适度减少跨论文重复解释
+          </label>
+          <button
+            onClick={async () => {
+              setWorking(true);
+              setError("");
+              try {
+                setDefaults(
+                  await researchApi("/api/tutor-settings", defaults, "PUT"),
+                );
+              } catch (e) {
+                setError((e as Error).message);
+              } finally {
+                setWorking(false);
+              }
+            }}
+          >
+            保存默认设置
+          </button>
+          <small>对新建论文聊天生效。当前聊天可在下面单独调整。</small>
+        </fieldset>
+      )}
       <label>
         讲解程度
         <select

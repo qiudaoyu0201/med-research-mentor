@@ -1,7 +1,6 @@
+import { PptGeneration, PlanGeneration } from "./generation-zones.tsx";
 import { useResearchLayout, Splitter } from "./research-layout.tsx";
 import { startResponseTiming } from "./response-timing.ts";
-import { ResearchPpt } from "./research-ppt.tsx";
-import { ResearchPlanPanel } from "./research-plan.tsx";
 import { ResearchSettings } from "./research-settings.tsx";
 import { PersonalRecordsPanel } from "./learning-records.tsx";
 import { useEffect, useRef, useState } from "react";
@@ -208,11 +207,11 @@ export function ResearchWorkspace() {
       selection.sourceAnchor.sourceVersion !== paper?.version);
   const importRetry = useRef<{ file: File; id: string } | undefined>(undefined);
   const recent = [...conversations]
-    .filter((c) => c.recentTurnIds.length)
+    .filter((c) => c.recentTurnIds.length && c.purpose !== "ppt-generation")
     .sort((a, b) => (b.updatedAt || "").localeCompare(a.updatedAt || ""))[0];
   const currentName = paper
     ? paperName(paper, index)
-    : (index.projects.find((p) => p.id === projectId)?.name ?? "研究想法");
+    : (index.projects.find((p) => p.id === projectId)?.name ?? "论文带读");
   const notes = index.notes.filter((n) =>
     paper ? n.paperId === paper.id : n.conversationId === conversation?.id,
   );
@@ -309,40 +308,7 @@ export function ResearchWorkspace() {
             return;
           }
         } catch {}
-        let preferredId = value.index.lastConversationId;
-        try {
-          const local = sessionStorage.getItem("research-current-chat");
-          if (local && value.conversations.some((c) => c.id === local))
-            preferredId = local;
-        } catch {}
-        if (
-          preferredId &&
-          value.conversations.some((c) => c.id === preferredId)
-        )
-          await openConversation(preferredId, value);
-        else {
-          const bound = value.papers.find(
-            (p) => p.id === value.index.currentPaperId,
-          );
-          setPaper(bound);
-          const owner =
-            value.index.papers.find((m) => m.paperId === bound?.id)
-              ?.projectId ??
-            value.index.currentProjectId ??
-            null;
-          setProjectId(
-            value.index.projects.some((p) => p.id === owner && !p.archived)
-              ? owner
-              : null,
-          );
-          if (bound) {
-            const main = await researchApi<ConversationState>(
-              `/api/papers/${bound.id}/chat`,
-              {},
-            );
-            if (!closed) await openConversation(main.id);
-          }
-        }
+        // Opening the app starts at home; explicit paper selection restores its chat.
       })
       .catch((err) => {
         if (!closed) setError(err.message);
@@ -1082,7 +1048,7 @@ export function ResearchWorkspace() {
           <div className="rw-breadcrumb">
             <span>
               {mode === "research"
-                ? "论文研究"
+                ? "论文带读"
                 : mode === "plan"
                   ? "研究方案"
                   : "PPT 汇报"}
@@ -1092,12 +1058,16 @@ export function ResearchWorkspace() {
                 mode === "plan" ? planTitle : (paper?.title ?? currentName)
               }
             >
-              {mode === "plan" ? planTitle : currentName}
+              {mode === "plan"
+                ? "研究方案"
+                : mode === "ppt"
+                  ? "论文汇报"
+                  : currentName}
             </strong>
           </div>
           <button
             aria-expanded={!!panel}
-            disabled={loading || mode === "plan"}
+            disabled={loading || mode !== "research" || !paper}
             onClick={() => {
               if (panel) closeReading();
               else {
@@ -1162,13 +1132,7 @@ export function ResearchWorkspace() {
                     : []),
                 ],
               },
-              {
-                label: "我的笔记",
-                run: () => {
-                  rememberAnswer();
-                  setPanel("notes");
-                },
-              },
+
               {
                 label: "PPT 汇报",
                 run: () => {
@@ -1213,30 +1177,21 @@ export function ResearchWorkspace() {
           />
         </header>
         {mode === "plan" ? (
-          <ResearchPlanPanel
+          <PlanGeneration
             papers={papers}
-            conversation={conversation}
-            initialQuestion={
-              selection?.focus?.excerpt ??
-              selection?.sourceAnchor?.excerpt ??
-              question
-            }
-            onResearch={() => setMode("research")}
-            onTitle={setPlanTitle}
+            onImported={(p) => {
+              setPapers((old) => [...old.filter((x) => x.id !== p.id), p]);
+              void refresh();
+            }}
           />
         ) : mode === "ppt" ? (
-          <ResearchPpt
-            key={conversation?.id ?? paper?.id ?? "empty"}
-            paper={paper}
-            conversation={conversation}
-            turns={turns}
-            notes={notes}
-            ensure={ensure}
-            onState={applyConversation}
-            onCitation={citation}
-            onResearch={() => setMode("research")}
-            layout={layout}
-            resize={resize}
+          <PptGeneration
+            papers={papers}
+            initialPaper={paper}
+            onImported={(p) => {
+              setPapers((old) => [...old.filter((x) => x.id !== p.id), p]);
+              void refresh();
+            }}
           />
         ) : (
           <div className="rw-content">

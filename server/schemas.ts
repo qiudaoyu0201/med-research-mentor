@@ -176,6 +176,7 @@ export const inputSchema = z.object({
 });
 const recordId = z.string().regex(/^[a-zA-Z0-9_-]{1,100}$/);
 export const conversationSchema = z.object({
+  purpose: z.enum(["reading", "ppt-generation"]).optional(),
   paperId: recordId.nullable().optional(),
   projectId: recordId.nullable().optional(),
   goal: z.string().max(2000).optional(),

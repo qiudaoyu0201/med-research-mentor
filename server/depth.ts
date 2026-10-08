@@ -88,7 +88,11 @@ export function resolveLearningIntent(
     backgroundRef: state.profileId,
     preferenceScope:
       message.learningIntent?.preferenceScope ??
-      (/以后|今后|接下来都|始终|一直用/.test(message.question)
+      (/以后|今后|接下来都|始终|一直用/.test(message.question) ||
+      (!message.focus &&
+        !message.sourceAnchor &&
+        !/这(?:一)?(?:句|段|次|张|个)|仅|只对|本轮/.test(message.question) &&
+        Object.keys(requestedPreferences(message)).length > 0)
         ? "conversation"
         : "turn"),
   };

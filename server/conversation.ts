@@ -1,12 +1,18 @@
 import { randomUUID } from "node:crypto";
-import type { ConversationState } from "../shared/types.ts";
+import type {
+  ConversationState,
+  LearningPreferences,
+} from "../shared/types.ts";
 import { save, list } from "./storage.ts";
 export class ConversationStore {
   states = new Map<string, ConversationState>();
   private writing = new Set<string>();
   private updates = new Map<string, Promise<unknown>>();
   private mainPending = new Map<string, Promise<ConversationState>>();
-  constructor(private persist: typeof save = save) {}
+  constructor(
+    private persist: typeof save = save,
+    private defaults: () => LearningPreferences | undefined = () => undefined,
+  ) {}
   async restore(loader: typeof list = list) {
     for (const state of await loader<ConversationState>("conversations"))
       this.states.set(state.id, state);
@@ -17,11 +23,14 @@ export class ConversationStore {
       projectId?: string | null;
       profileId?: string;
       goal?: string;
+      purpose?: "reading" | "ppt-generation";
     } = {},
     id: string = randomUUID(),
   ) {
+    const preferences = this.defaults();
     const state: ConversationState = {
       id,
+      purpose: input.purpose,
       version: 0,
       projectId: input.projectId ?? null,
       title: "新讨论",
@@ -40,6 +49,9 @@ export class ConversationStore {
       artifacts: [],
       recentTurnIds: [],
       summaries: [],
+      ...(preferences
+        ? { learningPreferences: structuredClone(preferences) }
+        : {}),
     };
     await this.persist("conversations", state.id, state);
     this.states.set(state.id, state);
@@ -55,7 +67,7 @@ export class ConversationStore {
     if (pending) return pending;
     const operation = (async () => {
       const existing = [...this.states.values()]
-        .filter((s) => s.paperId === paperId)
+        .filter((s) => s.paperId === paperId && s.purpose !== "ppt-generation")
         .sort(
           (a, b) =>
             Number(Boolean(b.mainChat)) - Number(Boolean(a.mainChat)) ||

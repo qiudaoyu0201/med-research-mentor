@@ -1,4 +1,5 @@
 import { z } from "zod";
+import { studyTypeIds } from "../shared/research-plan.ts";
 export const researchId = z.string().regex(/^[a-zA-Z0-9_-]{1,100}$/);
 const text = (max: number) => z.string().trim().min(1).max(max);
 const preferences = z
@@ -18,15 +19,8 @@ export const topicInputSchema = z
     question: text(3000),
     conditions: z.string().trim().max(5000).default(""),
     studyTypes: z
-      .array(
-        z.enum([
-          "basic-translational",
-          "clinical-observational",
-          "clinical-interventional",
-          "secondary-research",
-        ]),
-      )
-      .max(4)
+      .array(z.enum(studyTypeIds))
+      .max(studyTypeIds.length)
       .default([]),
     typeStatus: z
       .enum(["confirmed", "provisional", "unknown"])

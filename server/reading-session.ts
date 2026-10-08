@@ -7,16 +7,32 @@ import type {
 import { digest } from "./materials.ts";
 
 // These are bounded original-text units, not a claim that a chapter was understood.
-export function readingUnits(paper: PaperBundle): ReadingRange[] {
+export function readingUnits(
+  paper: PaperBundle,
+  paragraph = true,
+): ReadingRange[] {
   return paper.sources
     .filter((s) => s.kind === "paper" && !s.image && s.text.trim())
     .flatMap((s) => {
       const units: ReadingRange[] = [];
       for (let start = 0; start < s.text.length;) {
-        let end = Math.min(s.text.length, start + 2600);
+        let end = Math.min(s.text.length, start + (paragraph ? 4800 : 2600));
         if (end < s.text.length) {
-          const boundary = s.text.lastIndexOf("\n", end);
+          const paragraphEnd = paragraph
+            ? s.text.lastIndexOf("\n\n", end - 1)
+            : -1;
+          const boundary =
+            paragraphEnd > start + 1600
+              ? paragraphEnd + 1
+              : s.text.lastIndexOf("\n", paragraph ? end - 1 : end);
           if (boundary > start + 1300) end = boundary + 1;
+          else if (paragraph) {
+            const sentence = [
+              ...s.text.slice(start, end).matchAll(/[.!?。！？](?:\s|$)/g),
+            ].at(-1);
+            if (sentence && sentence.index! > 1600)
+              end = start + sentence.index! + sentence[0].length;
+          }
         }
         units.push({
           unitId: `${s.id}-${start}-${end}`,
@@ -68,7 +84,10 @@ export function prepareReading(
 ) {
   if (previous && previous.paperVersion !== paper.version && action !== "start")
     throw new Error("论文版本已变化，请明确重新开始带读；旧讨论仍保留。");
-  const units = readingUnits(paper);
+  // Historical cursors refer to the old segmentation; preserve their exact units.
+  const paragraph =
+    !previous || action === "start" || previous.segmentation === "paragraph-v2";
+  const units = readingUnits(paper, paragraph);
   if (!units.length)
     throw new Error("没有可读取的论文正文，请在资料中补充原文。");
   if (
@@ -91,6 +110,7 @@ export function prepareReading(
       ? structuredClone(previous)
       : {
           paperId: paper.id,
+          segmentation: "paragraph-v2",
           paperVersion: paper.version,
           revision: previous?.revision ?? 0,
           cursor: 0,
@@ -133,23 +153,44 @@ export function prepareReading(
     state.topic = question;
     cursor = found;
   }
-  const summary = action === "summary" || cursor >= units.length;
+  const summary =
+    action === "summary" || (action !== "deepen" && cursor >= units.length);
   if (summary && state.summaryDelivered && action !== "summary")
     throw new Error(
       "当前可读原文主线和总结已交付。可回看方法、选择图件或直接提出新问题。",
     );
+  // Include all delivered text when it fits. Otherwise sample across the whole
+  // journey rather than misrepresenting only the last pages as a paper summary.
+  let summaryChars = 0;
+  const stride = Math.max(
+    1,
+    Math.ceil(state.delivered.reduce((n, r) => n + r.end - r.start, 0) / 14000),
+  );
+  const summaryRanges = state.delivered.filter((r, i) => {
+    if (stride > 1 && i % stride !== 0 && i !== state.delivered.length - 1)
+      return false;
+    if (summaryChars + r.end - r.start > 16000) return false;
+    summaryChars += r.end - r.start;
+    return true;
+  });
   let ranges = summary
-    ? state.delivered.slice(-6)
+    ? summaryRanges
     : action === "deepen" && state.lastRanges.length
       ? state.lastRanges
       : units.slice(cursor, cursor + (action === "long" ? 3 : 1));
   if (!ranges.length) ranges = units.slice(0, 1);
   // Multiple excerpts of the same source are joined without pretending to cover the gap.
+  let readingChars = ranges.reduce((n, r) => n + r.end - r.start, 0);
   const contextRanges = summary
     ? []
     : state.lastRanges
         .filter((r) => !ranges.some((current) => current.unitId === r.unitId))
-        .slice(-3);
+        .slice(-3)
+        .filter((r) => {
+          if (readingChars + r.end - r.start > 16000) return false;
+          readingChars += r.end - r.start;
+          return true;
+        });
   const visibleRanges = [...contextRanges, ...ranges];
   const sources = [...new Set(visibleRanges.map((r) => r.sourceId))].map(
     (id) => {
@@ -162,7 +203,35 @@ export function prepareReading(
       };
     },
   );
-  const goal = `${question}\n中文带读：${summary ? "仅总结已经交付的范围，标明未覆盖部分" : action === "deepen" ? "深入解释当前片段，不推进下一片段" : action === "start" ? "先说明研究问题、对象和阅读方向，再讲清第一个单元" : "讲清本次新原文单元，已讲概念只作必要衔接，不重复上一轮全文"}。${summary && state.delivered.length > ranges.length ? `本次只提供最近${ranges.length}个已交付片段，更早讲过的内容未在本轮重新提供；请明示总结范围，不能称全部已读内容的完整总结。` : ""}英文术语首次给英文与通俗中文解释，区分原意、基础补充与推断，不称已读全文。当前位置：${ranges.map((r) => r.locator).join("；")}。${contextRanges.length ? `同时提供了前情原文供衔接与核对，前情范围 ${contextRanges.map((r) => r.locator).join("；")}。` : ""}`;
+  // Bring the figure actually referenced in this passage alongside its caption.
+  // The current provider accepts one original image per generation.
+  if (!summary) {
+    const currentText = ranges
+      .map((r) =>
+        paper.sources
+          .find((s) => s.id === r.sourceId)!
+          .text.slice(r.start, r.end),
+      )
+      .join("\n");
+    const figure = [
+      ...currentText.matchAll(/(?:Fig(?:ure)?\.?|图)\s*(\d+)/gi),
+    ].find(
+      (match) =>
+        !/(?:Extended\s+Data|Supplementary|Supplemental|补充|扩展)\s*$/i.test(
+          currentText.slice(Math.max(0, match.index! - 30), match.index),
+        ),
+    )?.[1];
+    const image =
+      figure &&
+      paper.sources.find(
+        (s) =>
+          s.image &&
+          s.figure &&
+          new RegExp(`^${figure}(?:[^0-9]|$)`).test(s.figure),
+      );
+    if (image && readingChars + image.text.length <= 18000) sources.push(image);
+  }
+  const goal = `${question}\n中文带读：${summary ? "仅总结已经交付的范围，标明未覆盖部分" : action === "deepen" ? "深入解释当前片段，不推进下一片段" : action === "start" ? "先说明研究问题、对象和阅读方向，再讲清第一个单元" : "讲清本次新原文单元，已讲概念只作必要衔接，不重复上一轮全文"}。${summary && state.delivered.length > ranges.length ? `本次从已交付范围中选取${ranges.length}个片段用于回顾，未重载全部已读原文；概括研究主线与关键证据，明确缺少的部分，不称逐项核验的全文总结。` : ""}英文术语首次给英文与通俗中文解释，区分原意、基础补充与推断，不称已读全文。当前位置：${ranges.map((r) => r.locator).join("；")}。${contextRanges.length ? `同时提供了前情原文供衔接与核对，前情范围 ${contextRanges.map((r) => r.locator).join("；")}。` : ""}`;
   return {
     action,
     ranges,

@@ -8,6 +8,7 @@
   },
   "scripts": {
     "dev": "tsx server/index.ts",
+    "dev:relay": "powershell -NoProfile -ExecutionPolicy Bypass -File scripts/start-configured.ps1",
     "build": "tsc --noEmit && vite build",
     "start": "tsx server/index.ts --production",
     "test": "tsx --test checks/*.test.ts",
@@ -38,6 +39,10 @@
     "pptxgenjs": "^4.0.1",
     "react": "^19.1.1",
     "react-dom": "^19.1.1",
+    "react-markdown": "^10.1.0",
+    "remark-gfm": "^4.0.1",
+    "remark-parse": "^11.0.0",
+    "unified": "^11.0.5",
     "yaml": "^2.9.1",
     "zod": "^4.1.11"
   },

@@ -166,6 +166,46 @@ const anchor = object({
   excerpt: str,
 });
 const shapes: Record<string, z.ZodType> = {
+  "tutor-settings": object({
+    learningPreferences: object({
+      verbosity: z.enum(["brief", "standard", "deep"]),
+      focus: z.enum([
+        "balanced",
+        "foundations",
+        "research-reasoning",
+        "methods-figures",
+        "mechanism",
+      ]),
+    }),
+    webLookup: bool,
+    rememberTerms: bool,
+  }),
+  "tutor-research": object({
+    id: str,
+    paperId: str,
+    version: str,
+    sources: z.array(source),
+  }),
+  "source-translations": object({
+    id: str,
+    key: str,
+    requestKey: str,
+    paperId: str,
+    sourceId: str,
+    requestKeys: strings.optional(),
+    offset: num.int().min(0),
+    original: str,
+    translated: str.optional(),
+    status: z.enum([
+      "queued",
+      "running",
+      "completed",
+      "failed",
+      "cancelled",
+      "interrupted",
+    ]),
+    budget,
+  }),
   papers: object({
     id: str,
     title: str,

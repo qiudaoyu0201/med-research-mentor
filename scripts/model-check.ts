@@ -5,13 +5,17 @@ import { BudgetLedger } from "../server/budget.ts";
 import { digest } from "../server/materials.ts";
 import { z } from "zod";
 const provider = createProvider();
-console.log(JSON.stringify(await provider.inspect(), null, 2));
+const inspection = await provider.inspect();
+console.log(JSON.stringify(inspection, null, 2));
+if (process.argv.includes("--require-auth") && !inspection.authenticated)
+  throw new Error("当前登录类型与所选运行通道不匹配；尚未发起模型生成。");
 if (process.argv.includes("--generate")) {
   const id = new Date().toISOString().replace(/[:.]/g, "-"),
     dir = resolve("runs/model-probe", id),
     report = {
       provider: provider.id,
       model: provider.model,
+      billingMode: provider.billingMode,
       results: [] as {
         task: string;
         status: string;
@@ -62,9 +66,12 @@ if (process.argv.includes("--generate")) {
       });
     }
   };
-  console.log("实际验证最多三次尝试，使用当前配置模型；不自动重试。");
-  await probe("text-schema", "用一句话解释对照组的用途。");
   const imageIndex = process.argv.indexOf("--image");
+  if (process.argv.includes("--image-only") && imageIndex === -1)
+    throw new Error("--image-only 须同时指定 --image 路径。");
+  console.log("实际验证最多三次尝试，使用当前配置模型；不自动重试。");
+  if (!process.argv.includes("--image-only"))
+    await probe("text-schema", "用一句话解释对照组的用途。");
   if (imageIndex !== -1) {
     const file = process.argv[imageIndex + 1];
     if (!file || file.startsWith("--"))

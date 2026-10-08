@@ -5,13 +5,13 @@ import { samplePdf } from "../server/sample.ts";
 import { AssistantService } from "../server/assistant.ts";
 import { ConversationStore } from "../server/conversation.ts";
 import { TaskManager } from "../server/orchestrator.ts";
-import { CodexProvider } from "../server/provider.ts";
+import { createProvider } from "../server/model-config.ts";
 import { Projects } from "../server/projects.ts";
 import { save } from "../server/storage.ts";
 
 // One real original-text question, maximum six role calls, no automatic retry.
 const id = randomUUID(),
-  provider = new CodexProvider(),
+  provider = createProvider(),
   manager = new TaskManager(provider);
 const conversations = new ConversationStore();
 const report: any = {

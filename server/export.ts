@@ -103,16 +103,7 @@ export async function exportDeck(
       color: "65656F",
       margin: 0,
     });
-    slide.addNotes(
-      `${s.notes}\n\n来源：\n${s.citations
-        .map((id) => {
-          const x = sourceMap.get(id)!;
-          return `${x.title} | ${x.locator} | ${x.url || "本机上传资料"}`;
-        })
-        .join(
-          "\n",
-        )}${s.imageSource ? `\n配图：${sourceMap.get(s.imageSource)!.locator}` : ""}${s.imageCrop ? `\n图件为原图局部，区域：${JSON.stringify(s.imageCrop)}` : ""}`,
-    );
+    // Speaking guidance is delivered separately, never embedded in the PPTX.
   }
   await mkdir("exports", { recursive: true });
   const path = resolve("exports", `${safeId(id)}.pptx`);

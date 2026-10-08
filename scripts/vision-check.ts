@@ -1,5 +1,5 @@
 import { chromium } from "playwright";
-import { CodexProvider } from "../server/provider.ts";
+import { createProvider } from "../server/model-config.ts";
 import { z } from "zod";
 const browser = await chromium.launch({ channel: "msedge", headless: true });
 let data: Buffer;
@@ -12,7 +12,7 @@ try {
 } finally {
   await browser.close();
 }
-const result = await new CodexProvider().generate(
+const result = await createProvider().generate(
   "只判断所给图片，不使用工具。",
   { question: "白色背景中央是什么颜色和形状？用中文回答。" },
   z.object({ color: z.string(), shape: z.string() }),

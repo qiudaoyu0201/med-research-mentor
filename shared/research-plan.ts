@@ -4,13 +4,23 @@ import type {
   LearningPreferences,
 } from "./types.ts";
 
+export const studyTypeIds = [
+  "basic-translational",
+  "clinical-observational",
+  "clinical-interventional",
+  "secondary-research",
+  "bioinformatics",
+  "medical-imaging",
+] as const;
 export const studyTypeLabels = {
   "basic-translational": "基础／转化实验",
   "clinical-observational": "临床观察",
   "clinical-interventional": "临床干预",
   "secondary-research": "二次研究",
-} as const;
-export type StudyType = keyof typeof studyTypeLabels;
+  bioinformatics: "生物信息／组学",
+  "medical-imaging": "医学影像",
+} as const satisfies Record<(typeof studyTypeIds)[number], string>;
+export type StudyType = (typeof studyTypeIds)[number];
 export interface SourceSelector {
   paperId: string;
   sourceVersion: string;

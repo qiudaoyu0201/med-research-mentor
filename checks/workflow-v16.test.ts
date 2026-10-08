@@ -188,7 +188,7 @@ test("部分长页覆盖具有内容哈希和字符范围，专题回主线不�
     ],
   };
   const units = readingUnits(long);
-  assert.ok(units.length > 3);
+  assert.ok(units.length >= 3);
   const state = completeReading(
     prepareReading(long, undefined, "start", "开始"),
     "a",

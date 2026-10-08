@@ -728,7 +728,10 @@ test("Figure + methods + three slides uses one teaching group and novice sees th
     3,
   );
   assert.ok(Object.keys(zip).some((k) => k.startsWith("ppt/media/")));
-  assert.match(strFromU8(zip["ppt/notesSlides/notesSlide2.xml"]), /来源/);
+  assert.ok(deck.slides[1].notes.length > 0);
+  assert.ok(
+    !strFromU8(zip["ppt/notesSlides/notesSlide2.xml"]).includes("来源"),
+  );
   const exported = await h.assistant.submit(state.id, {
     ...method,
     clientMessageId: "export",

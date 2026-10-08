@@ -67,9 +67,21 @@ export class CodexRpcFailure extends Error {
     super(message);
   }
 }
+export function publicProviderDiagnostic(value: unknown, limit = 600) {
+  return String(value)
+    .replace(/https?:\/\/[^\s<>"']+/gi, "[服务地址已隐藏]")
+    .replace(/\bBearer\s+[^\s,"'}]+/gi, "Bearer [已隐藏]")
+    .replace(/\b(?:sk|sess)-[A-Za-z0-9_-]{8,}\b/g, "[凭据已隐藏]")
+    .replace(
+      /((?:api[_-]?key|access[_-]?token|refresh[_-]?token|authorization|experimental_bearer_token)["']?\s*[:=]\s*["']?)[^\s,"'}]+/gi,
+      "$1[已隐藏]",
+    )
+    .slice(0, limit);
+}
 export class CodexClient {
   private proc: ChildProcessWithoutNullStreams;
   private seq = 0;
+  private closed = false;
   private pending = new Map<
     number,
     {
@@ -121,7 +133,7 @@ export class CodexClient {
                     msg.error.code +
                     "）；" +
                     (msg.error.code === -32602
-                      ? String(msg.error.message).slice(0, 400)
+                      ? publicProviderDiagnostic(msg.error.message, 400)
                       : "检查客户端版本与账号状态。"),
                   msg.error.code,
                   /(?:no rollout|thread.*not found|not found.*thread|thread.*not loaded)/i.test(
@@ -144,6 +156,8 @@ export class CodexClient {
       } catch {}
     });
     const stop = () => {
+      if (this.closed) return;
+      this.closed = true;
       for (const p of this.pending.values()) {
         clearTimeout(p.timer);
         p.reject(new Error("Codex 进程不可用；未自动重发请求。"));
@@ -153,8 +167,11 @@ export class CodexClient {
     };
     this.proc.on("error", stop);
     this.proc.on("exit", stop);
+    this.proc.stdin.on("error", stop);
   }
   rpc(method: string, params: unknown, timeout = 30_000): Promise<any> {
+    if (this.closed)
+      return Promise.reject(new Error("Codex 进程已经关闭；未重发请求。"));
     const id = ++this.seq;
     return new Promise((resolve, reject) => {
       const timer = setTimeout(() => {
@@ -189,9 +206,20 @@ export class CodexProvider implements Provider {
       "init" | "rpc" | "close" | "events"
     > = () => new CodexClient(),
     private timeoutMs = 180_000,
-  ) {}
+    private configuration?: {
+      model: string;
+      modelProvider: string;
+      authType: "apiKey";
+    },
+  ) {
+    if (configuration) {
+      this.model = configuration.model;
+      this.id = `codex-configured:${configuration.modelProvider}`;
+      this.billingMode = "api";
+    }
+  }
   id = "codex-chatgpt";
-  billingMode = "chatgpt" as const;
+  billingMode: "chatgpt" | "api" = "chatgpt";
   capabilities = {
     images: true,
     structuredOutput: "native-schema" as const,
@@ -205,16 +233,20 @@ export class CodexProvider implements Provider {
     transport: "codex-app-server",
   };
   async inspect() {
-    const client = new CodexClient();
+    const client = this.clientFactory();
     try {
       await client.init();
       const account = await client.rpc("account/read", { refreshToken: false });
       const models = await client.rpc("model/list", { limit: 100 });
+      if (this.configuration) await this.validateConfiguration(client);
       return {
         provider: this.id,
         capabilities: this.capabilities,
-        authenticated: account.account?.type === "chatgpt",
+        authenticated:
+          account.account?.type === (this.configuration?.authType ?? "chatgpt"),
         authType: account.account?.type || "none",
+        billingMode: this.billingMode,
+        modelProvider: this.configuration?.modelProvider ?? "openai",
         models: models.data?.map((m: any) => ({
           id: m.id,
           model: m.model,
@@ -225,6 +257,24 @@ export class CodexProvider implements Provider {
       };
     } finally {
       client.close();
+    }
+  }
+  private async validateConfiguration(client: Pick<CodexClient, "rpc">) {
+    const result = await client.rpc("config/read", { includeLayers: false });
+    const config = result.config ?? result;
+    const expected = this.configuration!.modelProvider;
+    if (
+      config.model_provider !== expected ||
+      !config.model_providers?.[expected]
+    ) {
+      throw new Error(
+        "当前 Codex 配置与显式选择的模型提供方不一致；未发送生成请求。请检查 TUTOR_CODEX_PROVIDER。",
+      );
+    }
+    if (config.model_providers[expected].wire_api !== "responses") {
+      throw new Error(
+        "配置通道必须支持 Codex Responses 协议；未回退到其他接口。",
+      );
     }
   }
   async generate<T>(
@@ -251,15 +301,20 @@ export class CodexProvider implements Provider {
       await client.init();
       signal.throwIfAborted();
       const account = await client.rpc("account/read", { refreshToken: false });
-      if (account.account?.type !== "chatgpt") {
+      if (
+        account.account?.type !== (this.configuration?.authType ?? "chatgpt")
+      ) {
         throw new Error(
-          "实时模式需要 ChatGPT 登录；不会使用 API Key 或静默切换付费接口。",
+          this.configuration
+            ? "当前 Codex 登录类型与 TUTOR_CODEX_AUTH 不一致；未切换账费通道。"
+            : "实时模式需要 ChatGPT 登录；使用现有 API 通道须显式配置 codex-configured，不会静默切换付费接口。",
         );
       }
+      if (this.configuration) await this.validateConfiguration(client);
       signal.throwIfAborted();
       const started = await client.rpc("thread/start", {
         model: this.model,
-        modelProvider: "openai",
+        modelProvider: this.configuration?.modelProvider ?? "openai",
         allowProviderModelFallback: false,
         cwd,
         approvalPolicy: "never",
@@ -269,6 +324,12 @@ export class CodexProvider implements Provider {
         selectedCapabilityRoots: [],
         dynamicTools: [],
         config: {
+          ...(this.configuration
+            ? {
+                [`model_providers.${this.configuration.modelProvider}.request_max_retries`]: 0,
+                [`model_providers.${this.configuration.modelProvider}.stream_max_retries`]: 0,
+              }
+            : {}),
           web_search: "disabled",
           "features.shell_tool": false,
           "features.multi_agent": false,
@@ -403,9 +464,9 @@ export class CodexProvider implements Provider {
               finish(
                 new Error(
                   /schema|required|additionalProperties/i.test(detail)
-                    ? "模型结构约定被拒绝：" + detail.slice(0, 600)
+                    ? "模型结构约定被拒绝：" + publicProviderDiagnostic(detail)
                     : detail
-                      ? "Codex 未完成生成：" + detail.slice(0, 600)
+                      ? "Codex 未完成生成：" + publicProviderDiagnostic(detail)
                       : "Codex 未完成生成；检查登录、额度或模型权限。",
                 ),
               );

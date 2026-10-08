@@ -332,10 +332,12 @@ test("different crops of one source remain separate immutable versions and survi
   assert.equal(restored.outline.slides[0].imageSource, "image");
   const xml = strFromU8(zip["ppt/slides/slide1.xml"]);
   assert.ok(!xml.includes("Synthetic image"));
-  assert.ok(strFromU8(zip["ppt/notesSlides/notesSlide1.xml"]).includes("p1"));
-  assert.ok(
-    strFromU8(zip["ppt/notesSlides/notesSlide1.xml"]).includes("局部选区"),
+  const note = strFromU8(zip["ppt/notesSlides/notesSlide1.xml"]);
+  assert.match(
+    [...note.matchAll(/<a:t>(.*?)<\/a:t>/g)].map((m) => m[1]).join(""),
+    /^\d+$/,
   );
+  assert.ok(restored.outline.slides[0].notes.length > 0);
 });
 
 test("manual page correction failure retains exact draft and can be saved again from the healthy ancestor", async () => {

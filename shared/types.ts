@@ -373,6 +373,7 @@ export interface AssistantMessage {
   deckEdit?: { versionId: string; slideIndex: number };
 }
 export interface ConversationState {
+  purpose?: "reading" | "ppt-generation";
   readingSession?: import("./reading-session.ts").ReadingSession;
   readingHistory?: import("./reading-session.ts").ReadingSession[];
   learningPreferences?: LearningPreferences;

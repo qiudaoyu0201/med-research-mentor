@@ -110,6 +110,33 @@ const plain = (p: PlanContent) => ({
   ...p,
   sections: p.sections.map(({ author: _a, ...s }) => s),
 });
+test("local reference fingerprints survive schema key order and restart but reject actual source changes", async () => {
+  const h = harness();
+  const p = await h.store.create({
+    ...topic,
+    sources: [{ sourceId: "duplicate", paperId: "a", sourceVersion: "1" }],
+  });
+  const job = await h.store.start(p.id, input(p));
+  assert.equal((await h.store.wait(job.id)).status, "completed");
+  const before = h.store.get(p.id);
+  assert.ok(before.topic.sources[0].hash);
+  const restored = new ResearchPlans(
+    h.provider,
+    async () => h.papers[0],
+    new TaskScheduler(),
+    h.persist,
+    h.erase,
+  );
+  await restored.restore([before], []);
+  assert.equal(
+    restored.get(p.id).topic.sources[0].hash,
+    before.topic.sources[0].hash,
+  );
+  h.papers[0].sources[0].text += " changed";
+  await assert.rejects(() => restored.start(p.id, input(before)), /来源内容/);
+  assert.equal(h.calls.length, 2);
+});
+
 test("零调用条件继承保留目标和历史稿，手改新稿关联新条件并拒绝核对旧版本", async () => {
   const h = harness(),
     p = await h.store.create({ ...topic, conditions: "仅显微镜" });

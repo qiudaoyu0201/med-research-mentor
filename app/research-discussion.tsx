@@ -1,3 +1,4 @@
+import { ResearchMarkdown } from "./markdown.tsx";
 import { selectedText } from "./research-selection.ts";
 import { measureReadableAnswer } from "./response-timing.ts";
 import { MessageAttachments } from "./research-attachments.tsx";
@@ -24,15 +25,15 @@ export const finished = (turn: ResearchTurn) =>
   );
 export const statusLabel: Record<string, string> = {
   queued: "等待中",
-  "checking-attachments": "检查附件",
-  planning: "整理问题",
-  running: "处理中",
-  teaching: "正在讲解",
-  novice: "检查理解步骤",
-  checking: "核对来源",
-  revising: "修订讲解",
-  rereading: "复读检查",
-  rechecking: "复核修改",
+  "checking-attachments": "正在思考…",
+  planning: "正在思考…",
+  running: "正在思考…",
+  teaching: "正在思考…",
+  novice: "正在思考…",
+  checking: "正在思考…",
+  revising: "正在思考…",
+  rereading: "正在思考…",
+  rechecking: "正在思考…",
   completed: "已完成",
   failed: "请求失败",
   cancelled: "已取消",
@@ -50,8 +51,8 @@ function citationGroups(
   >();
   for (const id of new Set(ids)) {
     const source =
-      paper?.sources.find((s) => s.id === id) ??
-      materials.find((s) => s.id === id);
+      materials.find((s) => s.id === id) ??
+      paper?.sources.find((s) => s.id === id);
     const samePage =
       source?.kind === "paper" && !source.attachmentId && source.page;
     const key = samePage
@@ -85,14 +86,7 @@ function AnswerSources({
     ),
   );
   const supplements = groups.filter((group) => !original.includes(group));
-  const first =
-    original[0]?.[1].entries[0] ??
-    (paper?.pdfUrl
-      ? {
-          id: paper.sources.find((s) => s.kind === "paper")?.id ?? "",
-          source: paper.sources.find((s) => s.kind === "paper"),
-        }
-      : undefined);
+  const first = original[0]?.[1].entries[0];
   if (!first && !supplements.length) return null;
   return (
     <div className="rw-answer-sources">
@@ -122,11 +116,6 @@ function AnswerSources({
               <span aria-hidden="true">↗</span>
             </button>
           </ObjectMenu>
-          <small>
-            {paper?.pdfUrl
-              ? "可选中文字继续提问，或框选图和段落查看局部。"
-              : "展开来源文字后，可选中段落继续提问。"}
-          </small>
         </div>
       )}
       {supplements.length > 0 && (
@@ -333,9 +322,7 @@ export function ResearchDiscussion({
       {!turns.length && (
         <section className="rp-welcome">
           <div className="rp-welcome-icon">◎</div>
-          <h2>
-            {paper ? "中文带读，也可以直接提问" : "从论文或你的研究想法开始"}
-          </h2>
+          <h2>{paper ? "中文带读，也可以直接提问" : "从一篇论文开始"}</h2>
           {paper ? (
             <>
               <p>
@@ -405,9 +392,6 @@ export function ResearchDiscussion({
               <button disabled={busy} onClick={onImport}>
                 ＋ 导入论文
               </button>
-              <button disabled={busy} onClick={onIdea}>
-                说说你的研究想法
-              </button>
             </>
           )}
           {latestTitle && (
@@ -448,33 +432,6 @@ export function ResearchDiscussion({
                     run: () => onSuggest(`${text}，继续解释上一轮完整问题。`),
                   })),
                 },
-                {
-                  label: "收藏解释",
-                  disabled: busy,
-                  run: () => onRecord(turn, "favorite"),
-                },
-                {
-                  label: savedIds.includes(turn.id)
-                    ? "已保存到笔记"
-                    : "保存回答为笔记",
-                  disabled: busy || savedIds.includes(turn.id),
-                  run: () => onSave(turn),
-                },
-                {
-                  label: "我的理解反馈",
-                  children: [
-                    {
-                      label: "仍不理解",
-                      disabled: busy,
-                      run: () => onRecord(turn, "feedback", "confused"),
-                    },
-                    {
-                      label: "我已理解",
-                      disabled: busy,
-                      run: () => onRecord(turn, "feedback", "understood"),
-                    },
-                  ],
-                },
               ]
             : [];
         return (
@@ -507,15 +464,6 @@ export function ResearchDiscussion({
             </div>
             <ObjectMenu objectKey={turn.id} label="回答操作" actions={actions}>
               <div className="rw-answer">
-                {turn.learningIntent && (
-                  <small>
-                    {verbosityLabels[turn.learningIntent.verbosity]} ·{" "}
-                    {focusLabels[turn.learningIntent.focus]}
-                    {turn.learningIntent.preferenceScope === "turn"
-                      ? " · 本轮"
-                      : " · 聊天偏好"}
-                  </small>
-                )}
                 {!complete && (
                   <small>
                     {statusLabel[
@@ -551,12 +499,13 @@ export function ResearchDiscussion({
                     {unit.sections.map((section, i) => (
                       <section key={i}>
                         <h3>{section.title}</h3>
-                        <p
+                        <div
                           className="rw-selectable"
                           onMouseUp={(e) => {
                             const text = selectedText(
                               e.currentTarget,
                               section.text,
+                              "markdown",
                             );
                             setSelectedSentence(
                               complete && turn.runId && text
@@ -568,6 +517,7 @@ export function ResearchDiscussion({
                             const text = selectedText(
                               e.currentTarget,
                               section.text,
+                              "markdown",
                             );
                             setSelectedSentence(
                               complete && turn.runId && text
@@ -578,7 +528,11 @@ export function ResearchDiscussion({
                           onTouchEnd={(e) => {
                             const element = e.currentTarget;
                             setTimeout(() => {
-                              const text = selectedText(element, section.text);
+                              const text = selectedText(
+                                element,
+                                section.text,
+                                "markdown",
+                              );
                               setSelectedSentence(
                                 complete && turn.runId && text
                                   ? { turnId: turn.id, index: i, text }
@@ -587,8 +541,18 @@ export function ResearchDiscussion({
                             }, 100);
                           }}
                         >
-                          {section.text}
-                        </p>
+                          <ResearchMarkdown text={section.text} />
+                        </div>
+                        {!!section.citations.length && (
+                          <AnswerSources
+                            ids={section.citations}
+                            paper={paper}
+                            materials={
+                              turn.run?.materials?.at(-1)?.sources ?? []
+                            }
+                            onCitation={onCitation}
+                          />
+                        )}
                         <div className="rw-evidence">
                           {selectedSentence?.turnId === turn.id &&
                             selectedSentence.index === i &&
@@ -658,12 +622,6 @@ export function ResearchDiscussion({
                         />
                       );
                     })}
-                    <AnswerSources
-                      ids={unit.sections.flatMap((s) => s.citations)}
-                      paper={paper}
-                      materials={turn.run?.materials?.at(-1)?.sources ?? []}
-                      onCitation={onCitation}
-                    />
                     {unit.terms.length > 0 && (
                       <details>
                         <summary>术语说明 · {unit.terms.length}</summary>

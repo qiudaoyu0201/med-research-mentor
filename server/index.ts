@@ -52,6 +52,14 @@ import { taskKey } from "./scheduler.ts";
 import { ReadingGuides } from "./reading-guides.ts";
 import { ResearchPlans } from "./research-plans.ts";
 import { researchId } from "./research-plan-schemas.ts";
+import { TutorSettings } from "./tutor-settings.ts";
+import { TutorResearch } from "./tutor-research.ts";
+import { SourceTranslations } from "./source-translation.ts";
+
+const tutorSettings = new TutorSettings();
+await tutorSettings.restore();
+const tutorResearch = new TutorResearch();
+await tutorResearch.restore();
 
 const app = express(),
   port = Number(process.env.PORT || 4317),
@@ -123,6 +131,7 @@ const paperById = async (id: string): Promise<PaperBundle> => {
     sources: [
       ...paper.sources.filter((s) => !s.attachmentId),
       ...attachments.sources(id, undefined, paper.version),
+      ...tutorResearch.sources(paper),
     ],
   };
 };
@@ -131,7 +140,7 @@ await deckVersions.restoreDisk();
 const assistant = new AssistantService(
   provider,
   manager,
-  new ConversationStore(),
+  new ConversationStore(save, () => tutorSettings.get().learningPreferences),
   paperById,
   save,
   new ResultCache(),
@@ -139,8 +148,42 @@ const assistant = new AssistantService(
   deckVersions,
   undefined,
   attachments,
+  { settings: () => tutorSettings.get(), research: tutorResearch },
 );
 const readingGuides = new ReadingGuides(provider, assistant.scheduler);
+app.get("/api/tutor-settings", (_req, res) => res.json(tutorSettings.get()));
+app.put("/api/tutor-settings", async (req, res) =>
+  res.json(await tutorSettings.update(req.body)),
+);
+const translations = new SourceTranslations(provider, assistant.scheduler);
+await translations.restore();
+app.post("/api/papers/:id/translation", async (req, res) => {
+  const body = z
+    .object({
+      sourceId: z.string().min(1).max(200),
+      offset: z.number().int().min(0).default(0),
+      requestKey: researchId,
+    })
+    .strict()
+    .parse(req.body);
+  res
+    .status(202)
+    .json(
+      await translations.start(
+        await paperById(req.params.id),
+        body.sourceId,
+        body.offset,
+        body.requestKey,
+      ),
+    );
+});
+app.get("/api/translations/:id", (req, res) =>
+  res.json(translations.get(safeId(req.params.id))),
+);
+app.post("/api/translations/:id/cancel", (req, res) => {
+  translations.cancel(safeId(req.params.id));
+  res.json({ ok: true });
+});
 app.get("/api/training-admission", (_req, res) =>
   res.json({ busy: assistant.scheduler.busy || manager.activeIds.size > 0 }),
 );
@@ -327,6 +370,7 @@ const workspaceSnapshot: express.RequestHandler = async (req, res) => {
       sources: [
         ...p.sources.filter((s) => !s.attachmentId),
         ...attachments.sources(p.id, undefined, p.version),
+        ...tutorResearch.sources(p),
       ],
     })),
   );
@@ -434,18 +478,16 @@ app.post("/api/papers/:id/reading-start", async (req, res) => {
       reason: "已有讨论，保留当前问题与进度，不自动重复起步。",
     });
   readingGuides.cancel(paper.id);
-  res
-    .status(202)
-    .json({
-      turn: await assistant.submit(state.id, {
-        clientMessageId,
-        question: "请用中文带我读这篇论文，从研究问题和第一个原文单元开始。",
-        mode: "live",
-        paperId: paper.id,
-        readingAction: "start",
-        expectedReadingRevision: 0,
-      }),
-    });
+  res.status(202).json({
+    turn: await assistant.submit(state.id, {
+      clientMessageId,
+      question: "请用中文带我读这篇论文，从研究问题和第一个原文单元开始。",
+      mode: "live",
+      paperId: paper.id,
+      readingAction: "start",
+      expectedReadingRevision: 0,
+    }),
+  });
 });
 app.post("/api/papers/:id/start", async (req, res) => {
   const body = z
@@ -1126,6 +1168,27 @@ app.get("/api/deck-versions/:id/speech", async (req, res) => {
   );
   res.type(format === "txt" ? "text/plain" : "text/markdown").send(text);
 });
+app.get("/api/deck-versions/:id/speaking-notes", async (req, res) => {
+  const version = deckVersions.get(
+    safeId(req.params.id),
+    safeId(String(req.query.conversationId)),
+  );
+  if (
+    version.status !== "completed" ||
+    version.review.issues.some((i) => !i.resolved && i.severity === "blocking")
+  )
+    throw new Error("此汇报尚未完成核对。");
+  const text = version.outline.slides
+    .map((slide, i) => `## 第 ${i + 1} 页 · ${slide.title}\n\n${slide.notes}`)
+    .join("\n\n");
+  res
+    .type("text/markdown; charset=utf-8")
+    .setHeader(
+      "Content-Disposition",
+      'attachment; filename="speaking-notes.md"',
+    )
+    .send(text);
+});
 app.post("/api/deck-versions/:id/restore", async (req, res) => {
   const body = z
     .object({ conversationId: z.string(), targetId: z.string() })
@@ -1246,6 +1309,7 @@ const server = app.listen(port, "127.0.0.1", () =>
   console.log(`医学科研入门导师：http://127.0.0.1:${port}`),
 );
 async function shutdown() {
+  await translations.close();
   await researchPlans.cancelAll();
   readingGuides.cancelAll();
   replayController?.abort();

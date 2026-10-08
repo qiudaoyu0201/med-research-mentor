@@ -2,7 +2,7 @@ import assert from "node:assert/strict";
 import { mkdir, readFile, writeFile } from "node:fs/promises";
 import { join } from "node:path";
 import { unzipSync } from "fflate";
-import { CodexProvider } from "../server/provider.ts";
+import { createProvider } from "../server/model-config.ts";
 import { TaskManager } from "../server/orchestrator.ts";
 import { AssistantService } from "../server/assistant.ts";
 import { ConversationStore } from "../server/conversation.ts";
@@ -28,7 +28,7 @@ console.log(
   }),
 );
 if (process.argv.includes("--live")) {
-  const provider = new CodexProvider();
+  const provider = createProvider();
   const manager = new TaskManager(provider);
   const conversations = new ConversationStore();
   const assistant = new AssistantService(

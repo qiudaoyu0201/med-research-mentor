@@ -1,4 +1,6 @@
 import { randomUUID } from "node:crypto";
+import { containsRenderedQuote } from "../shared/markdown.ts";
+import type { TutorResearch } from "./tutor-research.ts";
 import {
   readingAction,
   prepareReading,
@@ -240,6 +242,10 @@ export class AssistantService {
     private decks?: DeckVersions,
     readonly scheduler = new TaskScheduler(),
     private attachments?: Attachments,
+    private tutor?: {
+      settings: () => { webLookup: boolean; rememberTerms: boolean };
+      research: TutorResearch;
+    },
   ) {
     if (decks) decks.scheduler = scheduler;
   }
@@ -658,6 +664,36 @@ export class AssistantService {
       )
         throw new Error("排队期间带读进度已经变化，当前问题保留，未重发。");
       if (reading) paper = withFoundationSources(reading.paper);
+      const useLookup =
+        this.tutor?.settings().webLookup &&
+        message.mode === "live" &&
+        !message.module &&
+        !reading &&
+        !message.exportRunId &&
+        /检索|查找|查资料|文献|原理|机制|背景|为什么|怎么理解|什么是/.test(
+          message.question,
+        );
+      let supplementaryIds: string[] = [];
+      if (useLookup) {
+        try {
+          const extra = await this.tutor!.research.supplement(
+            paper,
+            message.question,
+            this.provider,
+            ledger,
+            signal,
+          );
+          paper.sources = [
+            ...paper.sources.filter((s) => !extra.some((e) => e.id === s.id)),
+            ...extra,
+          ];
+          supplementaryIds = extra.map((s) => s.id);
+        } catch (error) {
+          signal.throwIfAborted();
+          // Local evidence remains usable when optional network support fails.
+          turn.error = `补充资料暂不可用，仍依据当前论文讲解：${(error as Error).message}`;
+        }
+      }
       state.profileId = message.profileId ?? state.profileId;
       const depthRequest = requestedDepth(message.question, message.depth);
       const intent = resolveLearningIntent(message, state);
@@ -804,7 +840,7 @@ export class AssistantService {
           focusedRun.sourceVersion !== paper.version ||
           focusedRun.input.paperId !== paper.id ||
           !section ||
-          !section.text.includes(message.focus.excerpt)
+          !containsRenderedQuote(section.text, message.focus.excerpt)
         )
           throw new Error("追问句子未在当前会话及资料版本中交付。");
         focusedText = message.focus.excerpt;
@@ -949,6 +985,8 @@ export class AssistantService {
         plan = result.output;
       }
       plan = validatePlan(plan, paper, message, direct);
+      if (!plan.clarification && supplementaryIds.length)
+        plan.sourceIds = [...new Set([...plan.sourceIds, ...supplementaryIds])];
       if (
         !binding &&
         !admitted.length &&
@@ -976,6 +1014,12 @@ export class AssistantService {
           plan.goal,
           plan.modules,
         ).map((s) => s.id);
+      if (
+        supplementaryIds.length &&
+        !supplementaryIds.some((id) => plan!.sourceIds.includes(id))
+      )
+        turn.error =
+          "本次补查资料未纳入讲解材料，回答仍依据已选原文与基础资料。";
       let missingFoundations: { id: string; title: string }[] = [];
       if (
         message.mode === "live" &&
@@ -1005,7 +1049,8 @@ export class AssistantService {
           missingFoundations = missing.map(({ id, title }) => ({ id, title }));
         }
       }
-      ledger.state.limit = ledger.state.attempts.length ? 7 : 6;
+      // Routing and optional lookup are accounted separately from six work calls.
+      ledger.state.limit = 6 + ledger.state.attempts.length;
       signal.throwIfAborted();
       // Natural read-figure requests require the original image and a complete caption.
       if (
@@ -1120,9 +1165,25 @@ export class AssistantService {
                     : "核心教学按当前目标试读并核验；选区、附件和程度调整不省略检查",
               },
               ...(missingFoundations.length ? { missingFoundations } : {}),
-              taughtConcepts: state.taughtConcepts
-                .slice(-20)
-                .map((c) => c.name),
+              taughtConcepts: [
+                ...new Set([
+                  ...(this.tutor?.settings().rememberTerms
+                    ? [...this.conversations.states.values()]
+                        .filter(
+                          (c) =>
+                            c.id !== state.id &&
+                            c.paperId &&
+                            c.profileId === state.profileId,
+                        )
+                        .sort((a, b) =>
+                          (b.updatedAt ?? "").localeCompare(a.updatedAt ?? ""),
+                        )
+                        .slice(0, 8)
+                        .flatMap((c) => c.taughtConcepts.map((t) => t.name))
+                    : []),
+                  ...state.taughtConcepts.map((c) => c.name),
+                ]),
+              ].slice(-30),
               ...(previous
                 ? {
                     previous: {

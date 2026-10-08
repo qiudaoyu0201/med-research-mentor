@@ -17,7 +17,7 @@ import {
   materialPacket,
 } from "../server/materials.ts";
 import { foundationCatalog } from "../server/foundations.ts";
-import { CodexProvider } from "../server/provider.ts";
+import { createProvider } from "../server/model-config.ts";
 import { TaskManager } from "../server/orchestrator.ts";
 import { AssistantService } from "../server/assistant.ts";
 import { ConversationStore } from "../server/conversation.ts";
@@ -107,7 +107,7 @@ if (!args.includes("--live")) {
   process.exit(0);
 }
 assert.ok(["A", "B"].includes(batch), "实跑需指定 A 或 B 批次");
-const provider = new CodexProvider();
+const provider = createProvider();
 if (args.includes("--evaluate-only")) {
   const caseId = args[args.indexOf("--case") + 1];
   const test = transferCases.find((c) => c.id === caseId);

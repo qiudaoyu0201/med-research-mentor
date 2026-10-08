@@ -1,6 +1,6 @@
 import { randomUUID } from "node:crypto";
 import { mkdir, writeFile } from "node:fs/promises";
-import { CodexProvider } from "../server/provider.ts";
+import { createProvider } from "../server/model-config.ts";
 import { TaskManager } from "../server/orchestrator.ts";
 import { AssistantService } from "../server/assistant.ts";
 import { ConversationStore } from "../server/conversation.ts";
@@ -22,7 +22,7 @@ const report: any = {
 console.log(
   "主助手行为检查：背景直接解释与绑定句子的追问，最多两次调用，失败不重发。",
 );
-const provider = new CodexProvider();
+const provider = createProvider();
 const manager = new TaskManager(provider);
 const conversations = new ConversationStore();
 const assistant = new AssistantService(

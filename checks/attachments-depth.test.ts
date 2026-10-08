@@ -331,7 +331,7 @@ test("unrelated or unreadable images block only dependent questions; single-imag
   ]);
   assert.ok(second.budget.attempts.length <= 7);
 });
-test("natural explanation depth applies to the turn and uses the full previous answer; explicit quotation takes priority", async () => {
+test("natural explanation preference persists and uses the full previous answer; explicit quotation takes priority", async () => {
   const h = harness(),
     chat = await h.conversations.mainForPaper(paper.id);
   async function send(question: string, extra = {}) {
@@ -362,7 +362,7 @@ test("natural explanation depth applies to the turn and uses the full previous a
     focus: { runId: first.id, sectionIndex: 0, excerpt: "比较训练" },
   });
   assert.equal(focused.input.focusedText, "比较训练");
-  assert.equal(h.conversations.get(chat.id).explanationDepth, undefined);
+  assert.equal(h.conversations.get(chat.id).explanationDepth, "mechanism");
   const other = await h.conversations.mainForPaper("study-b");
   assert.equal(other.explanationDepth, undefined);
 });

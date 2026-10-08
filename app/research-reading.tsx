@@ -7,6 +7,7 @@ import type { ResearchNote } from "../shared/workspace.ts";
 import type { ResearchSelection } from "./research-discussion.tsx";
 import { SelectionActions } from "./research-menu.tsx";
 import { ResearchImage } from "./research-image.tsx";
+import { BilingualSource } from "./source-translation.tsx";
 
 function NoteEditor({
   note,
@@ -363,7 +364,9 @@ export function ResearchReading({
         </button>
       </header>
       <div className="rp-tabs" role="tablist" aria-label="阅读面板">
-        {(["sources", "notes"] as const).map((tab) => (
+        {(
+          ["sources", ...(notes.length ? ["notes" as const] : [])] as const
+        ).map((tab) => (
           <button
             key={tab}
             role="tab"
@@ -373,6 +376,7 @@ export function ResearchReading({
             onKeyDown={(e) => {
               if (e.key === "ArrowLeft" || e.key === "ArrowRight") {
                 e.preventDefault();
+                if (!notes.length) return;
                 onPanel(tab === "sources" ? "notes" : "sources");
                 (
                   e.currentTarget.parentElement?.querySelector(
@@ -382,7 +386,7 @@ export function ResearchReading({
               }
             }}
           >
-            {tab === "sources" ? "原文与图件" : "我的笔记"}
+            {tab === "sources" ? "原文与图件" : "历史笔记"}
           </button>
         ))}
       </div>
@@ -400,6 +404,43 @@ export function ResearchReading({
       >
         {panel === "sources" ? (
           <>
+            {paper &&
+              (() => {
+                const source =
+                  paper.sources.find(
+                    (s) => s.id === sourceId && s.kind === "paper",
+                  ) ??
+                  paper.sources.find((s) => s.kind === "paper" && !s.image);
+                if (!source) return null;
+                const range =
+                  extraSource?.id === source.id
+                    ? /提取字符 (\d+)[–-]/.exec(extraSource.locator)?.[1]
+                    : undefined;
+                const offset = range
+                  ? Math.floor(Number(range) / 3500) * 3500
+                  : 0;
+                return (
+                  <BilingualSource
+                    key={`${paper.id}:${paper.version}:${source.id}:${locatorRevision}`}
+                    paper={paper}
+                    source={source}
+                    initialOffset={Math.min(
+                      offset,
+                      Math.floor(
+                        Math.max(
+                          0,
+                          (source.caption || source.text).length - 1,
+                        ) / 3500,
+                      ) * 3500,
+                    )}
+                    displayLabel={
+                      source.caption
+                        ? "对应图注 · 中英对照"
+                        : "对应原文 · 中英对照"
+                    }
+                  />
+                );
+              })()}
             {paper && (
               <details className="rw-bibliography">
                 <summary>原始题录与材料状态</summary>
@@ -541,17 +582,29 @@ export function ResearchReading({
                   <p
                     className="rw-selectable"
                     onMouseUp={(e) => {
-                      const text = selectedText(e.currentTarget, source.text);
+                      const text = selectedText(
+                        e.currentTarget,
+                        source.text,
+                        "plain",
+                      );
                       setSelected(text ? { id: source.id, text } : undefined);
                     }}
                     onKeyUp={(e) => {
-                      const text = selectedText(e.currentTarget, source.text);
+                      const text = selectedText(
+                        e.currentTarget,
+                        source.text,
+                        "plain",
+                      );
                       setSelected(text ? { id: source.id, text } : undefined);
                     }}
                     onTouchEnd={(e) => {
                       const element = e.currentTarget;
                       setTimeout(() => {
-                        const text = selectedText(element, source.text);
+                        const text = selectedText(
+                          element,
+                          source.text,
+                          "plain",
+                        );
                         setSelected(text ? { id: source.id, text } : undefined);
                       }, 100);
                     }}
@@ -616,13 +669,8 @@ export function ResearchReading({
           <>
             <h2>我的笔记</h2>
             <p className="rw-note-help">
-              可以直接打字记录，也可以保存回答并保留原讨论与依据。
+              保留此前保存的笔记，新的内容可从回答菜单复制。
             </p>
-            <NoteComposer
-              key={paper?.id ?? "idea"}
-              draftKey={`research-new-note:${paper?.id ?? "idea"}`}
-              onCreate={onCreateNote}
-            />
             {!notes.length && <p>还没有保存笔记。</p>}
             {notes.map((note) => (
               <NoteEditor

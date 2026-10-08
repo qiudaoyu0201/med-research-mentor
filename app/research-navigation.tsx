@@ -61,7 +61,7 @@ export function ResearchNavigation({
     paperName(p, index).toLowerCase().includes(search.toLowerCase()),
   );
   const recent = [...conversations]
-    .filter((c) => c.recentTurnIds.length)
+    .filter((c) => c.recentTurnIds.length && c.purpose !== "ppt-generation")
     .sort((a, b) => (b.updatedAt || "").localeCompare(a.updatedAt || ""))
     .slice(0, 4);
   return (
@@ -80,7 +80,7 @@ export function ResearchNavigation({
         <div className="rp-sidebar-brand">
           <div>
             <strong>
-              科研<span>助手</span>
+              医学科研<span>导师</span>
             </strong>
             <small>从一个问题开始读论文</small>
           </div>
@@ -94,14 +94,14 @@ export function ResearchNavigation({
         </div>
         <nav className="rw-main-nav" aria-label="主导航">
           <button
-            aria-label="论文研究"
-            title="论文研究"
+            aria-label="论文带读"
+            title="论文带读"
             aria-current={mode === "research" ? "page" : undefined}
             disabled={busy}
             onClick={onHome}
           >
             <ResearchIcon name="book" />
-            <span>论文研究</span>
+            <span>论文带读</span>
           </button>
           <button
             aria-label="研究方案"
@@ -257,10 +257,6 @@ export function ResearchNavigation({
           <button aria-label="设置" title="设置" onClick={onSettings}>
             <ResearchIcon name="gear" />
             <span>设置</span>
-          </button>
-          <button aria-label="个人记录" title="个人记录" onClick={onRecords}>
-            <ResearchIcon name="person" />
-            <span>个人记录</span>
           </button>
         </footer>
       </aside>

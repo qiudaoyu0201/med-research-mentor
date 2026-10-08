@@ -10,6 +10,7 @@ export interface ReadingRange {
   locator: string;
 }
 export interface ReadingSession {
+  segmentation?: "paragraph-v2";
   paperId: string;
   paperVersion: string;
   revision: number;

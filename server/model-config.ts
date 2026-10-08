@@ -16,8 +16,28 @@ export type CompatibleConfiguration = z.infer<typeof configuration>;
 export function createProvider(env: NodeJS.ProcessEnv = process.env) {
   const selected = env.TUTOR_PROVIDER ?? "codex";
   if (selected === "codex") return new CodexProvider();
+  if (selected === "codex-configured") {
+    const parsed = z
+      .object({
+        model: z.string().trim().min(1).max(150),
+        modelProvider: z.string().regex(/^[A-Za-z0-9_-]+$/),
+        authType: z.literal("apiKey"),
+      })
+      .safeParse({
+        model: env.TUTOR_MODEL,
+        modelProvider: env.TUTOR_CODEX_PROVIDER,
+        authType: env.TUTOR_CODEX_AUTH,
+      });
+    if (!parsed.success)
+      throw new Error(
+        "复用 Codex 配置须显式设置 TUTOR_MODEL、TUTOR_CODEX_PROVIDER 和 TUTOR_CODEX_AUTH=apiKey；原生订阅请使用 TUTOR_PROVIDER=codex，不会猜测账费通道。",
+      );
+    return new CodexProvider(undefined, undefined, parsed.data);
+  }
   if (selected !== "compatible")
-    throw new Error("TUTOR_PROVIDER 必须为 codex 或 compatible。");
+    throw new Error(
+      "TUTOR_PROVIDER 必须为 codex、codex-configured 或 compatible。",
+    );
   const parsed = configuration.safeParse({
     baseUrl: env.TUTOR_MODEL_BASE_URL,
     model: env.TUTOR_MODEL,
