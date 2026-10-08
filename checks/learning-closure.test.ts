@@ -84,3 +84,10 @@ test("renaming a task or relabelling its study does not admit an identical quest
   h.input.transfer.question = h.input.initial.task.question;
   assert.throws(() => createClosure("invalid", h.input, h.provider), /重叠/);
 });
+
+test("corrupt initial review cannot be treated as passed independent learning", async () => {
+  const h = await fixture(true);
+  h.input.evaluation.review.checks = [];
+  assert.throws(() => createClosure("invalid-review", h.input, h.provider), /初始评价无效/);
+  assert.equal(h.calls.length, 0);
+});

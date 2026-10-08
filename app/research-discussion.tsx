@@ -68,7 +68,7 @@ function citationGroups(
   }
   return [...groups.entries()];
 }
-function AnswerSources({
+export function AnswerSources({
   ids,
   paper,
   materials,
@@ -86,7 +86,8 @@ function AnswerSources({
     ),
   );
   const supplements = groups.filter((group) => !original.includes(group));
-  const first = original[0]?.[1].entries[0];
+  const originals = original.flatMap(([, group]) => group.entries);
+  const first = originals[0];
   if (!first && !supplements.length) return null;
   return (
     <div className="rw-answer-sources">
@@ -96,13 +97,17 @@ function AnswerSources({
             objectKey={ids.join(":")}
             label="选择原文位置"
             actions={
-              original.length > 1
-                ? original.map(([, group]) => ({
-                    label: group.entries[0].source?.page
-                      ? `第 ${group.entries[0].source.page} 页`
-                      : (group.entries[0].source?.title ?? "原文"),
-                    run: () =>
-                      onCitation(group.entries[0].id, group.entries[0].source),
+              originals.length > 1
+                ? originals.map((entry) => ({
+                    label: [
+                      entry.source?.page ? `第 ${entry.source.page} 页` : "",
+                      entry.source?.figure ? `图 ${entry.source.figure}` : "",
+                      entry.source?.caption ? "图注" : "正文",
+                      entry.source?.title,
+                    ]
+                      .filter(Boolean)
+                      .join(" · "),
+                    run: () => onCitation(entry.id, entry.source),
                   }))
                 : []
             }

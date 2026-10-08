@@ -1,3 +1,4 @@
+import { currentSourceRanges } from "../shared/source-ranges.ts";
 import { researchApi } from "./research-api.ts";
 import { ResearchPdf } from "./research-pdf.tsx";
 import { selectedText } from "./research-selection.ts";
@@ -410,33 +411,23 @@ export function ResearchReading({
                   paper.sources.find(
                     (s) => s.id === sourceId && s.kind === "paper",
                   ) ??
-                  paper.sources.find((s) => s.kind === "paper" && !s.image);
+                  (!sourceId
+                    ? paper.sources.find((s) => s.kind === "paper" && !s.image)
+                    : undefined);
                 if (!source) return null;
-                const range =
-                  extraSource?.id === source.id
-                    ? /提取字符 (\d+)[–-]/.exec(extraSource.locator)?.[1]
-                    : undefined;
-                const offset = range
-                  ? Math.floor(Number(range) / 3500) * 3500
-                  : 0;
+                const ranges = currentSourceRanges(source, extraSource);
                 return (
                   <BilingualSource
                     key={`${paper.id}:${paper.version}:${source.id}:${locatorRevision}`}
                     paper={paper}
                     source={source}
-                    initialOffset={Math.min(
-                      offset,
-                      Math.floor(
-                        Math.max(
-                          0,
-                          (source.caption || source.text).length - 1,
-                        ) / 3500,
-                      ) * 3500,
-                    )}
+                    ranges={ranges}
                     displayLabel={
                       source.caption
                         ? "对应图注 · 中英对照"
-                        : "对应原文 · 中英对照"
+                        : ranges.length
+                          ? "所引片段 · 中英对照"
+                          : "论文原文 · 中英对照"
                     }
                   />
                 );

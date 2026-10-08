@@ -200,7 +200,7 @@ export function prepareReading(
           return true;
         });
   const visibleRanges = [...contextRanges, ...ranges];
-  const sources = [...new Set(visibleRanges.map((r) => r.sourceId))].map(
+  const sources: PaperBundle["sources"] = [...new Set(visibleRanges.map((r) => r.sourceId))].map(
     (id) => {
       const source = paper.sources.find((s) => s.id === id)!;
       const parts = visibleRanges.filter((r) => r.sourceId === id);
@@ -208,6 +208,11 @@ export function prepareReading(
         ...source,
         text: parts.map((r) => source.text.slice(r.start, r.end)).join("\n\n"),
         locator: parts.map((r) => r.locator).join("；"),
+        excerptRanges: parts.map((r) => ({
+          start: r.start, end: r.end,
+          role: ranges.some((current) => current.unitId === r.unitId)
+            ? "current" as const : "context" as const,
+        })),
       };
     },
   );

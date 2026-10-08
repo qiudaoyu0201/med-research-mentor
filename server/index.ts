@@ -162,6 +162,8 @@ app.post("/api/papers/:id/translation", async (req, res) => {
     .object({
       sourceId: z.string().min(1).max(200),
       offset: z.number().int().min(0).default(0),
+      end: z.number().int().positive().optional(),
+      expectedPaperVersion: z.string().min(1).max(200).optional(),
       requestKey: researchId,
     })
     .strict()
@@ -174,6 +176,8 @@ app.post("/api/papers/:id/translation", async (req, res) => {
         body.sourceId,
         body.offset,
         body.requestKey,
+        body.end,
+        body.expectedPaperVersion,
       ),
     );
 });

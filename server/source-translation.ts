@@ -78,11 +78,20 @@ export class SourceTranslations {
     sourceId: string,
     offset: number,
     requestKey: string,
+    end?: number,
+    expectedPaperVersion?: string,
   ) {
     if (this.closing)
       return Promise.reject(new Error("翻译服务正在关闭，未派发新请求。"));
     const pending = this.starting.then(() =>
-      this.startJob(paper, sourceId, offset, requestKey),
+      this.startJob(
+        paper,
+        sourceId,
+        offset,
+        requestKey,
+        end,
+        expectedPaperVersion,
+      ),
     );
     this.starting = pending.catch(() => {});
     return pending;
@@ -92,15 +101,32 @@ export class SourceTranslations {
     sourceId: string,
     offset: number,
     requestKey: string,
+    end?: number,
+    expectedPaperVersion?: string,
   ) {
     if (this.closing) throw new Error("翻译服务正在关闭，未派发新请求。");
+    if (
+      expectedPaperVersion !== undefined &&
+      expectedPaperVersion !== paper.version
+    )
+      throw new Error("论文版本已变化，请刷新原文后再翻译。");
     const source = paper.sources.find((s) => s.id === sourceId);
     if (!source || source.kind !== "paper")
       throw new Error("请选择当前论文原文或图注。");
     const text = source.caption || source.text;
-    if (offset >= text.length || offset < 0 || offset % 3500 !== 0)
+    if (
+      !Number.isInteger(offset) ||
+      offset >= text.length ||
+      offset < 0 ||
+      (end === undefined
+        ? offset % 3500 !== 0
+        : !Number.isInteger(end) ||
+          end <= offset ||
+          end > text.length ||
+          end - offset > 3500)
+    )
       throw new Error("原文范围已变化，请重新选择。");
-    const original = text.slice(offset, offset + 3500);
+    const original = text.slice(offset, end ?? offset + 3500);
     const key = digest({
       paper: paper.id,
       version: paper.version,

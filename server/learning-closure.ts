@@ -4,7 +4,7 @@ import { digest } from "./materials.ts";
 import type { BudgetState } from "../shared/types.ts";
 import type { Provider } from "./provider.ts";
 import { answerOpenTask, exposureVersion, type OpenLearnerRecord, type OpenTask, type Exposure } from "./internal-learner.ts";
-import { reviewArtifact } from "./internal-training.ts";
+import { reviewArtifact, validateReview, reviewSchema } from "./internal-training.ts";
 import { learningCriteria } from "./learning-protocol.ts";
 import { assertIndependentTarget, learningImage } from "./learning-exposure.ts";
 import { addAssistedCorrection, addIndependentTransfer, addRemedialTeaching, beginLearningLoop, type LearningLoopRecord } from "./learning-loop.ts";
@@ -50,7 +50,11 @@ function contract(input: ClosureInput, provider: Provider) {
 }
 function validateInput(input: ClosureInput) {
   if (!input.environmentHash.trim() || !input.rules.trim()) throw new Error("缺少冻结环境或教学规则。");
-  if (!input.evaluation.valid) throw new Error("初始评价无效，先修复评价而非给学生补教。");
+  const checked = validateReview(learningCriteria, input.initial.rawAnswer,
+    [...input.initial.task.sources.map((s) => s.id), ...input.learner.exposures.flatMap((e) => [e.id, ...(e.sourceIds ?? [])])],
+    reviewSchema.parse(input.evaluation.review));
+  if (!input.evaluation.valid || !checked.valid || input.evaluation.passed !== checked.passed)
+    throw new Error("初始评价无效，先修复评价而非给学生补教。");
   if (input.initial.mode !== "independent" || input.initial.unsupportedVisibleIds.length)
     throw new Error("初始作答不是有效的独立证据。");
   if (!input.learner.observations.some((o) => digest(o) === digest(input.initial)))
@@ -107,6 +111,8 @@ export async function advanceClosure(
     kind: stage === "correct" ? "target-hint" : "teaching" });
   const task = stage === "transfer" || stage === "check-transfer" ? input.transfer : input.initial.task;
   try {
+    if (!state.budget.attempts.length)
+      state.budget.deadline = new Date(Date.now() + 30 * 60_000).toISOString();
     state.inFlight = stage;
     state.status = "running";
     await save();

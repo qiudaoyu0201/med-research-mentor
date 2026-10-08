@@ -1,3 +1,4 @@
+import { translationSegments } from "../shared/source-ranges.ts";
 import { useEffect, useRef, useState } from "react";
 import type { PaperBundle, Source } from "../shared/types.ts";
 import type { SourceTranslation } from "../server/source-translation.ts";
@@ -8,9 +9,18 @@ interface PendingTranslation {
   requestKey: string;
   jobId?: string;
 }
-const pendingKey = (paper: PaperBundle, source: Source, offset: number) =>
+const pendingKey = (
+  paper: PaperBundle,
+  source: Source,
+  offset: number,
+  end?: number,
+) =>
   "tutor-translation-request:" +
-  JSON.stringify([paper.id, paper.version, source.id, offset]);
+  JSON.stringify(
+    end === undefined
+      ? [paper.id, paper.version, source.id, offset]
+      : [paper.id, paper.version, source.id, offset, end],
+  );
 function readPending(key: string): PendingTranslation | undefined {
   const raw = localStorage.getItem(key);
   if (!raw) return;
@@ -37,25 +47,21 @@ function savePending(key: string, value: PendingTranslation) {
 export function BilingualSource({
   paper,
   source,
-  initialOffset = 0,
+  ranges = [],
   displayLabel,
 }: {
   paper: PaperBundle;
   source: Source;
-  initialOffset?: number;
+  ranges?: { start: number; end: number }[];
   displayLabel?: string;
 }) {
   const text = source.caption || source.text;
-  const [offset, setOffset] = useState(
-    () =>
-      Math.max(
-        0,
-        Math.min(
-          Math.floor(initialOffset / 3500),
-          Math.max(0, Math.ceil(text.length / 3500) - 1),
-        ),
-      ) * 3500,
-  );
+  const segments = translationSegments(text, ranges);
+  const [segmentIndex, setSegmentIndex] = useState(0);
+  const segment = segments[segmentIndex] ?? { start: 0, end: 0 };
+  const offset = segment.start;
+  // Preserve old request keys for whole-source chunks.
+  const end = ranges.length ? segment.end : undefined;
   const [job, setJob] = useState<SourceTranslation>();
   const [pending, setPending] = useState<PendingTranslation>();
   const [busy, setBusy] = useState(false),
@@ -63,7 +69,7 @@ export function BilingualSource({
   const [storageReady, setStorageReady] = useState(false);
   const alive = useRef(true),
     submitting = useRef(false);
-  const key = pendingKey(paper, source, offset);
+  const key = pendingKey(paper, source, offset, end);
   const active = !!job && ["queued", "running"].includes(job.status);
   const terminalFailure =
     !!job && ["failed", "cancelled", "interrupted"].includes(job.status);
@@ -134,7 +140,13 @@ export function BilingualSource({
           )
         : await researchApi<SourceTranslation>(
             `/api/papers/${paper.id}/translation`,
-            { sourceId: source.id, offset, requestKey: saved.requestKey },
+            {
+              sourceId: source.id,
+              offset,
+              end,
+              expectedPaperVersion: paper.version,
+              requestKey: saved.requestKey,
+            },
           );
       const accepted = { ...saved, jobId: v.id };
       savePending(key, accepted);
@@ -157,28 +169,28 @@ export function BilingualSource({
     <details className="rw-bilingual">
       <summary>{displayLabel ?? "当前原文 · 中英对照"}</summary>
       <small>{source.locator}</small>
-      {text.length > 3500 && (
+      {segments.length > 1 && (
         <label>
           原文范围
           <select
             disabled={busy || active}
-            value={offset}
+            value={segmentIndex}
             onChange={(e) => {
-              setOffset(Number(e.target.value));
+              setSegmentIndex(Number(e.target.value));
               setStorageReady(false);
               setJob(undefined);
               setPending(undefined);
             }}
           >
-            {Array.from({ length: Math.ceil(text.length / 3500) }, (_, i) => (
-              <option key={i} value={i * 3500}>
+            {segments.map((_, i) => (
+              <option key={i} value={i}>
                 第 {i + 1} 段
               </option>
             ))}
           </select>
         </label>
       )}
-      <blockquote lang="en">{text.slice(offset, offset + 3500)}</blockquote>
+      <blockquote lang="en">{text.slice(offset, segment.end)}</blockquote>
       {job?.translated && (
         <>
           <ResearchMarkdown text={job.translated} />

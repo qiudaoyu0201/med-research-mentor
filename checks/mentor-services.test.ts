@@ -1,7 +1,10 @@
 import test from "node:test";
 import assert from "node:assert/strict";
 import { SourceTranslations } from "../server/source-translation.ts";
-import { TutorResearch, needsBackgroundDecision } from "../server/tutor-research.ts";
+import {
+  TutorResearch,
+  needsBackgroundDecision,
+} from "../server/tutor-research.ts";
 import { TaskScheduler } from "../server/scheduler.ts";
 import { BudgetLedger } from "../server/budget.ts";
 import type { Provider } from "../server/provider.ts";
@@ -236,9 +239,16 @@ test("background evidence retains counted planning, abstract provenance and sour
 });
 
 test("reading lookup admission allows bounded help while respecting explicit paper-only requests", () => {
-  const base = { clientMessageId: "lookup", mode: "live" as const, question: "请查资料解释这个机制" };
+  const base = {
+    clientMessageId: "lookup",
+    mode: "live" as const,
+    question: "请查资料解释这个机制",
+  };
   assert.equal(needsBackgroundDecision(base), true);
-  assert.equal(needsBackgroundDecision({ ...base, question: "只用原文解释这个机制" }), false);
+  assert.equal(
+    needsBackgroundDecision({ ...base, question: "只用原文解释这个机制" }),
+    false,
+  );
   assert.equal(needsBackgroundDecision({ ...base, module: "ppt" }), false);
   assert.equal(needsBackgroundDecision({ ...base, question: "继续" }), false);
 });
@@ -289,4 +299,60 @@ test("refreshed bibliography cannot overwrite an older source used by historical
     restored.sources(paper).find((s) => s.id === old[0].id),
     old[0],
   );
+});
+
+test("exact excerpt translation binds retries to the actual range and preserves legacy chunks", async () => {
+  let calls = 0;
+  const service = new SourceTranslations(
+    {
+      model: "fixture",
+      async generate(_r, _i, schema) {
+        calls++;
+        return { output: schema.parse({ translation: "译文" }) };
+      },
+    },
+    new TaskScheduler(),
+    async () => {},
+  );
+  const long = structuredClone(paper);
+  long.sources[0].text = "A".repeat(3500) + "CURRENT" + "B".repeat(4000);
+  try {
+    const exact = await service.start(long, "source", 3500, "exact", 3507);
+    await service.wait(exact.id);
+    assert.equal(exact.original, "CURRENT");
+    assert.equal(
+      (await service.start(long, "source", 3500, "exact", 3507)).id,
+      exact.id,
+    );
+    await assert.rejects(
+      service.start(long, "source", 3500, "exact", 3508),
+      /编号/,
+    );
+    const legacy = await service.start(long, "source", 0, "legacy");
+    await service.wait(legacy.id);
+    assert.equal(
+      (await service.start(long, "source", 0, "equivalent", 3500)).id,
+      legacy.id,
+    );
+    for (const [start, end] of [
+      [1, undefined],
+      [-1, 10],
+      [1.5, 10],
+      [1, 1],
+      [0, 3501],
+      [0, 99999],
+      [0, 1.5],
+    ])
+      await assert.rejects(
+        service.start(long, "source", start!, "bad", end),
+        /范围/,
+      );
+    await assert.rejects(
+      service.start(long, "source", 3500, "stale", 3507, "old-version"),
+      /论文版本已变化/,
+    );
+    assert.equal(calls, 2);
+  } finally {
+    await service.close();
+  }
 });

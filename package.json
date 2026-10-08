@@ -27,6 +27,7 @@
     "training:workflow": "tsx scripts/workflow-iteration.ts",
     "training:calibrate": "tsx scripts/internal-training.ts calibrate",
     "training:m2": "tsx scripts/internal-training-batches.ts",
+    "training:closures": "tsx scripts/learning-closures.ts",
     "training:m3": "tsx scripts/internal-learning.ts",
     "training:learning-calibrate": "tsx scripts/internal-learning.ts calibrate"
   },

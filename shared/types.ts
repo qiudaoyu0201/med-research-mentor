@@ -52,6 +52,7 @@ export interface Source {
   section?: "figure" | "results" | "methods" | "overview";
   relatedFigures?: string[];
   foundation?: FoundationMetadata;
+  excerptRanges?: { start: number; end: number; role: "current" | "context" }[];
 }
 export interface FoundationMetadata {
   version: string;
