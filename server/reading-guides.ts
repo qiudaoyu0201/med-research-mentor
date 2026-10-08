@@ -6,8 +6,15 @@ import { TaskScheduler, taskKey } from "./scheduler.ts";
 import { BudgetLedger } from "./budget.ts";
 import { save, list } from "./storage.ts";
 import { digest } from "./materials.ts";
+import { randomUUID } from "node:crypto";
 
-type Guide = ReadingStart & { id: string; budget: BudgetLedger["state"] };
+type Guide = ReadingStart & {
+  id: string;
+  cacheKey?: string;
+  requestKey?: string;
+  createdAt?: string;
+  budget: BudgetLedger["state"];
+};
 const guideRules =
   "根据给出的真实论文摘录整理中文阅读起点。先回应研究对象、问题、关键方法及可见结果，缺失部分不补造。summary 简短具体，sourceIds 只能用支持概述的摘录 ID；最多三个问题，具体涉及本研究的对象、方法或比较，避免所有论文通用的套话。无用能力声明和重复限制删去。只返回 JSON。";
 export class ReadingGuides {
@@ -44,7 +51,13 @@ export class ReadingGuides {
     });
   }
   get(paper: PaperBundle) {
-    return this.records.get(this.key(paper)) ?? readingStart(paper);
+    const key = this.key(paper);
+    return (
+      [...this.records.values()]
+        .filter((g) => (g.cacheKey ?? g.id) === key)
+        .sort((a, b) => (a.createdAt ?? "").localeCompare(b.createdAt ?? ""))
+        .at(-1) ?? readingStart(paper)
+    );
   }
   cancel(paperId: string) {
     for (const [id, controller] of this.controllers)
@@ -53,15 +66,24 @@ export class ReadingGuides {
   cancelAll() {
     for (const controller of this.controllers.values()) controller.abort();
   }
-  async start(paper: PaperBundle) {
-    const id = this.key(paper),
-      existing = this.records.get(id);
+  async start(paper: PaperBundle, requestKey?: string) {
+    const cacheKey = this.key(paper);
+    const previous =
+      requestKey &&
+      [...this.records.values()].find(
+        (g) => g.cacheKey === cacheKey && g.requestKey === requestKey,
+      );
+    if (previous) return previous;
+    const latest = this.get(paper);
+    const existing = "id" in latest ? (latest as Guide) : undefined;
     if (
       existing &&
-      (this.controllers.has(id) ||
-        !["failed", "cancelled"].includes(existing.status!))
+      (this.controllers.has(existing.id) ||
+        !["failed", "cancelled"].includes(existing.status!) ||
+        !requestKey)
     )
       return existing;
+    const id = existing ? randomUUID() : cacheKey;
     const sources = paper.sources
       .filter((s) => s.kind === "paper" && s.text.trim())
       .slice(0, 10)
@@ -79,6 +101,9 @@ export class ReadingGuides {
     const guide: Guide = {
       ...readingStart(paper),
       id,
+      cacheKey,
+      requestKey,
+      createdAt: new Date().toISOString(),
       budget: ledger.state,
       status: "queued",
       coverage: {

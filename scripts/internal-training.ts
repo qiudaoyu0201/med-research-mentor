@@ -309,6 +309,8 @@ try {
   let report: Report;
   try {
     report = await storage.read<Report>("training", "report");
+    if (report.quota?.extension)
+      throw new Error("v1.6已接续原账本，旧训练入口禁止派发。");
     if ((report as Report & { shortLoops?: unknown }).shortLoops)
       throw new Error(
         "本周期已进入 v1.4 产品诊断；使用 training:short，不恢复旧正式比较。",

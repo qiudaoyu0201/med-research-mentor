@@ -718,6 +718,8 @@ export class TaskManager {
             question: run.input.question,
             sources: materialPacket(sources, run.input.question),
             draft: generated.unit,
+            previous: run.input.previous ?? null,
+            previousIsContextOnly: true,
             deck: generated.deck,
             feedback,
             learningIntent: run.input.learningIntent ?? null,

@@ -1,6 +1,7 @@
 import type { TrainingCase } from "../evals/internal-training-cases.ts";
 import type { TrainingBatch } from "./internal-training.ts";
 import type { Attempt } from "../shared/types.ts";
+import { digest } from "./materials.ts";
 
 export const iterationQuotaVersion = "iteration-v1.1-70x3";
 export const recoveryProtocolVersion = "iteration-v1.3-isolated-c";
@@ -155,6 +156,19 @@ export function validateRecovery(
   }
 }
 export interface IterationQuota {
+  extension?: {
+    version: "workflow-v1.6";
+    authorizedBy: "user-latest-plan-implementation";
+    planHash: string;
+    priorQuotaHash: string;
+    baselineBatchIds: string[];
+    baselineBatchHash: string;
+    usedBefore: 42;
+    oldLimit: 70;
+    newLimit: 100;
+    added: 30;
+    createdAt: string;
+  };
   version: typeof iterationQuotaVersion;
   cycle: number;
   historicalAttempts: number;
@@ -163,6 +177,25 @@ export interface IterationQuota {
   originReportHash: string;
 }
 export function validateQuota(quota: IterationQuota) {
+  if (quota.extension) {
+    const { extension, ...original } = quota;
+    if (
+      quota.cycle !== 3 ||
+      extension.version !== "workflow-v1.6" ||
+      extension.authorizedBy !== "user-latest-plan-implementation" ||
+      extension.usedBefore !== 42 ||
+      extension.oldLimit !== 70 ||
+      extension.newLimit !== 100 ||
+      extension.added !== 30 ||
+      extension.priorQuotaHash !== digest(original) ||
+      !/^[a-f0-9]{64}$/.test(extension.planHash) ||
+      !/^[a-f0-9]{64}$/.test(extension.baselineBatchHash) ||
+      !Array.isArray(extension.baselineBatchIds) ||
+      new Set(extension.baselineBatchIds).size !==
+        extension.baselineBatchIds.length
+    )
+      throw new Error("阶段额度扩展或原 lineage 绑定无效。");
+  }
   if (
     quota.version !== iterationQuotaVersion ||
     !Number.isSafeInteger(quota.cycle) ||
@@ -191,6 +224,13 @@ export function iterationUsage(
   batches: TrainingBatch[],
 ) {
   validateQuota(quota);
+  if (
+    quota.extension &&
+    digest(
+      batches.filter((b) => quota.extension!.baselineBatchIds.includes(b.id)),
+    ) !== quota.extension.baselineBatchHash
+  )
+    throw new Error("扩展前历史调用账本发生变化，停止派发。");
   const attempts = batches
     .filter((b) => b.phase !== "M3")
     .flatMap((b) => b.budget.attempts);
@@ -198,13 +238,15 @@ export function iterationUsage(
     throw new Error("当前账本调用 ID 重复。");
   const current = attempts.length,
     product = quota.priorProductAttempts + current;
-  if (current > 70 || product > 210) throw new Error("新增产物额度超限。");
+  const cycleLimit = quota.extension?.newLimit ?? 70;
+  if (current > cycleLimit || product > 210)
+    throw new Error("新增产物额度超限。");
   return {
     current,
     product,
     historical: quota.historicalAttempts,
     combined: quota.historicalAttempts + product,
-    remainingCycle: 70 - current,
+    remainingCycle: cycleLimit - current,
     remainingProduct: 210 - product,
   };
 }
@@ -212,7 +254,10 @@ export function reserveIterationUnit(
   quota: IterationQuota,
   batches: TrainingBatch[],
   required: number,
+  entry?: "workflow-v1.6",
 ) {
+  if (quota.extension && entry !== "workflow-v1.6")
+    throw new Error("已接续 v1.6，旧入口禁止新派发；状态和历史仍可读取。");
   const usage = iterationUsage(quota, batches);
   if (
     !Number.isSafeInteger(required) ||

@@ -80,7 +80,7 @@ export function ResearchWorkspace() {
   );
   const [autoGuide, setAutoGuide] = useState(
     () =>
-      readPreference("research-auto-guide", ["true", "false"], "false") ===
+      readPreference("research-auto-reading", ["true", "false"], "true") ===
       "true",
   );
   const [wide, setWide] = useState(false),
@@ -103,7 +103,7 @@ export function ResearchWorkspace() {
     try {
       localStorage.setItem("research-navigation-collapsed", String(collapsed));
       localStorage.setItem("research-reader-pinned", String(pinned));
-      localStorage.setItem("research-auto-guide", String(autoGuide));
+      localStorage.setItem("research-auto-reading", String(autoGuide));
     } catch {}
   }, [collapsed, pinned, autoGuide]);
   function rememberAnswer() {
@@ -276,21 +276,6 @@ export function ResearchWorkspace() {
         );
         if (token === revision.current) {
           setStart(nextStart);
-          if (
-            autoGuide &&
-            nextStart.autoGenerate &&
-            !state.recentTurnIds.length
-          ) {
-            void researchApi<ReadingStart>(`/api/papers/${bound.id}/start`, {
-              automatic: true,
-            })
-              .then((guide) => {
-                if (token === revision.current) setStart(guide);
-              })
-              .catch((err) => {
-                if (token === revision.current) setError(err.message);
-              });
-          }
         }
       }
     } catch (err) {
@@ -625,7 +610,8 @@ export function ResearchWorkspace() {
           importRetry.current.file.lastModified !== files[0].lastModified)
       )
         importRetry.current = { file: files[0], id: crypto.randomUUID() };
-      const result = await importPaper(files, importRetry.current?.id);
+      const importId = importRetry.current?.id ?? crypto.randomUUID();
+      const result = await importPaper(files, importId);
       importRetry.current = undefined;
       await researchApi(
         `/api/papers/${result.paper.id}/metadata`,
@@ -633,13 +619,42 @@ export function ResearchWorkspace() {
         "PATCH",
       );
       await refresh();
-      if (token === revision.current) await selectPaper(result.paper);
+      if (token === revision.current) {
+        await selectPaper(result.paper);
+        const openedToken = revision.current;
+        if (
+          autoGuide &&
+          !result.error &&
+          !question.trim() &&
+          result.paper.parseStatus !== "needs-text"
+        ) {
+          const chat = await researchApi<ConversationState>(
+            `/api/papers/${result.paper.id}/chat`,
+            {},
+          );
+          if (
+            openedToken !== revision.current ||
+            composer.current?.value.trim()
+          )
+            return;
+          const started = await researchApi<{ turn: ResearchTurn | null }>(
+            `/api/papers/${result.paper.id}/reading-start`,
+            { importId, conversationId: chat.id },
+          );
+          if (openedToken === revision.current && started.turn)
+            setTurns((old) =>
+              old.some((t) => t.id === started.turn!.id)
+                ? old
+                : [...old, started.turn!],
+            );
+        }
+      }
       if (result.error) setError(result.error);
       else
         setNotice(
           result.paper.parseStatus === "needs-text"
             ? "文件已保留，需补充可读取正文。"
-            : "论文已导入，可以从一个问题开始。",
+            : "论文已导入，可继续中文带读，或直接告诉我你的问题。",
         );
     } catch (err) {
       setError((err as Error).message);
@@ -792,6 +807,7 @@ export function ResearchWorkspace() {
           mode: "live",
           paperId: pending.targetPaperId ?? targetPaperId,
           attachmentIds: pending.attachmentIds ?? attachmentIds,
+          expectedReadingRevision: state.readingSession?.revision ?? 0,
           ...(pending.selection?.sourceAnchor
             ? { sourceAnchor: pending.selection.sourceAnchor }
             : {}),
@@ -1232,20 +1248,34 @@ export function ResearchWorkspace() {
               )}
               <ResearchDiscussion
                 conversationId={conversation?.id}
+                readingSession={conversation?.readingSession}
                 turns={turns}
                 paper={paper}
                 start={start}
                 onGuide={() => {
-                  const token = revision.current;
-                  if (paper)
-                    void researchApi<ReadingStart>(
-                      `/api/papers/${paper.id}/start`,
-                      {},
-                    )
-                      .then((value) => {
-                        if (token === revision.current) setStart(value);
-                      })
-                      .catch((err) => setError(err.message));
+                  void action(async () => {
+                    const state = await ensure();
+                    const token = revision.current;
+                    const turn = await researchApi<ResearchTurn>(
+                      `/api/conversations/${state.id}/messages`,
+                      {
+                        clientMessageId: crypto.randomUUID(),
+                        question:
+                          "请用中文带我读这篇论文，从第一个可读单元开始。",
+                        mode: "live",
+                        paperId: state.paperId,
+                        readingAction: "start",
+                        expectedReadingRevision:
+                          state.readingSession?.revision ?? 0,
+                      },
+                    );
+                    if (token === revision.current)
+                      setTurns((old) =>
+                        old.some((t) => t.id === turn.id)
+                          ? old
+                          : [...old, turn],
+                      );
+                  });
                 }}
                 onCancelGuide={() =>
                   paper &&
@@ -1556,7 +1586,7 @@ export function ResearchWorkspace() {
                 label="调整聊天与阅读宽度"
                 value={layout.reading}
                 min={320}
-                max={Math.max(320, Math.min(420, contentWidth - 727))}
+                max={Math.max(320, Math.min(560, contentWidth - 727))}
                 reverse
                 scale={1}
                 onChange={(v) => resize("reading", v)}

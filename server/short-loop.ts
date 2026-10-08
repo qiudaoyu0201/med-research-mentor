@@ -103,6 +103,8 @@ export function reserveLoop(
   freezeHash: string,
   required = 4,
 ) {
+  if (report.quota.extension)
+    throw new Error("已接续 v1.6，旧短闭环入口不再派发。");
   assertLoopHistory(report);
   const state = report.shortLoops!;
   if (state.runs.some((r) => r.lane === lane && r.caseId === caseId))

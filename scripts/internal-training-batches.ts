@@ -31,6 +31,8 @@ interface Report {
 try {
   for (let index = 0; index < 8; index++) {
     const report = await store.read<Report>("training", "report");
+    if (report.quota?.extension)
+      throw new Error("v1.6已接续原账本，旧批次入口禁止派发。");
     assertContinuation(report.batches);
     if (
       [

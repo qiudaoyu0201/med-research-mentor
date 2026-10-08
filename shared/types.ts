@@ -347,6 +347,8 @@ export interface AssistantPlan {
   estimatedCalls: number;
 }
 export interface AssistantMessage {
+  readingAction?: import("./reading-session.ts").ReadingAction;
+  expectedReadingRevision?: number;
   speechScript?: boolean;
   learningIntent?: Partial<LearningPreferences> & {
     goal?: LearningGoal;
@@ -371,6 +373,8 @@ export interface AssistantMessage {
   deckEdit?: { versionId: string; slideIndex: number };
 }
 export interface ConversationState {
+  readingSession?: import("./reading-session.ts").ReadingSession;
+  readingHistory?: import("./reading-session.ts").ReadingSession[];
   learningPreferences?: LearningPreferences;
   explanationDepth?: ExplanationDepth;
   preferenceRevision?: number;

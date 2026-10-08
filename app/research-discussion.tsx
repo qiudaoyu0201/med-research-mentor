@@ -153,6 +153,7 @@ export function ResearchDiscussion({
   turns,
   paper,
   conversationId,
+  readingSession,
   start,
   onGuide,
   onCancelGuide,
@@ -174,6 +175,7 @@ export function ResearchDiscussion({
   turns: ResearchTurn[];
   paper?: PaperBundle;
   conversationId?: string;
+  readingSession?: import("../shared/reading-session.ts").ReadingSession;
   start?: ReadingStart;
   onGuide: () => void;
   onCancelGuide: () => void;
@@ -235,7 +237,37 @@ export function ResearchDiscussion({
       setCancelling((old) => old.filter((id) => id !== turn.id));
     }
   }
-  const scrollKey = `research-chat-scroll:${paper?.id ?? conversationId ?? "idea"}`;
+  const scrollKey = `research-chat-scroll:${paper?.id ?? "idea"}:${conversationId ?? "new"}`;
+  const follow = useRef(false);
+  const previousTurns = useRef<
+    { key: string; statuses: Map<string, string> } | undefined
+  >(undefined);
+  const [newContent, setNewContent] = useState(false);
+  useEffect(() => {
+    const el = messages.current;
+    if (!el) return;
+    const prior = previousTurns.current;
+    const changed =
+      prior?.key === scrollKey &&
+      turns.some(
+        (t) =>
+          !prior.statuses.has(t.id) ||
+          (prior.statuses.get(t.id) !== t.status && t.status === "completed"),
+      );
+    previousTurns.current = {
+      key: scrollKey,
+      statuses: new Map(turns.map((t) => [t.id, t.status])),
+    };
+    if (!prior || prior.key !== scrollKey) {
+      setNewContent(false);
+      follow.current = el.scrollHeight - el.clientHeight - el.scrollTop < 70;
+      return;
+    }
+    if (changed && follow.current) {
+      el.scrollTop = el.scrollHeight;
+      setNewContent(false);
+    } else if (changed) setNewContent(true);
+  }, [turns.length, turns.map((t) => `${t.id}:${t.status}`).join("|")]);
   useEffect(() => {
     setSelectedSentence(undefined);
     try {
@@ -262,17 +294,47 @@ export function ResearchDiscussion({
       className="rp-messages rw-messages"
       aria-label="连续研究讨论"
       onScroll={(e) => {
+        const el = e.currentTarget;
+        follow.current = el.scrollHeight - el.clientHeight - el.scrollTop < 70;
+        if (follow.current) setNewContent(false);
         requestAnimationFrame(() => requestAnimationFrame(measureAnswers));
         try {
           localStorage.setItem(scrollKey, String(e.currentTarget.scrollTop));
         } catch {}
       }}
     >
+      {readingSession && (
+        <div className="rw-reading-progress" role="status">
+          <small>{readingSession.label}</small>
+          <div className="rw-actions">
+            {["继续带读", ...(readingSession.topic ? ["回到主线"] : [])].map(
+              (q) => (
+                <button key={q} disabled={busy} onClick={() => onSuggest(q)}>
+                  {q}
+                </button>
+              ),
+            )}
+          </div>
+        </div>
+      )}
+      {newContent && (
+        <button
+          className="rw-latest-content"
+          onClick={() => {
+            if (messages.current)
+              messages.current.scrollTop = messages.current.scrollHeight;
+            follow.current = true;
+            setNewContent(false);
+          }}
+        >
+          回到最新内容
+        </button>
+      )}
       {!turns.length && (
         <section className="rp-welcome">
           <div className="rp-welcome-icon">◎</div>
           <h2>
-            {paper ? "从这篇论文的一个问题开始" : "从论文或你的研究想法开始"}
+            {paper ? "中文带读，也可以直接提问" : "从论文或你的研究想法开始"}
           </h2>
           {paper ? (
             <>
@@ -312,7 +374,9 @@ export function ResearchDiscussion({
                 (["queued", "running"].includes(start?.status ?? "") ? (
                   <button onClick={onCancelGuide}>停止整理研究起点</button>
                 ) : (
-                  <button onClick={onGuide}>整理研究起点</button>
+                  <button disabled={busy} onClick={onGuide}>
+                    开始中文带读
+                  </button>
                 ))}
               {start?.error && <p role="alert">{start.error}</p>}
               {(start?.status === "completed"

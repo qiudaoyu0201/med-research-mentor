@@ -29,6 +29,82 @@ const budget = object({
   deadline: str,
   revisions: strings,
 });
+const bibliography = object({
+  pmid: str,
+  doi: str.optional(),
+  authors: strings,
+  year: str,
+  journal: str,
+  level: z.enum(["metadata", "abstract"]),
+  fetchedAt: str,
+  crossref: z.enum(["matched", "mismatch", "unavailable", "no-doi"]),
+  notices: strings,
+});
+const referenceFields = {
+  id: str,
+  title: str,
+  locator: str,
+  excerpt: str,
+  hash: str,
+};
+const sourceRef = z.union([
+  object({
+    ...referenceFields,
+    sourceType: z.literal("pubmed"),
+    bibliography,
+    url: str,
+  }),
+  object({
+    ...referenceFields,
+    sourceType: z.literal("local").optional(),
+    paperId: str,
+    sourceVersion: str,
+    sourceId: str,
+  }),
+]);
+const readingRange = object({
+  unitId: str,
+  sourceId: str,
+  sourceHash: str,
+  excerptHash: str,
+  start: num.int().min(0),
+  end: num.int().min(1),
+  locator: str,
+});
+const readingSession = object({
+  paperId: str,
+  paperVersion: str,
+  revision: num.int().min(0),
+  cursor: num.int().min(0),
+  mainCursor: num.int().min(0),
+  topic: str.nullable(),
+  delivered: z.array(readingRange),
+  lastRanges: z.array(readingRange),
+  lastTurnId: str,
+  summaryDelivered: bool,
+  label: str,
+});
+const literature = object({
+  id: str,
+  topicVersion: str,
+  query: str,
+  queryReason: str,
+  startedAt: str,
+  status: z.enum(["completed", "empty", "failed", "cancelled"]),
+  requests: z.array(
+    object({
+      url: str,
+      status: num.nullable(),
+      at: str,
+      error: str.optional(),
+    }),
+  ),
+  candidatePmids: strings,
+  selected: z.array(sourceRef),
+  selectionReason: str,
+  limitations: strings,
+  excluded: z.array(sourceRef).optional(),
+});
 const topic = object({
   id: str,
   version: str,
@@ -36,18 +112,7 @@ const topic = object({
   conditions: str,
   studyTypes: strings,
   typeStatus: str,
-  sources: z.array(
-    object({
-      id: str,
-      title: str,
-      locator: str,
-      excerpt: str,
-      hash: str,
-      paperId: str,
-      sourceVersion: str,
-      sourceId: str,
-    }),
-  ),
+  sources: z.array(sourceRef),
   learningPreferences: object({ verbosity: str, focus: str }),
 });
 const content = object({
@@ -150,6 +215,8 @@ const shapes: Record<string, z.ZodType> = {
     status: str,
   }),
   conversations: object({
+    readingSession: readingSession.optional(),
+    readingHistory: z.array(readingSession).optional(),
     id: str,
     version: num,
     paperId: str.nullable(),
@@ -218,6 +285,7 @@ const shapes: Record<string, z.ZodType> = {
     archived: bool,
   }),
   "research-plan-jobs": object({
+    literature: literature.optional(),
     id: str,
     planId: str,
     status: str,
@@ -240,6 +308,7 @@ const shapes: Record<string, z.ZodType> = {
     height: num.positive(),
     purpose: z.enum(["page", "original", "legacy", "crop"]),
   }),
+  "literature-searches": literature,
   "attachment-originals": object({ base64: str }),
   attachments: object({
     id: str,

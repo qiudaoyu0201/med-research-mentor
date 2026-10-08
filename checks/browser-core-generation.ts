@@ -150,11 +150,8 @@ try {
     await page
       .getByRole("checkbox", { name: "同时生成完整演讲稿", exact: true })
       .isChecked(),
-    false,
+    true,
   );
-  await page
-    .getByRole("checkbox", { name: "同时生成完整演讲稿", exact: true })
-    .check();
   await page.getByRole("button", { name: "生成汇报", exact: true }).click();
   await page.waitForFunction(
     () =>
@@ -176,7 +173,7 @@ try {
   );
   assert.equal(message.speechScript, false);
   report.assertions.push(
-    "三个核心入口保持原有布局；汇报要求为空可直接生成，完整稿显式可选，通用提示不预设实验论文",
+    "三个核心入口保持原有布局；汇报要求为空可直接生成，默认包含完整稿且可关闭，通用提示不预设实验论文",
   );
   await page.getByText("完整演讲稿", { exact: true }).click();
   await page.getByRole("button", { name: "补写演讲稿", exact: true }).click();

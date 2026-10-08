@@ -70,7 +70,7 @@ export const sectionSchema = z
 export const planContentSchema = z
   .object({
     title: text(200),
-    sections: z.array(sectionSchema).min(1).max(8),
+    sections: z.array(sectionSchema).min(1).max(12),
     assumptions: z.array(text(500)).max(15),
     questions: z.array(text(500)).max(3),
     limitations: z.array(text(700)).max(15),
@@ -101,6 +101,7 @@ export const planReviewSchema = z
   .strict();
 export const planJobInputSchema = z
   .object({
+    retrieveLiterature: z.boolean().default(false),
     requestKey: researchId,
     expectedVersion: researchId.nullable(),
     expectedTopicVersion: researchId,

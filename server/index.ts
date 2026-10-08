@@ -217,6 +217,23 @@ app.delete("/api/research-plans/:id", async (req, res) => {
   res.json({ ok: true });
 });
 app.get("/api/research-plans/:id/exports/:versionId", (req, res) => {
+  if (req.query.format === "docx") {
+    const buffer = researchPlans.exportDocx(
+      req.params.id,
+      researchId.parse(req.params.versionId),
+    );
+    return res
+      .type(
+        "application/vnd.openxmlformats-officedocument.wordprocessingml.document",
+      )
+      .setHeader(
+        "Content-Disposition",
+        `attachment; filename="research-plan-${req.params.versionId}.docx"`,
+      )
+      .send(buffer);
+  }
+  if (req.query.format && req.query.format !== "md")
+    throw new Error("不支持该导出格式。");
   const markdown = researchPlans.exportMarkdown(
     req.params.id,
     researchId.parse(req.params.versionId),
@@ -387,14 +404,69 @@ app.get("/api/papers/:id/start", async (req, res) => {
       Boolean(guide.excerpt),
   });
 });
+app.post("/api/papers/:id/reading-start", async (req, res) => {
+  const body = z
+    .object({ importId: entityId, conversationId: entityId })
+    .strict()
+    .parse(req.body);
+  const receipt = await read<{ paperId: string }>(
+    "paper-imports",
+    body.importId,
+  );
+  const state = assistant.conversations.get(body.conversationId);
+  if (receipt.paperId !== req.params.id || state.paperId !== req.params.id)
+    throw new Error("导入与论文会话不匹配。");
+  const paper = await paperById(req.params.id);
+  if (
+    !paper.sources.some((s) => s.kind === "paper" && !s.image && s.text.trim())
+  )
+    return res.json({ turn: null, reason: "没有可读取正文，请补原文。" });
+  const clientMessageId = `reading-${digest({ importId: body.importId, conversationId: state.id, version: paper.version }).slice(0, 40)}`;
+  const old = [...assistant.turns.values()].find(
+    (t) =>
+      t.conversationId === state.id &&
+      t.message.clientMessageId === clientMessageId,
+  );
+  if (old) return res.json({ turn: old });
+  if (state.recentTurnIds.length)
+    return res.json({
+      turn: null,
+      reason: "已有讨论，保留当前问题与进度，不自动重复起步。",
+    });
+  readingGuides.cancel(paper.id);
+  res
+    .status(202)
+    .json({
+      turn: await assistant.submit(state.id, {
+        clientMessageId,
+        question: "请用中文带我读这篇论文，从研究问题和第一个原文单元开始。",
+        mode: "live",
+        paperId: paper.id,
+        readingAction: "start",
+        expectedReadingRevision: 0,
+      }),
+    });
+});
 app.post("/api/papers/:id/start", async (req, res) => {
-  const body = z.object({ automatic: z.boolean().optional() }).parse(req.body);
+  const body = z
+    .object({
+      automatic: z.boolean().optional(),
+      requestKey: entityId.optional(),
+    })
+    .parse(req.body);
   const paper = await paperById(req.params.id);
   if (body.automatic && process.env.TUTOR_READING_GUIDES === "manual")
     return res.json(readingGuides.get(paper));
   if (body.automatic && assistant.scheduler.has(taskKey(paper.id, "guide")))
     return res.json(readingGuides.get(paper));
-  res.status(202).json(await readingGuides.start(paper));
+  res
+    .status(202)
+    .json(
+      await readingGuides.start(
+        paper,
+        body.automatic ? undefined : body.requestKey,
+      ),
+    );
 });
 app.post("/api/papers/:id/start/cancel", (req, res) => {
   readingGuides.cancel(req.params.id);

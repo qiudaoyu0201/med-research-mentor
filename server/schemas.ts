@@ -182,6 +182,10 @@ export const conversationSchema = z.object({
   profileId: z.enum(["beginner", "methods", "reasoning"]).optional(),
 });
 export const messageSchema = z.object({
+  readingAction: z
+    .enum(["start", "continue", "deepen", "jump", "long", "summary", "resume"])
+    .optional(),
+  expectedReadingRevision: z.number().int().min(0).optional(),
   speechScript: z.boolean().optional(),
   learningIntent: learningRequestSchema.optional(),
   slideCount: z.number().int().min(1).max(16).optional(),

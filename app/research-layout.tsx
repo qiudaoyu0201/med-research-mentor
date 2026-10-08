@@ -8,7 +8,7 @@ export const defaultLayout = {
 };
 const bounds = {
   navigation: [200, 280],
-  reading: [320, 420],
+  reading: [320, 560],
   composer: [110, 300],
   pptList: [180, 380],
   pptEditor: [260, 480],
@@ -44,9 +44,6 @@ export function useResearchLayout() {
   function update(key: keyof typeof defaultLayout, value: number) {
     setLayout((old) => {
       const next = { ...old, [key]: value };
-      try {
-        localStorage.setItem("research-layout-v2", JSON.stringify(next));
-      } catch {}
       return next;
     });
   }
@@ -58,6 +55,14 @@ export function useResearchLayout() {
     } catch {}
     setLayout(defaultLayout);
   }
+  useEffect(() => {
+    const timer = setTimeout(() => {
+      try {
+        localStorage.setItem("research-layout-v2", JSON.stringify(layout));
+      } catch {}
+    }, 200);
+    return () => clearTimeout(timer);
+  }, [layout]);
   return { layout, update, reset };
 }
 export function Splitter({

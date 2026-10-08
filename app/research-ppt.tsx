@@ -18,6 +18,13 @@ import { slideImageKey, preferredSources } from "../shared/image-region.ts";
 
 const done = (v: DeckVersion) =>
   ["completed", "failed", "cancelled", "interrupted"].includes(v.status);
+const storedDraft = (key: string) => {
+  try {
+    return localStorage.getItem(key);
+  } catch {
+    return null;
+  }
+};
 export function ResearchPpt({
   paper,
   conversation,
@@ -64,9 +71,10 @@ export function ResearchPpt({
     [name, setName] = useState("");
   const [useNotes, setUseNotes] = useState(true);
   const [editing, setEditing] = useState(false);
-  const [withSpeech, setWithSpeech] = useState(false),
+  const [withSpeech, setWithSpeech] = useState(true),
     [speechDraft, setSpeechDraft] = useState("");
   const [speechEditing, setSpeechEditing] = useState(false);
+  const [speechRequest, setSpeechRequest] = useState("");
   const [cancelling, setCancelling] = useState<string[]>([]),
     [cancelledTurns, setCancelledTurns] = useState<string[]>([]),
     [notice, setNotice] = useState("");
@@ -103,6 +111,15 @@ export function ResearchPpt({
     draft &&
     JSON.stringify(draft) !== JSON.stringify(current.outline.slides[page]);
   const speechChanged = speechDraft !== (current?.outline.speechScript ?? "");
+  const unsavedPages =
+    current?.outline.slides.flatMap((slide, i) => {
+      try {
+        const saved = localStorage.getItem(draftKey(current.id, i));
+        return saved && saved !== JSON.stringify(slide) ? [i + 1] : [];
+      } catch {
+        return [];
+      }
+    }) ?? [];
   const imageKey = draft && slideImageKey(draft);
   const imageSource = paper?.sources.find((s) => s.id === draft?.imageSource);
   const imageAsset = imageKey && current?.displayAssets?.[imageKey];
@@ -116,6 +133,9 @@ export function ResearchPpt({
     : originalImageUrl;
   useEffect(() => {
     setSpeechEditing(false);
+    setSpeechRequest(
+      storedDraft(`research-speech-request:${current?.id}`) ?? "",
+    );
     try {
       setSpeechDraft(
         localStorage.getItem(`research-speech-draft:${current?.id}`) ??
@@ -171,22 +191,47 @@ export function ResearchPpt({
             previousStatus.current.get(v.id) !== "completed",
         );
         if (completed) {
-          if (completed.operation === "speech" && completed.parentId)
-            localStorage.removeItem(
+          if (completed.parentId) {
+            const parent = values.find((v) => v.id === completed.parentId);
+            const priorSpeech = localStorage.getItem(
               `research-speech-draft:${completed.parentId}`,
             );
-          if (completed.parentId) {
+            if (
+              priorSpeech !== null &&
+              priorSpeech !== (parent?.outline.speechScript ?? "") &&
+              (completed.operation !== "speech" ||
+                priorSpeech !== completed.outline.speechScript)
+            ) {
+              localStorage.setItem(
+                `${completed.operation === "speech" ? "research-speech-conflict" : "research-speech-draft"}:${completed.id}`,
+                priorSpeech,
+              );
+              if (completed.operation !== "speech")
+                localStorage.setItem(
+                  `research-speech-draft-base:${completed.id}`,
+                  completed.parentId,
+                );
+              setNotice(
+                "旧讲稿修改已保留。先保存并核对页面，再比较讲稿与新页面的对应关系后保存核对。",
+              );
+            }
             completed.outline.slides.forEach((_slide, i) => {
               const prior = localStorage.getItem(
                 draftKey(completed.parentId!, i),
               );
-              if (prior && i !== completed.slideIndex)
-                localStorage.setItem(draftKey(completed.id, i), prior);
+              if (
+                prior &&
+                prior !== JSON.stringify(parent?.outline.slides[i]) &&
+                prior !== JSON.stringify(completed.outline.slides[i])
+              ) {
+                if (i === completed.slideIndex)
+                  localStorage.setItem(
+                    `research-ppt-conflict:${completed.id}:${i}`,
+                    prior,
+                  );
+                else localStorage.setItem(draftKey(completed.id, i), prior);
+              }
             });
-            if (completed.slideIndex !== undefined)
-              localStorage.removeItem(
-                draftKey(completed.parentId, completed.slideIndex),
-              );
           }
           setSelected(completed.id);
           void researchApi<ConversationState>(
@@ -339,6 +384,9 @@ export function ResearchPpt({
         `/api/deck-versions/${current.id}/speech`,
         {
           conversationId: current.conversationId,
+          question: manual
+            ? "保存手动演讲稿，核对事实与稿页对应关系。"
+            : speechRequest || "根据当前已保存页面补写或更新完整演讲稿。",
           ...(manual ? { speechScript: speechDraft } : {}),
         },
       );
@@ -651,6 +699,12 @@ export function ResearchPpt({
                   </details>
                   <details>
                     <summary>完整演讲稿</summary>
+                    {!!unsavedPages.length && (
+                      <p className="hint">
+                        第 {unsavedPages.join("、")}{" "}
+                        页还有未保存修改。请先保存并核对这些页面，再更新讲稿；导出对应已保存版本。
+                      </p>
+                    )}
                     {!current.outline.speechScript &&
                       current.parentId &&
                       versions.find((v) => v.id === current.parentId)?.outline
@@ -700,7 +754,7 @@ export function ResearchPpt({
                           busy ||
                           active.length > 0 ||
                           current.status !== "completed" ||
-                          Boolean(changed) ||
+                          unsavedPages.length > 0 ||
                           speechChanged
                         }
                         onClick={() => void speech(false)}
@@ -716,7 +770,7 @@ export function ResearchPpt({
                               busy ||
                               active.length > 0 ||
                               !speechDraft.trim() ||
-                              Boolean(changed)
+                              unsavedPages.length > 0
                             }
                             onClick={() => void speech(true)}
                           >
@@ -753,6 +807,69 @@ export function ResearchPpt({
                         </>
                       )}
                     </div>
+                    <label>
+                      讲稿修改要求
+                      <textarea
+                        aria-label="讲稿修改要求"
+                        maxLength={2000}
+                        value={speechRequest}
+                        placeholder="例如：补充实验为什么这样设计，缩短开场"
+                        onChange={(e) => {
+                          setSpeechRequest(e.target.value);
+                          localStorage.setItem(
+                            `research-speech-request:${current.id}`,
+                            e.target.value,
+                          );
+                        }}
+                      />
+                    </label>
+                    {!!speechRequest.trim() && (
+                      <button
+                        disabled={
+                          busy ||
+                          active.length > 0 ||
+                          unsavedPages.length > 0 ||
+                          speechChanged ||
+                          current.status !== "completed"
+                        }
+                        onClick={() => void speech(false)}
+                      >
+                        按要求修改讲稿并核对
+                      </button>
+                    )}
+                    {storedDraft(`research-speech-conflict:${current.id}`) !==
+                      null && (
+                      <button
+                        onClick={() => {
+                          const prior = storedDraft(
+                            `research-speech-conflict:${current.id}`,
+                          );
+                          if (prior !== null) {
+                            setSpeechDraft(prior);
+                            try {
+                              localStorage.setItem(
+                                `research-speech-draft:${current.id}`,
+                                prior,
+                              );
+                            } catch {}
+                            setSpeechEditing(true);
+                            setNotice(
+                              "已恢复旧讲稿修改供比较，保存后需重新核对。",
+                            );
+                          }
+                        }}
+                      >
+                        恢复另一份未保存讲稿供比较
+                      </button>
+                    )}
+                    {(changed ||
+                      localStorage.getItem(
+                        `research-speech-draft-base:${current.id}`,
+                      )) && (
+                      <p className="hint">
+                        页面和讲稿分别保留。先保存并核对页面；讲稿基于旧页面时需比较并重新核对，不能作为新页面的已核对讲稿导出。
+                      </p>
+                    )}
                   </details>
                   <details>
                     <summary>核对结果与版本差异</summary>
@@ -850,6 +967,31 @@ export function ResearchPpt({
               >
                 {current && draft && (
                   <>
+                    {storedDraft(
+                      `research-ppt-conflict:${current.id}:${page}`,
+                    ) !== null && (
+                      <button
+                        onClick={() => {
+                          const prior = storedDraft(
+                            `research-ppt-conflict:${current.id}:${page}`,
+                          );
+                          if (prior) {
+                            try {
+                              changeDraft(JSON.parse(prior));
+                              setNotice(
+                                "已恢复旧页面修改供比较，保存后需重新核对。",
+                              );
+                            } catch {
+                              setError(
+                                "旧页面草稿无法读取，已保留原记录；当前保存版本仍可查看。",
+                              );
+                            }
+                          }
+                        }}
+                      >
+                        恢复另一份未保存页面供比较
+                      </button>
+                    )}
                     <h2>编辑第 {page + 1} 页</h2>
                     <button onClick={() => setEditing(false)}>返回预览</button>
                     <p role="status">

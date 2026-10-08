@@ -18,6 +18,7 @@ import "./research-plan.css";
 
 const statusLabels: Record<PlanJob["status"], string> = {
   queued: "等待生成",
+  searching: "正在检索并核验文献",
   generating: "正在起草",
   reviewing: "草稿已保存，正在核对",
   completed: "生成成功",
@@ -78,7 +79,9 @@ export function ResearchPlanPanel({
   const [draft, setDraft] = useState<Draft>();
   const [topic, setTopic] = useState<TopicDraft>(
     () =>
-      localRead<TopicDraft>("research-plan-new-topic") ?? {
+      (initialQuestion.trim()
+        ? undefined
+        : localRead<TopicDraft>("research-plan-new-topic")) ?? {
         question: initialQuestion,
         conditions: "",
         studyTypes: [],
@@ -94,7 +97,8 @@ export function ResearchPlanPanel({
     [instruction, setInstruction] = useState("");
   const [scope, setScope] = useState<
     "direction" | "design-draft" | "full-plan"
-  >("design-draft");
+  >("full-plan");
+  const [retrieveLiterature, setRetrieveLiterature] = useState(true);
   const [sectionId, setSectionId] = useState("");
   const [working, setWorking] = useState(false),
     [error, setError] = useState(""),
@@ -142,11 +146,12 @@ export function ResearchPlanPanel({
       conditions: p.topic.conditions,
       studyTypes: p.topic.studyTypes,
       typeStatus: p.topic.typeStatus,
-      sources: p.topic.sources.map(({ paperId, sourceVersion, sourceId }) => ({
-        paperId,
-        sourceVersion,
-        sourceId,
-      })),
+      sources: p.topic.sources.flatMap(
+        ({ paperId, sourceVersion, sourceId }) =>
+          paperId && sourceVersion && sourceId
+            ? [{ paperId, sourceVersion, sourceId }]
+            : [],
+      ),
       learningPreferences: p.topic.learningPreferences,
     };
   }
@@ -350,6 +355,7 @@ export function ResearchPlanPanel({
             action: actionName,
             instruction,
             requestedScope: scope,
+            retrieveLiterature: actionName !== "review" && retrieveLiterature,
             ...(sectionId && actionName === "revise" ? { sectionId } : {}),
           };
     pending.current = { planId: target.id, body };
@@ -693,6 +699,15 @@ export function ResearchPlanPanel({
               <summary>{current ? "调整方案" : "起草方案"}</summary>
               <details>
                 <summary>生成选项（可选）</summary>
+                <label>
+                  <input
+                    type="checkbox"
+                    checked={retrieveLiterature}
+                    onChange={(e) => setRetrieveLiterature(e.target.checked)}
+                  />
+                  自动检索 PubMed
+                  并核验文献（读取摘要，网络失败可改为已有来源起草）
+                </label>
                 <div className="rplan-fields">
                   <label>
                     本次范围
@@ -811,6 +826,41 @@ export function ResearchPlanPanel({
                 <div className="rplan-job" role="status">
                   <strong>{statusLabels[latestJob.status]}</strong>
                   {latestJob.error && <p>{latestJob.error}</p>}
+                  {latestJob.literature && (
+                    <details>
+                      <summary>
+                        文献检索与依据 · {latestJob.literature.selected.length}{" "}
+                        篇
+                      </summary>
+                      <p>检索式：{latestJob.literature.query}</p>
+                      <p>{latestJob.literature.queryReason}</p>
+                      <p>{latestJob.literature.selectionReason}</p>
+                      {latestJob.literature.selected.map((r) => (
+                        <details key={r.id}>
+                          <summary>
+                            {r.title} · {r.bibliography?.year}
+                          </summary>
+                          <p>{r.excerpt}</p>
+                          <p>
+                            实际读取：
+                            {r.bibliography?.level === "abstract"
+                              ? "摘要"
+                              : "元数据"}
+                            ；Crossref：{r.bibliography?.crossref}
+                          </p>
+                          {r.bibliography?.notices.map((n, i) => (
+                            <p key={i}>{n}</p>
+                          ))}
+                          <a href={r.url} target="_blank" rel="noreferrer">
+                            打开 PubMed 原记录
+                          </a>
+                        </details>
+                      ))}
+                      {latestJob.literature.limitations.map((l, i) => (
+                        <p key={i}>{l}</p>
+                      ))}
+                    </details>
+                  )}
                   <details>
                     <summary>任务详情</summary>
                     <small>
@@ -868,11 +918,18 @@ export function ResearchPlanPanel({
                     job.id === shown.review?.jobId &&
                     job.status === "completed",
                 ) ? (
-                  <a
-                    href={`/api/research-plans/${plan.id}/exports/${shown.id}`}
-                  >
-                    导出此保存版 Markdown
-                  </a>
+                  <>
+                    <a
+                      href={`/api/research-plans/${plan.id}/exports/${shown.id}?format=docx`}
+                    >
+                      下载此保存版 Word 文档
+                    </a>
+                    <a
+                      href={`/api/research-plans/${plan.id}/exports/${shown.id}`}
+                    >
+                      导出此保存版 Markdown
+                    </a>
+                  </>
                 ) : shown ? (
                   <>
                     <button disabled title="方案需成功完成核对后才能导出">
@@ -1067,7 +1124,9 @@ export function ResearchPlanPanel({
                                 </summary>
                                 <p>{r.excerpt}</p>
                                 <small>
-                                  {r.paperId}@{r.sourceVersion}
+                                  {r.bibliography
+                                    ? `PMID ${r.bibliography.pmid} · ${r.bibliography.level === "abstract" ? "摘要" : "元数据"} · Crossref ${r.bibliography.crossref}`
+                                    : `${r.paperId}@${r.sourceVersion}`}
                                 </small>
                               </details>
                             )

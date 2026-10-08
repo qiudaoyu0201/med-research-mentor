@@ -1,4 +1,9 @@
 import { randomUUID } from "node:crypto";
+import {
+  readingAction,
+  prepareReading,
+  completeReading,
+} from "./reading-session.ts";
 import type {
   AssistantMessage,
   AssistantPlan,
@@ -313,6 +318,15 @@ export class AssistantService {
       return duplicate;
     }
     const state = this.conversations.get(conversationId);
+    const action = readingAction(message, state.readingSession);
+    if (
+      action &&
+      message.expectedReadingRevision !== undefined &&
+      message.expectedReadingRevision !== (state.readingSession?.revision ?? 0)
+    )
+      throw new Error(
+        "带读进度已经变化，请保留问题并刷新后继续。未发出模型请求。",
+      );
     if (
       state.mainChat &&
       message.paperId !== undefined &&
@@ -594,7 +608,7 @@ export class AssistantService {
         }
       }
       const admitted = checked.flatMap((a) => attachmentSource(a) ?? []);
-      const paper = withFoundationSources({
+      let paper = withFoundationSources({
         ...original,
         sources: [
           ...original.sources.filter(
@@ -627,6 +641,23 @@ export class AssistantService {
       }
       state.paperId = binding;
       state.sourceVersion = paper.version;
+      const action = readingAction(message, state.readingSession);
+      const reading = action
+        ? prepareReading(
+            original,
+            state.readingSession,
+            action,
+            message.question,
+          )
+        : undefined;
+      const readingRevision = state.readingSession?.revision ?? 0;
+      if (
+        reading &&
+        message.expectedReadingRevision !== undefined &&
+        message.expectedReadingRevision !== readingRevision
+      )
+        throw new Error("排队期间带读进度已经变化，当前问题保留，未重发。");
+      if (reading) paper = withFoundationSources(reading.paper);
       state.profileId = message.profileId ?? state.profileId;
       const depthRequest = requestedDepth(message.question, message.depth);
       const intent = resolveLearningIntent(message, state);
@@ -826,8 +857,14 @@ export class AssistantService {
         !(message.sourceIds ?? []).some((id) =>
           paper.sources.some((s) => s.id === id && s.kind === "paper"),
         );
-      const routed =
-        message.focus || message.sourceAnchor || message.figureSourceId
+      const routed = reading
+        ? {
+            ...message,
+            question: reading.goal,
+            module: "paper" as const,
+            sourceIds: reading.paper.sources.map((s) => s.id),
+          }
+        : message.focus || message.sourceAnchor || message.figureSourceId
           ? {
               ...message,
               module: message.figureSourceId
@@ -1069,6 +1106,9 @@ export class AssistantService {
               checks: {
                 readability:
                   !direct &&
+                  (!reading ||
+                    /看不懂|不理解/.test(message.question) ||
+                    message.readabilityCheck === true) &&
                   (!plan.modules.includes("ppt") ||
                     plan.modules.includes("figure") ||
                     message.readabilityCheck === true) &&
@@ -1239,10 +1279,58 @@ export class AssistantService {
         turn.status = "completed";
       }
       signal.throwIfAborted();
+      if (reading && turn.status === "completed") {
+        const latest = this.conversations.get(state.id);
+        if (
+          (latest.readingSession?.revision ?? 0) !== readingRevision ||
+          latest.paperId !== paper.id
+        )
+          throw new Error(
+            "带读进度或论文已变化，已生成草稿保留在任务中，请刷新比较。",
+          );
+        const run = turn.runId ? this.manager.runs.get(turn.runId) : undefined;
+        if (
+          !run?.result ||
+          run.status !== "completed" ||
+          run.review?.issues.some(
+            (i) => !i.resolved && i.severity === "blocking",
+          )
+        )
+          throw new Error("必要核对未完成，带读进度不推进。");
+        const snapshot = run.materials?.at(-1);
+        const packet =
+          snapshot && materialPacket(snapshot.sources, run.input.question);
+        if (
+          !packet ||
+          reading.paper.sources.some(
+            (s) =>
+              !packet.references.some(
+                (r) =>
+                  r.id === s.id &&
+                  packet.blocks.some(
+                    (b) => b.hash === r.blockHash && b.text === s.text,
+                  ),
+              ),
+          )
+        )
+          throw new Error("实际提供的原文范围与带读单元不一致，进度未推进。");
+        // Save the validated answer before committing its coverage. Restore reads saved turns;
+        // a browser paint or refresh never dispatches a replacement answer.
+        await this.persist("turns", turn.id, turn);
+        if (reading.action === "start" && state.readingSession)
+          state.readingHistory = [
+            ...(state.readingHistory ?? []),
+            structuredClone(state.readingSession),
+          ];
+        state.readingSession = completeReading(reading, turn.id);
+      }
       state.taskGroups = state.taskGroups.map((g) =>
         g.id.startsWith(turn.id) ? { ...g, status: turn.status } : g,
       );
-      await this.commitExecution(state);
+      await this.commitExecution(
+        state,
+        reading && turn.status === "completed" ? readingRevision : undefined,
+      );
       if (
         turn.status === "completed" &&
         turn.runId &&
@@ -1282,23 +1370,39 @@ export class AssistantService {
       this.activeIds.delete(turn.id);
     }
   }
-  private commitExecution(state: ConversationState) {
-    return this.conversations.update(state.id, (current) => ({
-      ...state,
-      version: current.version,
-      recentTurnIds: current.recentTurnIds,
-      mainChat: current.mainChat,
-      title: current.title,
-      titleEdited: current.titleEdited,
-      ...(current.preferenceRevision !== state.preferenceRevision
-        ? {
-            profileId: current.profileId,
-            explanationDepth: current.explanationDepth,
-            learningPreferences: current.learningPreferences,
-            preferenceRevision: current.preferenceRevision,
-          }
-        : {}),
-    }));
+  private commitExecution(
+    state: ConversationState,
+    expectedReadingRevision?: number,
+  ) {
+    return this.conversations
+      .update(state.id, (current) => {
+        if (
+          expectedReadingRevision !== undefined &&
+          ((current.readingSession?.revision ?? 0) !==
+            expectedReadingRevision ||
+            current.paperId !== state.paperId)
+        )
+          throw new Error(
+            "保存时带读进度或论文已变化，原进度保留，生成草稿可在任务中查看。",
+          );
+        return {
+          ...state,
+          version: current.version,
+          recentTurnIds: current.recentTurnIds,
+          mainChat: current.mainChat,
+          title: current.title,
+          titleEdited: current.titleEdited,
+          ...(current.preferenceRevision !== state.preferenceRevision
+            ? {
+                profileId: current.profileId,
+                explanationDepth: current.explanationDepth,
+                learningPreferences: current.learningPreferences,
+                preferenceRevision: current.preferenceRevision,
+              }
+            : {}),
+        };
+      })
+      .then((value) => structuredClone(value));
   }
   private context(state: ConversationState) {
     const feedback = (state.learningRecords ?? [])

@@ -23,6 +23,7 @@
     "training:m1": "tsx scripts/internal-training.ts m1",
     "training:recover": "tsx scripts/internal-training-recovery.ts",
     "training:short": "tsx scripts/short-loop.ts",
+    "training:workflow": "tsx scripts/workflow-iteration.ts",
     "training:calibrate": "tsx scripts/internal-training.ts calibrate",
     "training:m2": "tsx scripts/internal-training-batches.ts",
     "training:m3": "tsx scripts/internal-learning.ts",
@@ -31,6 +32,7 @@
   "dependencies": {
     "@napi-rs/canvas": "^1.0.10",
     "express": "^5.1.0",
+    "fflate": "^0.8.3",
     "multer": "^2.0.2",
     "pdfjs-dist": "^6.4.299",
     "pptxgenjs": "^4.0.1",
@@ -46,7 +48,6 @@
     "@types/react": "^19.1.16",
     "@types/react-dom": "^19.1.9",
     "@vitejs/plugin-react": "^5.0.4",
-    "fflate": "^0.8.2",
     "playwright": "^1.55.1",
     "prettier": "^3.9.9",
     "tsx": "^4.20.6",

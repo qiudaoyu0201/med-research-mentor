@@ -16,7 +16,19 @@ export interface SourceSelector {
   sourceVersion: string;
   sourceId: string;
 }
-export interface SourceRef extends SourceSelector {
+export interface SourceRef extends Partial<SourceSelector> {
+  sourceType?: "local" | "pubmed";
+  bibliography?: {
+    pmid: string;
+    doi?: string;
+    authors: string[];
+    year: string;
+    journal: string;
+    level: "metadata" | "abstract";
+    fetchedAt: string;
+    crossref: "matched" | "mismatch" | "unavailable" | "no-doi";
+    notices: string[];
+  };
   id: string;
   kind: "paper" | "foundation" | "interpretation";
   title: string;
@@ -125,6 +137,7 @@ export interface ResearchPlan {
 }
 export type PlanJobStatus =
   | "queued"
+  | "searching"
   | "generating"
   | "reviewing"
   | "completed"
@@ -133,6 +146,7 @@ export type PlanJobStatus =
   | "interrupted"
   | "conflict";
 export interface PlanJob {
+  literature?: import("./literature.ts").LiteratureSearch;
   id: string;
   planId: string;
   status: PlanJobStatus;

@@ -119,19 +119,17 @@ export function ResearchSettings({
       </label>
       <label>
         <span className="rw-switch-row">
-          自动整理阅读起点
+          导入后开始中文带读
           <input
             className="rw-switch"
             role="switch"
-            aria-label="自动整理阅读起点"
+            aria-label="导入后开始中文带读"
             type="checkbox"
             checked={autoGuide}
             onChange={(e) => onAutoGuide(e.target.checked)}
           />
         </span>
-        <small>
-          开启后，无聊天且没有有效缓存的论文会自动整理；服务端禁用时仍以手动方式使用。
-        </small>
+        <small>仅在主动导入且没有问题时开始；打开历史论文不会重复生成。</small>
       </label>
       <label>
         学习背景

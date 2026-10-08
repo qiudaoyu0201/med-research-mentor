@@ -292,8 +292,18 @@
   border-color: var(--rw-line);
 }
 .rw .rw-answer {
-  max-width: 820px;
+  max-width: 900px;
   padding: 0 40px 0 0;
+}
+.rw-reading-progress {
+  margin: 0 0 18px;
+  color: var(--rw-secondary);
+}
+.rw-latest-content {
+  position: sticky;
+  top: 8px;
+  z-index: 2;
+  margin-left: auto;
 }
 .rw .rw-answer h2 {
   font-size: 21px;
