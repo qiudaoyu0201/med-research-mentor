@@ -84,3 +84,20 @@ export function loopNeedsRemediation(evaluation: { valid: boolean; review: { che
 export function learningLoopClosed(loop: LearningLoopRecord) {
   return loop.status === "transferred" && !!loop.transfer;
 }
+
+export function assertLearningClosureAdmission(
+  loops: LearningLoopRecord[],
+  expectedCount: number,
+) {
+  if (!Number.isSafeInteger(expectedCount) || expectedCount < 1)
+    throw new Error("学习闭环数量无效。");
+  if (loops.length !== expectedCount)
+    throw new Error("学习闭环记录不完整，不能开始续接。");
+  if (loops.some((loop) => learningLoopClosed(loop)))
+    throw new Error("已完成的迁移记录不能再次派发，保留原结果。");
+  if (loops.some((loop) => loop.status === "blocked"))
+    throw new Error("存在阻塞闭环，需先处理阻塞原因，不能自动重发。");
+  if (loops.some((loop) => loop.status !== "initial-only" && loop.status !== "remediated"))
+    throw new Error("闭环状态不支持安全续接。");
+  return structuredClone(loops);
+}

@@ -1,7 +1,7 @@
 import test from "node:test";
 import assert from "node:assert/strict";
 import { digest } from "../server/materials.ts";
-import { addAssistedCorrection, addIndependentTransfer, addRemedialTeaching, beginLearningLoop } from "../server/learning-loop.ts";
+import { addAssistedCorrection, addIndependentTransfer, addRemedialTeaching, assertLearningClosureAdmission, beginLearningLoop } from "../server/learning-loop.ts";
 import type { OpenTask } from "../server/internal-learner.ts";
 
 const task = (id: string): OpenTask => ({ id, kind: "design-draft", question: "设计", sources: [] });
@@ -27,4 +27,12 @@ test("learning loop rejects target leakage and skipped stages", () => {
   assert.throws(() => addAssistedCorrection(loop, answer("independent"), {}), /辅助/);
   addAssistedCorrection(loop, answer("assisted"), {});
   assert.throws(() => addIndependentTransfer(loop, task("a"), answer("independent"), {}), /新任务/);
+});
+
+test("closure admission refuses incomplete, blocked or already closed records", () => {
+  const loop = beginLearningLoop(task("a"), answer("independent"), {});
+  assert.throws(() => assertLearningClosureAdmission([], 1), /不完整/);
+  assert.deepEqual(assertLearningClosureAdmission([loop], 1)[0].taskId, "a");
+  loop.status = "blocked";
+  assert.throws(() => assertLearningClosureAdmission([loop], 1), /阻塞/);
 });
