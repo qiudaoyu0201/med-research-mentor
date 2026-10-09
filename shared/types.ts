@@ -313,6 +313,7 @@ export interface Attempt {
   error?: string;
 }
 export interface BudgetState {
+  transportRecoveryOf?: string;
   limit: number;
   groupLimit: number;
   deadline: string;

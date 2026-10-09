@@ -515,7 +515,7 @@ export class TaskManager {
       schema: import("zod").z.ZodType<T>,
     ): Promise<T> => {
       signal.throwIfAborted();
-      const record = {
+      let record = {
         role,
         inputKeys: Object.keys(input as object),
         input: structuredClone(input),
@@ -531,11 +531,23 @@ export class TaskManager {
           schema,
           signal,
           {
+            recoverTransport: this.deliveryPolicy === "online",
             groupId: run.input.groupId ?? run.id,
             image: run.input.visibleImage,
             sourceHash: digest({ sources, image: run.input.visibleImage }),
             skillHash: digest(skills.versions),
             onReserved: async (attempt) => {
+              if (record.attemptId) {
+                record.durationMs =
+                  ledger.state.attempts.find((a) => a.id === record.attemptId)
+                    ?.durationMs ?? 0;
+                record = {
+                  role,
+                  inputKeys: Object.keys(input as object),
+                  input: structuredClone(input),
+                  durationMs: 0,
+                };
+              }
               record.attemptId = attempt.id;
               run.calls++;
               run.roles.push(record);
@@ -548,7 +560,9 @@ export class TaskManager {
         record.usage = result.usage;
         return result.output;
       } finally {
-        record.durationMs = Date.now() - started;
+        record.durationMs =
+          ledger.state.attempts.find((a) => a.id === record.attemptId)
+            ?.durationMs ?? Date.now() - started;
         await this.persist("runs", run.id, run);
       }
     };

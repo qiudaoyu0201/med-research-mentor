@@ -4,6 +4,18 @@ import type { Provider, ProviderObserver } from "./provider.ts";
 import { ProviderFailure } from "./provider.ts";
 import type { z } from "zod";
 import { watchRequest, TaskDeadline } from "./task-timing.ts";
+import { setTimeout as delay } from "node:timers/promises";
+
+interface CallOptions {
+  groupId?: string;
+  image?: string;
+  sourceHash: string;
+  skillHash: string;
+  onReserved?: (attempt: Attempt) => Promise<void>;
+  observe?: ProviderObserver;
+  managedTiming?: boolean;
+  recoverTransport?: boolean;
+}
 
 // Each provider turn uses a fresh thread. Prefer its increment, never add cumulative updates.
 export function normalizeUsage(raw: any): TokenUsage {
@@ -57,15 +69,69 @@ export class BudgetLedger {
     input: unknown,
     schema: z.ZodType<T>,
     signal: AbortSignal,
-    options: {
-      groupId?: string;
-      image?: string;
-      sourceHash: string;
-      skillHash: string;
-      onReserved?: (attempt: Attempt) => Promise<void>;
-      observe?: ProviderObserver;
-      managedTiming?: boolean;
-    },
+    options: CallOptions,
+  ): Promise<{ output: T; usage?: unknown }> {
+    const before = this.state.attempts.length;
+    try {
+      return await this.callOnce(
+        provider,
+        role,
+        instructions,
+        input,
+        schema,
+        signal,
+        options,
+      );
+    } catch (error) {
+      const failed = this.state.attempts.at(-1);
+      if (
+        !options.recoverTransport ||
+        this.state.transportRecoveryOf ||
+        signal.aborted ||
+        !(error instanceof ProviderFailure) ||
+        error.kind !== "transport" ||
+        this.state.attempts.length !== before + 1 ||
+        !failed ||
+        failed.observation?.remoteTerminal !== "failed" ||
+        failed.outputChars > 0 ||
+        failed.observation.outputUpdates > 0 ||
+        failed.observation.timeoutLayer ||
+        !/stream disconnected|network error|error sending request|error decoding response body/i.test(
+          error.message,
+        ) ||
+        /401|403|429|quota|rate.limit|unauthori|authentication/i.test(
+          error.message,
+        ) ||
+        !options.groupId ||
+        this.state.attempts.length >= this.state.limit ||
+        this.state.attempts.filter((a) => a.groupId === options.groupId)
+          .length >= this.state.groupLimit ||
+        Date.parse(this.state.deadline) - Date.now() < 5000
+      )
+        throw error;
+      // Persist once-per-task recovery and retain the failed attempt's unknown usage.
+      this.state.transportRecoveryOf = failed.id;
+      await this.persist();
+      await delay(750, undefined, { signal });
+      return this.callOnce(
+        provider,
+        role,
+        instructions,
+        input,
+        schema,
+        signal,
+        options,
+      );
+    }
+  }
+  private async callOnce<T>(
+    provider: Provider,
+    role: string,
+    instructions: string,
+    input: unknown,
+    schema: z.ZodType<T>,
+    signal: AbortSignal,
+    options: CallOptions,
   ) {
     signal.throwIfAborted();
     const remaining = Date.parse(this.state.deadline) - Date.now();
