@@ -247,7 +247,7 @@ test("reading lookup admission allows bounded help while respecting explicit pap
   assert.equal(needsBackgroundDecision(base), true);
   assert.equal(
     needsBackgroundDecision({ ...base, question: "为什么会持续？" }),
-    false,
+    true,
   );
   for (const question of [
     "不需要联网，解释这个机制",

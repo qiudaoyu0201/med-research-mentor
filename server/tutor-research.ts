@@ -20,7 +20,7 @@ export function needsBackgroundDecision(message: AssistantMessage) {
     !/(?:不(?:需要|必|用|要)?|无需|禁止)\s*(?:联网|上网|检索|查)|(?:仅|只)(?:根据|依据|使用|用)(?:已导入的?|当前的?|提供的?)?(?:论文|原文|资料)/.test(
       message.question,
     ) &&
-    /检索|查找|查资料|查文献|联网|补充背景|补充机制/.test(
+    /检索|查找|查资料|查文献|联网|原理|机制|背景|为什么|怎么理解|什么是|看不懂|不理解/.test(
       message.question,
     )
   );
