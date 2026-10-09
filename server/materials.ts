@@ -3,7 +3,7 @@ import type { Source, PaperBundle } from "../shared/types.ts";
 import { preferredSources } from "../shared/image-region.ts";
 export const digest = (value: unknown) =>
   createHash("sha256").update(JSON.stringify(value)).digest("hex");
-export const selectionVersion = "generic-evidence-v5-focused-coverage";
+export const selectionVersion = "generic-evidence-v6-report-coverage";
 export function figureNumber(text: string) {
   const match = /(?:Figure|Fig\.?|图)\s*([\d一二两三四五六七八九十]+)/i.exec(
     text,
@@ -41,6 +41,10 @@ export function defaultPaperSources(
   question: string,
   modules: string[],
 ) {
+  // Report requests may name several figures as emphasis, not as a restriction
+  // to the first figure mentioned. Preserve whole-paper context for composition.
+  if (modules.includes("ppt"))
+    return preferredSources(paper.sources).filter((s) => s.kind === "paper");
   const number = figureNumber(question);
   const images = preferredSources(paper.sources).filter(
     (s) =>
@@ -66,8 +70,6 @@ export function defaultPaperSources(
       ),
     ];
   }
-  if (modules.includes("ppt"))
-    return preferredSources(paper.sources).filter((s) => s.kind === "paper");
   return paper.sources.filter((s) => s.kind === "paper" && !s.image);
 }
 export function selectEvidence(
@@ -90,6 +92,7 @@ export function selectEvidence(
       .filter(
         (s) =>
           !s.image ||
+          modules.includes("ppt") ||
           !targetFigure(question) ||
           matchesFigure(s, targetFigure(question)!),
       )
@@ -103,7 +106,7 @@ export function selectEvidence(
   } catch (error) {
     if (!(error as Error).message.includes("20,000")) throw error;
   }
-  const target = figureNumber(question);
+  const target = modules.includes("ppt") ? undefined : figureNumber(question);
   const score = (s: Source) => {
     if (s.image && (!target || matchesFigure(s, target))) return 100;
     if (target && matchesFigure(s, target))

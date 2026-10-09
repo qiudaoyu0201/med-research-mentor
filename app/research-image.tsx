@@ -52,7 +52,7 @@ export function ResearchImage({
           setOpen(true);
         }}
       >
-        {thumbnail ? <img src={url} alt="待发送图片" /> : `${title} · 查看大图`}
+        {thumbnail ? <img src={url} alt={title} /> : `${title} · 查看大图`}
       </button>
       {open && (
         <dialog ref={dialog} className="rw-image-dialog" onCancel={close}>

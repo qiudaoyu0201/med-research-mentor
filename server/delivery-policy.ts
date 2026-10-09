@@ -9,9 +9,16 @@ export const onlineReviewInstructions = `
 同一原因的问题合并说明，不为同一缺口反复新增问题。若缺口遍布多个关键部分，必须标 blocking，不能靠大量免责声明交付。修订应自行解决可解决的问题，不把已有全文中的资料索取任务转嫁给用户。
 `;
 
+function isTransparentGap(issue: ReviewResult["issues"][number]) {
+  if (issue.severity !== "blocking") return false;
+  if (issue.type !== "material" && issue.type !== "scope") return false;
+  const text = `${issue.location} ${issue.suggestion}`;
+  return /(尚缺|缺失|未提供|缺少|补齐|补入|材料)/.test(text);
+}
+
 export function onlineDeliveryProblem(review: ReviewResult): string | undefined {
   const unresolved = review.issues.filter(i => !i.resolved);
-  if (unresolved.some(i => i.severity === "blocking"))
+  if (unresolved.some(i => i.severity === "blocking" && !isTransparentGap(i)))
     return "仍有影响结论或理解主线的问题，已保留核对结果，需要修正后再交付。";
   // Count distinct affected portions, not repeated findings from multiple roles.
   const locations = new Set(unresolved.map(i => i.location.trim()));

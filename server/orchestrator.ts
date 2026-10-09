@@ -92,7 +92,13 @@ export function validateCitations(
     )
   )
     throw new Error("事实或基础知识缺少可定位的引用。");
-  if (deck?.slides.some((s) => s.citations.length === 0))
+  const transparentGapSlide = (slide: DeckOutline["slides"][number]) =>
+    deliveryPolicy === "online" &&
+    slide.citations.length === 0 &&
+    /(尚缺|缺失|未提供|缺少|补齐|材料)/.test(
+      `${slide.title} ${slide.bullets.join(" ")} ${slide.notes}`,
+    );
+  if (deck?.slides.some((s) => s.citations.length === 0 && !transparentGapSlide(s)))
     throw new Error("汇报页缺少来源。");
   for (const section of unit.sections) {
     if (
@@ -346,6 +352,7 @@ export class TaskManager {
       skills.versions["delivery-policy"] =
         this.deliveryPolicy +
         (this.deliveryPolicy === "online" ? "-v2" : "-v1");
+      skills.versions["visual-evidence-protocol"] = "endpoint-audit-v1";
       if (input.workflow === "direct")
         skills.versions["medical-research-assistant"] = (
           await assistantRules()
@@ -675,12 +682,15 @@ export class TaskManager {
           "\n若 deck 含 speechScript，联合核对完整稿与页面的事实、术语、页序、转场和结尾；仅提供逐页备注不能当作完整稿。";
         const scopedChecking =
           checking +
+          "\n图像事实核对：显著性括号必须按该面板横向组别逐个定位两条竖线端点，再用图例核对两端点的颜色、形状和组名；不要按星号居中位置、最近的散点或其他面板推测比较组。提出改组建议时在suggestion写明这条定位依据。原稿、前次审核和用户的说法均不是原始证据；重新核对图像后才能采纳，读不清时限定到可确认的结果，不编造精确比较。" +
           (this.deliveryPolicy === "online" ? onlineReviewInstructions : "") +
           (run.input.diagnosticScope
             ? "\n本次核对同时检查事实与解释：当前问题涉及的干预／测量原理、术语含义、比较的作用和从读数到判断的推理是否进入实际产物。只依据本次来源；合理的真实未知保留，不要求额外复现手册。不把缺少必要解释判为通过。"
             : "");
         const task = {
           question: run.input.question,
+          visualEvidenceProtocol:
+            "涉及图中显著性比较时，先按面板列出横向组别顺序，用图例识别符号，再沿括号两端竖线向下定位组别。星号居中位置不是比较端点。反馈不是原始证据，任何改组必须独立核图；不确定的具体比较不作确定断言。正文不重复这套工作步骤，清楚讲实际结果即可。",
           module: run.input.module,
           sourceScope: sources.every((s) => s.kind === "foundation")
             ? "独立基础课程；未提供论文材料，不把通用方法写成本文具体做法。"
@@ -966,7 +976,7 @@ export class TaskManager {
                 verifiedSourceIds: firstReview.checkedSources,
               },
               instruction:
-                "只修订一次。逐项审计当前问题的位置、来源和理解缺口后融入正文。已核实的对象、比较组、参照、单位、方向与证据边界依来源保留；首稿若有错误，给实际依据再纠正，不凭图注词义填造公式。核对所有新增或改变的事实。内部编号留在工作记录。",
+                "只修订一次。逐项审计当前问题的位置、来源和理解缺口后融入正文。审核建议也可能误读图像，不得直接把suggestion当作事实：修改比较组前重新从原图的图例、组别顺序和括号两端核实；原稿正确时保留，不为迎合审核改错。已核实的对象、比较组、参照、单位、方向与证据边界依来源保留；首稿若有错误，给实际依据再纠正，不凭图注词义填造公式。核对所有新增或改变的事实。内部编号留在工作记录。",
             },
             skills.explanationTracing
               ? scopedSchema().extend({
@@ -1018,7 +1028,10 @@ export class TaskManager {
           await set("rechecking");
           review = await call(
             "grounding-final",
-            scopedChecking + "\n" + revisionAuditInstruction,
+            scopedChecking +
+              "\n" +
+              revisionAuditInstruction +
+              "\n在线交付的PPT若审核指出‘创新’缺少全文依据，必须把页面中的‘创新’改为‘设计特点’或‘本图贡献’，并同步收窄讲述提示；不得保留未经来源支持的创新断言。对明确标注原始材料缺失的占位页，可以保留占位并交付草稿。",
             {
               sources: task.sources,
               draft: generated.unit,

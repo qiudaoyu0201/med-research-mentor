@@ -501,6 +501,34 @@ export function ResearchDiscussion({
                 {unit && (
                   <>
                     <h2>{unit.title}</h2>
+                    {paper &&
+                      paper.version === turn.sourceVersion &&
+                      [...new Set(unit.sections.flatMap((s) => s.citations))]
+                        .map((id) => paper.sources.find((s) => s.id === id))
+                        .filter(
+                          (s): s is Source =>
+                            !!s?.figure &&
+                            !!(s.image || (s.page && paper.pdfUrl)),
+                        )
+                        .map((source) => (
+                          <figure key={source.id} className="rw-answer-figure">
+                            <ResearchImage
+                              url={
+                                source.image ??
+                                `/api/papers/${encodeURIComponent(paper.id)}/sources/${encodeURIComponent(source.id)}/image`
+                              }
+                              title={source.title}
+                              caption={source.caption}
+                              thumbnail
+                              onPage={() => onCitation(source.id, source)}
+                            />
+                            <figcaption>
+                              {source.title} ·{" "}
+                              {source.page ? `PDF 第 ${source.page} 页 · ` : ""}
+                              点击放大查看
+                            </figcaption>
+                          </figure>
+                        ))}
                     {unit.sections.map((section, i) => (
                       <section key={i}>
                         <h3>{section.title}</h3>
