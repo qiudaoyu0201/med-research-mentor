@@ -245,6 +245,25 @@ test("reading lookup admission allows bounded help while respecting explicit pap
     question: "请查资料解释这个机制",
   };
   assert.equal(needsBackgroundDecision(base), true);
+  for (const question of [
+    "不需要联网，解释这个机制",
+    "无需联网，为什么如此？",
+    "不用上网查资料，解释原理",
+    "仅根据已导入论文第2页解释，为什么会持续？",
+    "仅依据原文解释这个机制",
+  ])
+    assert.equal(
+      needsBackgroundDecision({ ...base, question }),
+      false,
+      question,
+    );
+  assert.equal(
+    needsBackgroundDecision({
+      ...base,
+      question: "需要联网查资料，解释这个机制",
+    }),
+    true,
+  );
   assert.equal(
     needsBackgroundDecision({ ...base, question: "只用原文解释这个机制" }),
     false,

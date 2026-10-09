@@ -1473,7 +1473,12 @@ export function ResearchWorkspace() {
                   <textarea
                     ref={composer}
                     aria-label="向科研助手提问"
-                    placeholder="哪里没读懂？可以用自己的话问。"
+                    disabled={loading}
+                    placeholder={
+                      loading
+                        ? "正在恢复当前讨论，请稍候…"
+                        : "哪里没读懂？可以用自己的话问。"
+                    }
                     value={question}
                     maxLength={2000}
                     onChange={(e) => {

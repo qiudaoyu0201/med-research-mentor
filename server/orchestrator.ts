@@ -94,19 +94,21 @@ export function validateCitations(
     throw new Error("事实或基础知识缺少可定位的引用。");
   if (deck?.slides.some((s) => s.citations.length === 0))
     throw new Error("汇报页缺少来源。");
-    for (const section of unit.sections) {
-      if (
-        ["paper", "foundation"].includes(section.kind) &&
-        !section.citations.some(
-          (id) => {
-            const kind = sources.find((s) => s.id === id)?.kind;
-            return kind === section.kind ||
-              (deliveryPolicy === "online" && section.kind === "foundation" && kind === "paper");
-          },
-        )
-      )
-        throw new Error("论文事实与通用基础的引用类型不匹配。");
-    }
+  for (const section of unit.sections) {
+    if (
+      ["paper", "foundation"].includes(section.kind) &&
+      !section.citations.some((id) => {
+        const kind = sources.find((s) => s.id === id)?.kind;
+        return (
+          kind === section.kind ||
+          (deliveryPolicy === "online" &&
+            section.kind === "foundation" &&
+            kind === "paper")
+        );
+      })
+    )
+      throw new Error("论文事实与通用基础的引用类型不匹配。");
+  }
   if (
     sources.some((s) => s.kind === "paper" && s.paperId) &&
     new Set(sources.filter((s) => s.kind === "paper").map((s) => s.paperId))
@@ -232,7 +234,20 @@ export function cacheKey(
     )
     .digest("hex");
 }
-export function needsRevision(review: ReviewResult, feedback: NoviceFeedback) {
+export function needsRevision(
+  review: ReviewResult,
+  feedback: NoviceFeedback,
+  policy: "internal" | "online" = "internal",
+) {
+  if (policy === "online") {
+    return (
+      Boolean(onlineDeliveryProblem(review)) ||
+      review.issues.some(
+        (i) => !i.resolved && i.type !== "teaching" && i.type !== "material",
+      ) ||
+      feedback.breakpoints.some((b) => b.status === "open")
+    );
+  }
   return (
     review.issues.some((i) => !i.resolved && i.type !== "material") ||
     feedback.breakpoints.some((b) => b.status === "open")
@@ -328,7 +343,9 @@ export class TaskManager {
             input.workflow !== "direct" && (input.checks?.readability ?? true),
           grounding: input.workflow !== "direct",
         }));
-      skills.versions["delivery-policy"] = this.deliveryPolicy + "-v1";
+      skills.versions["delivery-policy"] =
+        this.deliveryPolicy +
+        (this.deliveryPolicy === "online" ? "-v2" : "-v1");
       if (input.workflow === "direct")
         skills.versions["medical-research-assistant"] = (
           await assistantRules()
@@ -538,7 +555,13 @@ export class TaskManager {
     try {
       const profile = profiles.find((p) => p.id === run.input.profileId)!;
       if (run.cacheHit) {
-        validateCitations(run.result!, run.review!, sources, run.deck, this.deliveryPolicy);
+        validateCitations(
+          run.result!,
+          run.review!,
+          sources,
+          run.deck,
+          this.deliveryPolicy,
+        );
         await set("completed");
       } else if (run.input.mode === "example") {
         // Fixed, verified content has no fabricated role execution or progress.
@@ -560,7 +583,13 @@ export class TaskManager {
             "论文局部证据包，不是全文核验。",
           ],
         };
-        validateCitations(run.result, run.review, paper.sources, run.deck, this.deliveryPolicy);
+        validateCitations(
+          run.result,
+          run.review,
+          paper.sources,
+          run.deck,
+          this.deliveryPolicy,
+        );
         await set("completed");
       } else if (run.input.workflow === "direct") {
         const rules = await assistantRules();
@@ -597,7 +626,13 @@ export class TaskManager {
           checkedSources: [],
           limitations: ["本次为背景解释，未运行来源核对或模拟试读。"],
         };
-        validateCitations(result, run.review, sources, undefined, this.deliveryPolicy);
+        validateCitations(
+          result,
+          run.review,
+          sources,
+          undefined,
+          this.deliveryPolicy,
+        );
         run.result = result;
         await set("completed");
       } else {
@@ -625,7 +660,8 @@ export class TaskManager {
           skills.modules.find((m) => m.id === "medical-grounding-check")!.text +
           "\n若 deck 含 speechScript，联合核对完整稿与页面的事实、术语、页序、转场和结尾；仅提供逐页备注不能当作完整稿。";
         const scopedChecking =
-          checking + (this.deliveryPolicy === "online" ? onlineReviewInstructions : "") +
+          checking +
+          (this.deliveryPolicy === "online" ? onlineReviewInstructions : "") +
           (run.input.diagnosticScope
             ? "\n本次核对同时检查事实与解释：当前问题涉及的干预／测量原理、术语含义、比较的作用和从读数到判断的推理是否进入实际产物。只依据本次来源；合理的真实未知保留，不要求额外复现手册。不把缺少必要解释判为通过。"
             : "");
@@ -637,7 +673,10 @@ export class TaskManager {
             : paper.scope,
           sources: materialPacket(sources, run.input.question),
           taughtConcepts: run.input.taughtConcepts,
-          figureFamiliarity: figureFamiliarity(run.input.taughtConcepts, run.input.question),
+          figureFamiliarity: figureFamiliarity(
+            run.input.taughtConcepts,
+            run.input.question,
+          ),
           previous: run.input.previous || null,
           modules: run.input.modules ?? [run.input.module],
           slideCount: run.input.slideCount ?? null,
@@ -865,7 +904,7 @@ export class TaskManager {
           await this.persist("runs", run.id, run);
         }
         if (
-          needsRevision(review, feedback) ||
+          needsRevision(review, feedback, this.deliveryPolicy) ||
           run.materialRequests!.some((r) => r.status === "provided")
         ) {
           await ledger.revise(run.input.groupId ?? run.id);
@@ -1057,4 +1096,7 @@ export class TaskManager {
     }
   }
 }
-import { onlineDeliveryProblem, onlineReviewInstructions } from "./delivery-policy.ts";
+import {
+  onlineDeliveryProblem,
+  onlineReviewInstructions,
+} from "./delivery-policy.ts";

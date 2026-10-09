@@ -6,8 +6,10 @@ import { reviewSchema } from "../server/schemas.ts";
 import { feedbackAttribution } from "../evals/role-coordination-candidate.ts";
 import type { TrainingBatch } from "../server/internal-training.ts";
 
-if (process.argv[2]) throw new Error("固定两例，不接受新目录或重复预算");
-const id = "feedback-attribution-20261009";
+const recovery = process.argv[2] === "recovery-v2";
+if (process.argv[2] && !recovery)
+  throw new Error("固定两例，仅允许已确认远端失败后的recovery-v2");
+const id = "feedback-attribution-20261009" + (recovery ? "-recovery-v2" : "");
 const directory = resolve("runs/internal-training", id);
 process.env.TUTOR_DATA_DIR = join(directory, "data");
 const { RecordStorage } = await import("../server/storage.ts");
@@ -24,6 +26,33 @@ const raw = await readFile(
   "utf8",
 );
 const parent = JSON.parse(raw);
+let lineageRaw = raw;
+let inheritedAttempts = parent.parentNewAttempts + parent.calls;
+if (recovery) {
+  lineageRaw = await readFile(
+    "runs/internal-training/feedback-attribution-20261009/records/training/report.json",
+    "utf8",
+  );
+  const failed = JSON.parse(lineageRaw);
+  const attempt = failed.batch.budget.attempts[0];
+  if (
+    failed.status !== "stopped" ||
+    failed.calls !== 1 ||
+    failed.batch.budget.attempts.length !== 1 ||
+    attempt.status !== "unknown" ||
+    attempt.observation?.remoteTerminal !== "failed" ||
+    !attempt.observation?.events.some(
+      (e: any) => e.type === "terminal" && e.status === "failed",
+    ) ||
+    failed.parentNewAttempts !== inheritedAttempts
+  )
+    throw new Error("前次连接中断未确认远端结束或累计账本不符");
+  inheritedAttempts = failed.parentNewAttempts + failed.calls;
+}
+const admission = async () => {
+  await trainingAdmission();
+  await trainingAdmission("http://127.0.0.1:4319");
+};
 if (
   parent.status !== "needs-improvement" ||
   parent.calls !== 6 ||
@@ -82,12 +111,12 @@ try {
   await claim.writeFile(
     JSON.stringify({
       limit: 2,
-      parentHash: createHash("sha256").update(raw).digest("hex"),
-      inheritedAttempts: parent.parentNewAttempts + parent.calls,
+      parentHash: createHash("sha256").update(lineageRaw).digest("hex"),
+      inheritedAttempts,
     }),
   );
   await claim.close();
-  await trainingAdmission();
+  await admission();
   const provider = createProvider();
   if (
     provider.id !== parent.provider.id ||
@@ -114,10 +143,10 @@ try {
   };
   const report: any = {
     status: "running",
-    parentReportHash: createHash("sha256").update(raw).digest("hex"),
-    parentNewAttempts: parent.parentNewAttempts + parent.calls,
+    parentReportHash: createHash("sha256").update(lineageRaw).digest("hex"),
+    parentNewAttempts: inheritedAttempts,
     inheritedUnknownUsage:
-      "校准v4、v7各一次未知用量保留，远端均确认interrupted；参见父报告哈希链。",
+      "校准v4、v7未知用量保留；恢复入口另继承首次反馈归属测试的未知用量，远端failed。UI测试另见部署文档，不重复计入内部调用数。",
     provider: parent.provider,
     batch,
     results: [],
@@ -144,7 +173,7 @@ try {
   try {
     reserveUnit(batch, 2, 0);
     for (const c of cases) {
-      await trainingAdmission();
+      await admission();
       counted.context = c.id;
       const result = await counted.generate(
         packet.instructions + "\n" + feedbackAttribution,

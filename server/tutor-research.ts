@@ -10,11 +10,20 @@ import type { SourceRef } from "../shared/research-plan.ts";
 // A cheap admission check; the counted model decision below still decides
 // whether the supplied paper actually needs external background evidence.
 export function needsBackgroundDecision(message: AssistantMessage) {
-  return message.mode === "live" &&
-    (!message.module || message.module === "paper" || message.module === "figure") &&
-    !message.exportRunId && !message.deckEdit &&
-    !/不要联网|不联网|不用查|仅用原文|只用原文/.test(message.question) &&
-    /检索|查找|查资料|查文献|联网|原理|机制|背景|为什么|怎么理解|什么是|看不懂|不理解/.test(message.question);
+  return (
+    message.mode === "live" &&
+    (!message.module ||
+      message.module === "paper" ||
+      message.module === "figure") &&
+    !message.exportRunId &&
+    !message.deckEdit &&
+    !/(?:不(?:需要|必|用|要)?|无需|禁止)\s*(?:联网|上网|检索|查)|(?:仅|只)(?:根据|依据|使用|用)(?:已导入的?|当前的?|提供的?)?(?:论文|原文|资料)/.test(
+      message.question,
+    ) &&
+    /检索|查找|查资料|查文献|联网|原理|机制|背景|为什么|怎么理解|什么是|看不懂|不理解/.test(
+      message.question,
+    )
+  );
 }
 
 interface ResearchRecord {

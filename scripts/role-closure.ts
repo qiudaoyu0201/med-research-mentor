@@ -15,16 +15,26 @@ import {
   groundingCoordination,
   groundingCoverage,
   presentationEvidence,
+  feedbackAttribution,
 } from "../evals/role-coordination-candidate.ts";
 import { strictDevelopmentAcceptance } from "../server/development-acceptance.ts";
 
 const recovery = process.argv[2] === "storage-recovery";
-const revision = process.argv[2] === "revision-v2" || recovery;
+const coordination = process.argv[2] === "coordination-v3";
+const revision = process.argv[2] === "revision-v2" || recovery || coordination;
 if (process.argv[2] && !revision)
-  throw new Error("仅支持默认整合回归、revision-v2或storage-recovery");
+  throw new Error(
+    "仅支持默认整合回归、revision-v2、storage-recovery或coordination-v3",
+  );
 const batchId =
   "role-closure-20261009" +
-  (recovery ? "-storage-recovery" : revision ? "-revision-v2" : "");
+  (coordination
+    ? "-coordination-v3"
+    : recovery
+      ? "-storage-recovery"
+      : revision
+        ? "-revision-v2"
+        : "");
 const directory = resolve("runs/internal-training/" + batchId);
 process.env.TUTOR_DATA_DIR = join(directory, "data");
 process.env.TUTOR_READING_GUIDES = "manual";
@@ -44,7 +54,38 @@ const parentRaw = await readFile(
 const parent = JSON.parse(parentRaw);
 let lineage = parent;
 let lineageHash = digest(parentRaw);
-if (revision) {
+if (coordination) {
+  const raw = await readFile(
+    "runs/internal-training/feedback-attribution-20261009-recovery-v2/records/training/report.json",
+    "utf8",
+  );
+  lineage = JSON.parse(raw);
+  lineageHash = digest(raw);
+  const learner = lineage.results.find(
+    (r: any) => r.id === "learner-only",
+  )?.output;
+  const wrong = lineage.results.find((r: any) => r.id === "draft-too")?.output;
+  if (
+    lineage.status !== "awaiting-evaluation" ||
+    lineage.calls !== 2 ||
+    lineage.batch.budget.attempts.length !== 2 ||
+    lineage.batch.budget.attempts.some((a: any) => a.status !== "succeeded") ||
+    !learner ||
+    !wrong ||
+    learner.issues.some((i: any) => !i.resolved && i.severity === "blocking") ||
+    !learner.issues.some((i: any) =>
+      i.location.includes("feedback.understood"),
+    ) ||
+    !wrong.issues.some(
+      (i: any) =>
+        i.type === "fact" &&
+        i.severity === "blocking" &&
+        !i.resolved &&
+        i.location.includes("notes"),
+    )
+  )
+    throw new Error("角色归属局部配对未通过，不扩展闭环");
+} else if (revision) {
   const raw = await readFile(
     "runs/internal-training/role-closure-20261009" +
       (recovery ? "-revision-v2" : "") +
@@ -94,6 +135,7 @@ try {
   );
   await claim.close();
   await trainingAdmission();
+  await trainingAdmission("http://127.0.0.1:4319");
   const provider = createProvider();
   const baseline = JSON.parse(
     await readFile(
@@ -119,7 +161,10 @@ try {
     ["medical-novice-simulator", noviceCoordination],
     [
       "medical-grounding-check",
-      groundingCoordination + groundingCoverage + sharedCitationInstructions,
+      groundingCoordination +
+        groundingCoverage +
+        sharedCitationInstructions +
+        (coordination ? feedbackAttribution : ""),
     ],
     ...(revision ? [["medical-journal-club-ppt", presentationEvidence]] : []),
   ]) {
@@ -173,6 +218,7 @@ try {
       control,
     ) {
       await trainingAdmission();
+      await trainingAdmission("http://127.0.0.1:4319");
       const review = schema instanceof z.ZodObject && "issues" in schema.shape;
       const stage = [
         "teaching",

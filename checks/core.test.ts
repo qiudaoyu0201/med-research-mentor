@@ -8,6 +8,7 @@ import {
   visibleInput,
   validateCitations,
   cacheKey,
+  needsRevision,
 } from "../server/orchestrator.ts";
 import {
   sample,
@@ -60,6 +61,87 @@ function provider(outputs: unknown[]): Provider {
   };
 }
 const discard = async () => {};
+
+test("online peripheral advice does not force another model call, internal review still revises", async () => {
+  const minor = {
+    ...review,
+    issues: [
+      {
+        id: "optional",
+        location: "术语",
+        type: "teaching" as const,
+        evidence: ["xu-design"],
+        suggestion: "可补充术语读法",
+        severity: "warning" as const,
+        resolved: false,
+      },
+    ],
+  };
+  for (const policy of ["online", "internal"] as const) {
+    const outputs = [{ unit, deck: null }, minor, { unit, deck: null }, review];
+    const manager = new TaskManager(provider(outputs), discard, policy);
+    const run = await manager.start(
+      { ...input, checks: { readability: false } },
+      sample,
+    );
+    await wait(run);
+    assert.equal(run.status, "completed", run.error);
+    assert.equal(run.calls, policy === "online" ? 2 : 4);
+    if (policy === "online")
+      assert.equal(run.review?.issues[0].resolved, false);
+  }
+  assert.equal(needsRevision(minor, novice, "online"), false);
+  for (const type of ["fact", "scope"] as const)
+    assert.equal(
+      needsRevision(
+        { ...minor, issues: [{ ...minor.issues[0], type }] },
+        novice,
+        "online",
+      ),
+      true,
+    );
+  assert.equal(
+    needsRevision(
+      { ...minor, issues: [{ ...minor.issues[0], severity: "blocking" }] },
+      novice,
+      "online",
+    ),
+    true,
+  );
+  assert.equal(
+    needsRevision(
+      {
+        ...minor,
+        issues: ["a", "b", "c"].map((location) => ({
+          ...minor.issues[0],
+          location,
+        })),
+      },
+      novice,
+      "online",
+    ),
+    true,
+  );
+  assert.equal(
+    needsRevision(
+      minor,
+      {
+        understood: [],
+        breakpoints: [
+          {
+            id: "bp",
+            sentence: "原句",
+            missingConcept: "比较",
+            question: "为什么",
+            status: "open",
+          },
+        ],
+      },
+      "online",
+    ),
+    true,
+  );
+});
 test("full speech is explicit, required when selected, and isolated in cache; generic PPT includes methods", () => {
   const ordinary = { unit, deck: defaultDeck };
   assert.throws(() =>
