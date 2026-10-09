@@ -979,10 +979,17 @@ export function ResearchWorkspace() {
         busy={false}
         search={search}
         setSearch={setSearch}
-        onPaper={(p) => void selectPaper(p)}
+        onPaper={(p) => {
+          setMode("research");
+          setMobile(false);
+          void selectPaper(p);
+        }}
         onProject={(id) => blank(id)}
         mode={mode}
-        onHome={() => setMode("research")}
+        onHome={() => {
+          setMode("research");
+          setMobile(false);
+        }}
         onPpt={() => {
           setPanel(null);
           setMode("ppt");

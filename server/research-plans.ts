@@ -911,13 +911,14 @@ export class ResearchPlans {
       !!input &&
       input.action !== "review" &&
       input.maxCalls === 4 &&
-      report.issues.some((i) => i.severity === "blocking") &&
+      (report.issues.some((i) => i.severity === "blocking") ||
+        new Set(report.issues.map(i => i.sectionId)).size > 2) &&
       !ledger.state.revisions.includes("plan");
     await this.locked(job.planId, async () => {
       const latest = await this.currentFor(job, signal);
       latest.versions.find((v) => v.id === version.id)!.review = report;
       await this.storePlan(latest);
-      const blocked = report.issues.some(
+      const blocked = new Set(report.issues.map(i => i.sectionId)).size > 2 || report.issues.some(
         (issue) => issue.severity === "blocking",
       );
       job.status = repair ? "generating" : blocked ? "failed" : "completed";
@@ -1037,6 +1038,7 @@ export class ResearchPlans {
       !v.review ||
       v.review.versionId !== v.id ||
       v.review.issues.some((issue) => issue.severity === "blocking") ||
+      new Set(v.review.issues.map(issue => issue.sectionId)).size > 2 ||
       this.jobs.get(v.review.jobId)?.status !== "completed"
     )
       throw new ResearchConflict(
