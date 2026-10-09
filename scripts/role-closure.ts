@@ -17,10 +17,14 @@ import {
   presentationEvidence,
   feedbackAttribution,
 } from "../evals/role-coordination-candidate.ts";
-import { strictDevelopmentAcceptance } from "../server/development-acceptance.ts";
+import {
+  strictDevelopmentAcceptance,
+  mainlineDevelopmentAcceptance,
+} from "../server/development-acceptance.ts";
 
 const recovery = process.argv[2] === "storage-recovery";
-const coordination = process.argv[2] === "coordination-v3";
+const mainline = process.argv[2] === "mainline-v4";
+const coordination = process.argv[2] === "coordination-v3" || mainline;
 const revision = process.argv[2] === "revision-v2" || recovery || coordination;
 if (process.argv[2] && !revision)
   throw new Error(
@@ -28,13 +32,15 @@ if (process.argv[2] && !revision)
   );
 const batchId =
   "role-closure-20261009" +
-  (coordination
-    ? "-coordination-v3"
-    : recovery
-      ? "-storage-recovery"
-      : revision
-        ? "-revision-v2"
-        : "");
+  (mainline
+    ? "-mainline-v4"
+    : coordination
+      ? "-coordination-v3"
+      : recovery
+        ? "-storage-recovery"
+        : revision
+          ? "-revision-v2"
+          : "");
 const directory = resolve("runs/internal-training/" + batchId);
 process.env.TUTOR_DATA_DIR = join(directory, "data");
 process.env.TUTOR_READING_GUIDES = "manual";
@@ -106,6 +112,24 @@ if (coordination) {
   )
     throw new Error("前次整合回归未完整结束");
 }
+if (mainline) {
+  const raw = await readFile(
+    "runs/internal-training/model-scope-20261009-config-recovery/records/training/report.json",
+    "utf8",
+  );
+  const latest = JSON.parse(raw);
+  const attempts = latest.batch.budget.attempts;
+  if (
+    latest.status !== "stopped" ||
+    latest.parentNewAttempts !== 54 ||
+    latest.calls !== 1 ||
+    attempts.length !== 1 ||
+    attempts[0].observation?.remoteTerminal !== "failed"
+  )
+    throw new Error("前批未明确结束，不能接续");
+  lineage = latest;
+  lineageHash = digest(raw);
+}
 const missing = parent.results.find((r: any) => r.id === "citation-missing");
 const repaired = parent.results.find((r: any) => r.id === "citation-repaired");
 if (
@@ -157,6 +181,13 @@ try {
     ),
   );
   const rules = await freezeRules();
+  if (mainline) {
+    const entry = rules.entries["medical-journal-club-ppt"];
+    entry.text +=
+      "\n模型概览页列出多个实验对象时，逐个为其配置实际页内来源：细胞方法不能替代动物组织观察。总结跨实验结果时也要覆盖对应实验来源。优先用页面表达研究思路，方法参数只在影响结论时展开，解释放独立notes。";
+    entry.version += "-model-coverage-v4";
+    entry.hash = digest(entry.text);
+  }
   for (const [id, addition] of [
     ["medical-novice-simulator", noviceCoordination],
     [
@@ -186,6 +217,9 @@ try {
     status: "running",
     parentHash: lineageHash,
     parentNewAttempts: lineage.parentNewAttempts + lineage.calls,
+    inheritedUnknownUsage: mainline
+      ? "保留前批及其祖先全部unknown用量，线上实测另计。"
+      : undefined,
     batch,
     sourceView: "inline-frozen-blocks",
     scope: "整篇六页PPT三Agent开发回归；非发布/留出评估",
@@ -286,6 +320,7 @@ try {
     report.runStatus = run.status;
     report.error = run.error;
     report.passed = strictDevelopmentAcceptance(run);
+    if (mainline) report.mainlinePassed = mainlineDevelopmentAcceptance(run);
     const uncertain = batch.budget.attempts.some((a) =>
       ["unknown", "reserved", "cancelled"].includes(a.status),
     );
