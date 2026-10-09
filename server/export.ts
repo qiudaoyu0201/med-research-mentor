@@ -69,6 +69,19 @@ export async function exportDeck(
       line: { color: "007AFF" },
     });
     for (const b of layout.text) {
+      if (b.role === "bullet" && b.marker) {
+        slide.addText(b.marker, {
+          x: b.markerAbove ? b.x : b.x - 0.42,
+          y: b.markerAbove ? b.y - 0.36 : b.y + 0.02,
+          w: 0.28,
+          h: 0.22,
+          fontSize: 10,
+          bold: true,
+          color: "007AFF",
+          margin: 0,
+          fontFace: "Aptos",
+        });
+      }
       slide.addText(b.lines.join("\n"), {
         x: b.x,
         y: b.y,

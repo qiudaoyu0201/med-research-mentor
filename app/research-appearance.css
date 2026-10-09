@@ -1412,25 +1412,43 @@
 .rw-markdown {
   line-height: 1.85;
   overflow-wrap: anywhere;
+  /* Parsed block layout owns spacing; do not inherit pre-wrap from selection. */
+  white-space: normal;
 }
 .rw-markdown p {
-  margin: 0.65em 0 1em;
+  margin: 0.42em 0 0.72em;
   white-space: normal;
 }
 .rw-markdown h1,
 .rw-markdown h2,
 .rw-markdown h3,
 .rw-markdown h4 {
-  margin: 1.2em 0 0.55em;
+  margin: 0.95em 0 0.45em;
   line-height: 1.4;
 }
 .rw-markdown ul,
 .rw-markdown ol {
   padding-left: 1.6em;
-  margin: 0.65em 0 1em;
+  margin: 0.45em 0 0.78em;
 }
 .rw-markdown li {
-  margin: 0.35em 0;
+  margin: 0.22em 0;
+}
+.rw-markdown li > p {
+  margin: 0.2em 0;
+}
+.rw-markdown li > :is(ul, ol) {
+  margin-block: 0.25em;
+}
+.rw-markdown > :first-child {
+  margin-top: 0;
+}
+.rw-markdown > :last-child {
+  margin-bottom: 0;
+}
+.rw-markdown pre,
+.rw-markdown pre code {
+  white-space: pre;
 }
 .rw-markdown strong {
   font-weight: 650;

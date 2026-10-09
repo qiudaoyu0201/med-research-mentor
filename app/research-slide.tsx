@@ -127,6 +127,25 @@ export function ResearchSlide({
           ))}
         </text>
       ))}
+      {layout.text
+        .filter((b) => b.marker)
+        .map((b, i) => (
+          <text
+            key={`marker-${i}`}
+            x={(b.markerAbove ? b.x : b.x - 0.42) * 100}
+            y={
+              ((b.markerAbove ? b.y - 0.36 : b.y + 0.02) +
+                ((10 * 1.18) / 72) * 0.88) *
+              100
+            }
+            fill="#007AFF"
+            fontSize={(10 / 72) * 100}
+            fontWeight="700"
+            fontFamily="Aptos, sans-serif"
+          >
+            {b.marker}
+          </text>
+        ))}
       <text x="1225" y="724" fill="#65656F" fontSize="14">
         {page} / {total}
       </text>

@@ -496,3 +496,78 @@ test("shared slide layout enlarges figures, preserves readable text, and uses co
     "Fig. 2 · p. 4",
   );
 });
+
+test("text-only slide layout uses content-aware spacing and numbered visual anchors", () => {
+  const layout = slideLayout(
+    {
+      title: "三层证据",
+      bullets: ["第一层观察", "第二层验证"],
+      notes: "",
+      citations: ["s"],
+    },
+    [
+      {
+        id: "s",
+        title: "PDF",
+        kind: "paper",
+        text: "",
+        locator: "p. 1",
+        page: 1,
+        verified: false,
+      },
+    ],
+  );
+  const bullets = layout.text.filter((b) => b.role === "bullet");
+  assert.equal(bullets.length, 2);
+  assert.deepEqual(
+    bullets.map((b) => b.marker),
+    ["01", "02"],
+  );
+  assert.ok(bullets[0].y < 2);
+  assert.ok(bullets[1].y - bullets[0].y < 1);
+  assert.ok(bullets.every((b) => b.x > 1));
+});
+
+test("slide compositions preserve all content within the canvas and keep molecular labels intact", () => {
+  const bullets = [
+    "模型：人 MRC5 成纤维细胞和小鼠组织",
+    "干预：比较处理组与对照组",
+    "定位：观察损伤灶与端粒共定位",
+    "验证：ChIP 检测亚端粒区域 γH2A.X 富集",
+    "结论边界：相关性不能直接证明因果",
+  ];
+  const layout = slideLayout(
+    { title: "实验设计", bullets, notes: "讲稿不进入页面", citations: [] },
+    [],
+  );
+  const boxes = layout.text.filter((b) => b.role === "bullet");
+  assert.equal(boxes[0].y, boxes[1].y);
+  assert.ok(boxes[1].x > boxes[0].x + boxes[0].w);
+  for (const [i, b] of boxes.entries()) {
+    assert.equal(
+      b.lines.join("").replace(/\s/g, ""),
+      bullets[i].replace(/\s/g, ""),
+    );
+    assert.ok(b.x + b.w <= 13.34 && b.y + b.h < 6.8);
+    for (const next of boxes.slice(i + 1)) {
+      const intersect =
+        b.x < next.x + next.w &&
+        next.x < b.x + b.w &&
+        b.y < next.y + next.h &&
+        next.y < b.y + b.h;
+      assert.equal(intersect, false);
+    }
+  }
+  assert.ok(boxes[3].lines.some((l) => l.includes("γH2A.X")));
+  const steps = slideLayout(
+    {
+      title: "研究路径",
+      bullets: bullets.slice(0, 3),
+      notes: "",
+      citations: [],
+    },
+    [],
+  ).text.filter((b) => b.role === "bullet");
+  assert.equal(new Set(steps.map((b) => b.y)).size, 1);
+  assert.equal(new Set(steps.map((b) => b.x)).size, 3);
+});
