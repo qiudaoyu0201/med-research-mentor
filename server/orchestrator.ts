@@ -94,17 +94,19 @@ export function validateCitations(
     throw new Error("事实或基础知识缺少可定位的引用。");
   if (deck?.slides.some((s) => s.citations.length === 0))
     throw new Error("汇报页缺少来源。");
-  if (deliveryPolicy === "internal") {
     for (const section of unit.sections) {
       if (
         ["paper", "foundation"].includes(section.kind) &&
         !section.citations.some(
-          (id) => sources.find((s) => s.id === id)?.kind === section.kind,
+          (id) => {
+            const kind = sources.find((s) => s.id === id)?.kind;
+            return kind === section.kind ||
+              (deliveryPolicy === "online" && section.kind === "foundation" && kind === "paper");
+          },
         )
       )
         throw new Error("论文事实与通用基础的引用类型不匹配。");
     }
-  }
   if (
     sources.some((s) => s.kind === "paper" && s.paperId) &&
     new Set(sources.filter((s) => s.kind === "paper").map((s) => s.paperId))
