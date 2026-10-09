@@ -186,7 +186,7 @@ export class CodexClient {
     await this.rpc("initialize", {
       clientInfo: {
         name: "medical_research_tutor",
-        title: "医学科研入门导师",
+        title: "医研导师",
         version: "0.1.0",
       },
       capabilities: { experimentalApi: true },

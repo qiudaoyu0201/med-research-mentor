@@ -541,7 +541,7 @@ function App() {
     return (
       <main className="loading">
         <div className="app-symbol">医</div>
-        <h1>医学科研入门导师</h1>
+        <h1>医研导师</h1>
         <p>{error || "正在加载…"}</p>
       </main>
     );
@@ -551,7 +551,7 @@ function App() {
         <button className="brand" onClick={() => setShowLibrary(true)}>
           <span className="app-symbol">医</span>
           <span>
-            医学科研入门导师<small>从看见结果，到理解科研</small>
+            医研导师<small>Med Research Mentor · 从看见结果，到理解科研</small>
           </span>
         </button>
         <span className="saved">

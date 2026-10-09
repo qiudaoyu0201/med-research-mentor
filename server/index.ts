@@ -1310,7 +1310,7 @@ app.use(
   },
 );
 const server = app.listen(port, "127.0.0.1", () =>
-  console.log(`医学科研入门导师：http://127.0.0.1:${port}`),
+  console.log(`医研导师（Med Research Mentor）：http://127.0.0.1:${port}`),
 );
 async function shutdown() {
   await translations.close();

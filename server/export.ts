@@ -16,7 +16,7 @@ export async function exportDeck(
     sourceMap = new Map(paper.sources.map((s) => [s.id, s]));
   const pptx = new PptxGenJS();
   pptx.layout = "LAYOUT_WIDE";
-  pptx.author = "医学科研入门导师";
+  pptx.author = "医研导师（Med Research Mentor）";
   pptx.subject = "学习汇报";
   pptx.title = paper.title;
   pptx.theme = {
