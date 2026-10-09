@@ -640,9 +640,34 @@ export function ResearchDiscussion({
                   </>
                 )}
                 {turn.error && (
-                  <p className="rw-error" role="alert">
-                    {turn.error}
-                  </p>
+                  <>
+                    <p className="rw-error" role="alert">{turn.error}</p>
+                    {turn.run?.review?.issues?.length ? (
+                      <details className="rw-review-details" open>
+                        <summary>
+                          核验详情 · {turn.run.review.issues.filter((issue) => !issue.resolved).length} 个待处理问题
+                        </summary>
+                        {turn.run.review.issues
+                          .filter((issue) => !issue.resolved)
+                          .slice(0, 8)
+                          .map((issue) => (
+                            <div className="rw-review-issue" key={issue.id}>
+                              <strong>
+                                {issue.severity === "blocking" ? "必须修正" : "建议补充"} · {issue.type}
+                              </strong>
+                              <p>{issue.location}</p>
+                              <p>{issue.suggestion}</p>
+                              {issue.evidence.length > 0 && (
+                                <small>依据：{issue.evidence.join("、")}</small>
+                              )}
+                            </div>
+                          ))}
+                        <p className="rw-review-next">
+                          可以补充对应 PDF 页或原文范围后重新提问；系统会保留当前草稿，不会把未核验内容推进为已读。
+                        </p>
+                      </details>
+                    ) : null}
+                  </>
                 )}
                 {turn.status === "clarification" && (
                   <p>{turn.reply?.nextStep}</p>

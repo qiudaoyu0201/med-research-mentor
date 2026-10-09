@@ -337,6 +337,34 @@
 .rw-error {
   color: var(--rw-secondary) !important;
 }
+
+.rw-review-details {
+  margin: 10px 0;
+  padding: 10px 12px;
+  border: 1px solid #e4c7c0;
+  border-radius: 12px;
+  background: #fffaf8;
+}
+
+.rw-review-details summary {
+  cursor: pointer;
+  font-weight: 650;
+}
+
+.rw-review-issue {
+  margin-top: 10px;
+  padding-top: 10px;
+  border-top: 1px solid #f0ded9;
+}
+
+.rw-review-issue p,
+.rw-review-next {
+  margin: 5px 0 0;
+}
+
+.rw-review-issue small {
+  color: #6d5a55;
+}
 .rw-running {
   background: var(--rw-surface);
   border-color: var(--rw-line);
