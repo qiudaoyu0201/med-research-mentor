@@ -643,7 +643,7 @@ export function ResearchDiscussion({
                   <>
                     <p className="rw-error" role="alert">{turn.error}</p>
                     {turn.run?.review?.issues?.length ? (
-                      <details className="rw-review-details" open>
+                      <details className="rw-review-details">
                         <summary>
                           核验详情 · {turn.run.review.issues.filter((issue) => !issue.resolved).length} 个待处理问题
                         </summary>
@@ -653,17 +653,17 @@ export function ResearchDiscussion({
                           .map((issue) => (
                             <div className="rw-review-issue" key={issue.id}>
                               <strong>
-                                {issue.severity === "blocking" ? "必须修正" : "建议补充"} · {issue.type}
+                                {issue.severity === "blocking" ? "必须修正" : "建议补充"} · {{fact: "事实", scope: "结论范围", teaching: "讲解衔接", material: "资料缺口"}[issue.type]}
                               </strong>
                               <p>{issue.location}</p>
                               <p>{issue.suggestion}</p>
                               {issue.evidence.length > 0 && (
-                                <small>依据：{issue.evidence.join("、")}</small>
+                                <small>依据：{issue.evidence.map(id => turn.run?.materials?.at(-1)?.sources.find(s => s.id === id)?.locator ?? "相关引用资料").join("、")}</small>
                               )}
                             </div>
                           ))}
                         <p className="rw-review-next">
-                          可以补充对应 PDF 页或原文范围后重新提问；系统会保留当前草稿，不会把未核验内容推进为已读。
+                          已保留本次核对结果。可调整问题后继续；需要额外资料时会说明具体缺少什么。
                         </p>
                       </details>
                     ) : null}

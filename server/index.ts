@@ -64,7 +64,7 @@ await tutorResearch.restore();
 const app = express(),
   port = Number(process.env.PORT || 4317),
   provider = createProvider(),
-  manager = new TaskManager(provider);
+  manager = new TaskManager(provider, save, "online");
 let replayController: AbortController | undefined;
 const loadedSample = withFoundationSources(await localSample());
 await mkdir(join(root, "uploads"), { recursive: true });

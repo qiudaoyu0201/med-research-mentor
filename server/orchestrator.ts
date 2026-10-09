@@ -275,6 +275,7 @@ export class TaskManager {
   constructor(
     private provider: Provider,
     private persist: typeof save = save,
+    private deliveryPolicy: "internal" | "online" = "internal",
   ) {}
   async start(
     input: TaskInput,
@@ -322,6 +323,7 @@ export class TaskManager {
             input.workflow !== "direct" && (input.checks?.readability ?? true),
           grounding: input.workflow !== "direct",
         }));
+      skills.versions["delivery-policy"] = this.deliveryPolicy + "-v1";
       if (input.workflow === "direct")
         skills.versions["medical-research-assistant"] = (
           await assistantRules()
@@ -618,7 +620,7 @@ export class TaskManager {
           skills.modules.find((m) => m.id === "medical-grounding-check")!.text +
           "\n若 deck 含 speechScript，联合核对完整稿与页面的事实、术语、页序、转场和结尾；仅提供逐页备注不能当作完整稿。";
         const scopedChecking =
-          checking +
+          checking + (this.deliveryPolicy === "online" ? onlineReviewInstructions : "") +
           (run.input.diagnosticScope
             ? "\n本次核对同时检查事实与解释：当前问题涉及的干预／测量原理、术语含义、比较的作用和从读数到判断的推理是否进入实际产物。只依据本次来源；合理的真实未知保留，不要求额外复现手册。不把缺少必要解释判为通过。"
             : "");
@@ -1001,6 +1003,10 @@ export class TaskManager {
           )
             throw new Error("读图汇报缺少已提供的原图来源。");
         }
+        if (this.deliveryPolicy === "online") {
+          const problem = onlineDeliveryProblem(review);
+          if (problem) throw new Error(problem);
+        }
         // If a blocking issue cannot be mapped to a section, withhold the whole draft.
         if (
           review.issues.some(
@@ -1044,3 +1050,4 @@ export class TaskManager {
     }
   }
 }
+import { onlineDeliveryProblem, onlineReviewInstructions } from "./delivery-policy.ts";
