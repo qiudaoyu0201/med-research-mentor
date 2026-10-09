@@ -436,6 +436,14 @@ test("manual page correction failure retains exact draft and can be saved again 
 });
 
 test("shared slide layout enlarges figures, preserves readable text, and uses concise page citations", () => {
+  for (const sentence of [
+    "研究跨越急性应激、端粒酶表达、活细胞动力学与小鼠组织观察。",
+    "检验结果（比较对照），再看证据。",
+  ]) {
+    const lines = wrapSlideText(sentence, 3.5, 20);
+    assert.equal(lines.join(""), sentence);
+    assert.ok(lines.every((line) => !/^[，。；：！？、）]/.test(line)));
+  }
   const boundaryText = "损伤形成后处理：检验缓解作用";
   const boundaryLines = wrapSlideText(boundaryText, 3.5, 18);
   assert.ok(boundaryLines.length > 1);

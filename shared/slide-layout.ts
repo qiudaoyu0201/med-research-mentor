@@ -20,9 +20,22 @@ export function wrapSlideText(text: string, width: number, fontSize: number) {
   for (const paragraph of text.split("\n")) {
     let line = "",
       length = 0;
-    for (const word of paragraph.match(
-      /\d[\d,.]*(?:[–—−-]\d[\d,.]*)?(?:%|％)?|[A-Za-z\u0370-\u03ff][A-Za-z0-9\u0370-\u03ff_./+-]*|[^\x00-\x7f]|\s+|./gu,
-    ) ?? []) {
+    const tokens =
+      paragraph.match(
+        /\d[\d,.]*(?:[–—−-]\d[\d,.]*)?(?:%|％)?|[A-Za-z\u0370-\u03ff][A-Za-z0-9\u0370-\u03ff_./+-]*|[^\x00-\x7f]|\s+|./gu,
+      ) ?? [];
+    const words: string[] = [];
+    // Keep closing punctuation with the preceding token before wrapping;
+    // appending it after wrapping would overflow an already full line.
+    for (const token of tokens) {
+      if (
+        words.length &&
+        /^[，。；：！？、）》」』】”’…,.!?;:)\]]+$/.test(token)
+      )
+        words[words.length - 1] += token;
+      else words.push(token);
+    }
+    for (const word of words) {
       const units = [...word].reduce(
         (n, c) => n + (/[\x00-\x7f]/.test(c) ? 0.52 : 1),
         0,

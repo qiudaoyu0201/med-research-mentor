@@ -29,7 +29,11 @@ export async function exportDeck(
     let image = s.imageSource ? sourceMap.get(s.imageSource)?.image : undefined;
     if (s.imageSource && !sourceMap.has(s.imageSource))
       throw new Error("图件来源无效。");
-    let size = s.imageSource ? { width: 1600, height: 1000 } : undefined;
+    if (s.imageSource && !image)
+      throw new Error(
+        `第 ${i + 1} 页已选择原图，但图片数据缺失；请重新加载论文原图后导出。`,
+      );
+    let size: { width: number; height: number } | undefined;
     if (image) {
       let decoded = await loadImage(image);
       if (s.imageCrop) {
@@ -98,15 +102,6 @@ export async function exportDeck(
       });
     }
     if (image && layout.image) slide.addImage({ data: image, ...layout.image });
-    else if (layout.image)
-      slide.addText("原图未提供", {
-        ...layout.image,
-        fontSize: 20,
-        color: "73737C",
-        align: "center",
-        valign: "middle",
-        margin: 0,
-      });
     slide.addText(`${i + 1} / ${deck.slides.length}`, {
       x: 12.1,
       y: 7.02,

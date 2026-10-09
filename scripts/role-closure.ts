@@ -23,24 +23,37 @@ import {
 } from "../server/development-acceptance.ts";
 
 const recovery = process.argv[2] === "storage-recovery";
-const mainline = process.argv[2] === "mainline-v4";
+const clinical = process.argv[2] === "clinical-small-v7";
+const crossPaper = process.argv[2] === "cross-paper-v6";
+const transportRecovery = process.argv[2] === "mainline-recovery-v5";
+const mainline =
+  process.argv[2] === "mainline-v4" ||
+  transportRecovery ||
+  crossPaper ||
+  clinical;
 const coordination = process.argv[2] === "coordination-v3" || mainline;
 const revision = process.argv[2] === "revision-v2" || recovery || coordination;
 if (process.argv[2] && !revision)
   throw new Error(
-    "仅支持默认整合回归、revision-v2、storage-recovery或coordination-v3",
+    "支持默认整合回归、revision-v2、storage-recovery、coordination-v3、mainline-v4、mainline-recovery-v5、cross-paper-v6或clinical-small-v7",
   );
 const batchId =
   "role-closure-20261009" +
-  (mainline
-    ? "-mainline-v4"
-    : coordination
-      ? "-coordination-v3"
-      : recovery
-        ? "-storage-recovery"
-        : revision
-          ? "-revision-v2"
-          : "");
+  (clinical
+    ? "-clinical-small-v7"
+    : crossPaper
+      ? "-cross-paper-v6"
+      : transportRecovery
+        ? "-mainline-recovery-v5"
+        : mainline
+          ? "-mainline-v4"
+          : coordination
+            ? "-coordination-v3"
+            : recovery
+              ? "-storage-recovery"
+              : revision
+                ? "-revision-v2"
+                : "");
 const directory = resolve("runs/internal-training/" + batchId);
 process.env.TUTOR_DATA_DIR = join(directory, "data");
 process.env.TUTOR_READING_GUIDES = "manual";
@@ -114,17 +127,30 @@ if (coordination) {
 }
 if (mainline) {
   const raw = await readFile(
-    "runs/internal-training/model-scope-20261009-config-recovery/records/training/report.json",
+    clinical
+      ? "runs/internal-training/role-closure-20261009-cross-paper-v6/records/training/report.json"
+      : crossPaper
+        ? "runs/internal-training/role-closure-20261009-mainline-recovery-v5/records/training/report.json"
+        : transportRecovery
+          ? "runs/internal-training/role-closure-20261009-mainline-v4/records/training/report.json"
+          : "runs/internal-training/model-scope-20261009-config-recovery/records/training/report.json",
     "utf8",
   );
   const latest = JSON.parse(raw);
   const attempts = latest.batch.budget.attempts;
   if (
-    latest.status !== "stopped" ||
-    latest.parentNewAttempts !== 54 ||
-    latest.calls !== 1 ||
-    attempts.length !== 1 ||
-    attempts[0].observation?.remoteTerminal !== "failed"
+    crossPaper || clinical
+      ? !["diagnostic-passed", "needs-improvement"].includes(latest.status) ||
+        latest.parentNewAttempts !== (clinical ? 62 : 56) ||
+        latest.calls < 3 ||
+        latest.calls > 6 ||
+        attempts.length !== latest.calls ||
+        attempts.some((a: any) => a.status !== "succeeded")
+      : latest.status !== "stopped" ||
+        latest.parentNewAttempts !== (transportRecovery ? 55 : 54) ||
+        latest.calls !== 1 ||
+        attempts.length !== 1 ||
+        attempts[0].observation?.remoteTerminal !== "failed"
   )
     throw new Error("前批未明确结束，不能接续");
   lineage = latest;
@@ -174,17 +200,54 @@ try {
       JSON.stringify(baseline.provider.settings)
   )
     throw new Error("模型配置与基线不同");
-  const paper: PaperBundle = JSON.parse(
+  let paper: PaperBundle = JSON.parse(
     await readFile(
-      "data/papers/6149094e-e528-461a-bc3e-791ae6e5652e.json",
+      crossPaper
+        ? "data/papers/494f12de-ceee-402d-a282-9d5fd0a7d6f7.json"
+        : "data/papers/6149094e-e528-461a-bc3e-791ae6e5652e.json",
       "utf8",
     ),
   );
+  if (clinical) {
+    const pool = JSON.parse(
+      await readFile(
+        "runs/internal-training/literature-pool-20261010/report.json",
+        "utf8",
+      ),
+    );
+    const source = pool.selected.find((s: any) => s.id === "pmid-34189796");
+    if (
+      pool.status !== "completed" ||
+      source?.bibliography?.level !== "abstract" ||
+      !source.excerpt.includes("cross-sectional")
+    )
+      throw new Error("临床摘要来源不完整");
+    paper = {
+      id: source.id,
+      title: source.title,
+      version: digest(source.excerpt),
+      scope: "实际PubMed摘要，不是全文；只核对摘要提供的研究设计与结论",
+      sources: [
+        {
+          id: source.id,
+          title: source.title,
+          kind: "paper",
+          text: source.excerpt,
+          locator: source.locator,
+          url: source.url,
+          verified: false,
+        },
+      ],
+    };
+  }
   const rules = await freezeRules();
   if (mainline) {
     const entry = rules.entries["medical-journal-club-ppt"];
     entry.text +=
       "\n模型概览页列出多个实验对象时，逐个为其配置实际页内来源：细胞方法不能替代动物组织观察。总结跨实验结果时也要覆盖对应实验来源。优先用页面表达研究思路，方法参数只在影响结论时展开，解释放独立notes。";
+    if (crossPaper)
+      entry.text +=
+        "\n开篇研究路线和总结也检查页内来源覆盖：涉及具体实验的句子配对应原始图注，不让引言引用代替后文实验来源。每张结果页以当前imageSource对应的图为主体；如需串联其他图，明确说是另一图的结果，不把未显示面板说成当前图。先在notes解释关键指标读到什么，再连接比较与结论，避免只列方法名。";
     entry.version += "-model-coverage-v4";
     entry.hash = digest(entry.text);
   }
@@ -222,7 +285,9 @@ try {
       : undefined,
     batch,
     sourceView: "inline-frozen-blocks",
-    scope: "整篇六页PPT三Agent开发回归；非发布/留出评估",
+    scope: clinical
+      ? "新检索临床摘要三Agent小样本回归；非全文或发布评估"
+      : "整篇六页PPT三Agent开发回归；非发布/留出评估",
     provider: baseline.provider,
   };
   const persist = () => store.save("training", "report", report);
@@ -295,14 +360,15 @@ try {
       const run = await manager.start(
         {
           paperId: paper.id,
-          module: "ppt",
+          module: clinical ? "paper" : "ppt",
           mode: "live",
           profileId: "beginner",
-          question:
-            "生成6页组会汇报：研究背景、实验设计、关键对照、主要结果与创新局限。逐页讲述提示独立保存在notes，不进入幻灯片正文；不需要完整讲稿。",
+          question: clinical
+            ? "我是医学科研新手，请用两三个短段落带我读这篇摘要：研究想回答什么、如何测量和比较、结果说明什么，以及为什么不能直接推出治疗失眠可以减少衰弱。首次出现的关键英文术语给中文解释，不展开摘要没报告的实验操作。"
+            : "生成6页组会汇报：研究背景、实验设计、关键对照、主要结果与创新局限。逐页讲述提示独立保存在notes，不进入幻灯片正文；不需要完整讲稿。",
           sourceIds: paper.sources.map((s) => s.id),
           taughtConcepts: [],
-          slideCount: 6,
+          ...(clinical ? {} : { slideCount: 6 }),
           checks: {
             readability: true,
             reason: "内部三Agent协作与来源视图整合回归",

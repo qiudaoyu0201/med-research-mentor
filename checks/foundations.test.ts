@@ -476,6 +476,61 @@ test("late foundation supplementation triggers exactly one revision and preserve
   } as unknown as ResultCache;
   await manager.publishCache(run.id, cache);
 });
+test("paper-linked definition gaps also receive foundations before revision", async () => {
+  const p = paper("mixed");
+  const gap = {
+    id: "bp-1",
+    sentence: "TAF下降",
+    missingConcept: "指标的生物学含义",
+    question: "Figure 4中TAF和SA-β-gal各代表什么？请补充基础来源。",
+    status: "open",
+  };
+  const audit = {
+    ...review,
+    issues: [
+      {
+        id: gap.id,
+        type: "material",
+        severity: "warning",
+        location: "notes",
+        suggestion: gap.question,
+        evidence: ["mixed-result"],
+        resolved: false,
+      },
+    ],
+  };
+  const manager = new TaskManager(
+    provider([
+      lesson("mixed-result", "paper"),
+      { understood: [], breakpoints: [gap] },
+      audit,
+      lesson("taf-basics"),
+      { understood: [], breakpoints: [{ ...gap, status: "resolved" }] },
+      review,
+    ]),
+    discard,
+  );
+  const run = await manager.start(
+    {
+      paperId: p.id,
+      module: "paper",
+      mode: "live",
+      question: "讲实验",
+      profileId: "beginner",
+      sourceIds: ["mixed-result"],
+      taughtConcepts: [],
+    },
+    p,
+  );
+  await manager.wait(run.id);
+  assert.equal(run.status, "completed", run.error);
+  assert.ok(run.materialRequests![0].matchedIds.includes("taf-basics"));
+  assert.ok(run.materialRequests![0].matchedIds.includes("sa-beta-gal"));
+  assert.ok(JSON.stringify(run.roles[3].input).includes("taf-basics"));
+  assert.ok(!JSON.stringify(run.roles[0].input).includes("taf-basics"));
+  assert.equal(run.materialRequests![0].status, "resolved");
+});
+
 test("unknown concepts stay pending with three calls and specific requests", async () => {
   const p = paper("alpha");
   const gap = {

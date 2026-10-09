@@ -76,9 +76,12 @@ export function watchRequest(
   return {
     signal: AbortSignal.any([signal, controller.signal]),
     observe(event: ProviderEvent) {
-      if (event.type !== "output" || (event.text?.length ?? 0) <= outputLength)
-        return;
-      outputLength = event.text!.length;
+      // Some structured-output streams keep emitting whitespace after the JSON.
+      // Preserve those raw bytes in the ledger, but do not treat them as progress.
+      const meaningfulLength =
+        event.type === "output" ? (event.text?.trimEnd().length ?? 0) : 0;
+      if (event.type !== "output" || meaningfulLength <= outputLength) return;
+      outputLength = meaningfulLength;
       if (outputTimer) {
         clearTimeout(outputTimer);
         timers.delete(outputTimer);

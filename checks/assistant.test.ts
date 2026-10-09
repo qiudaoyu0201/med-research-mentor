@@ -224,7 +224,14 @@ test("optional full speech reaches PPT generation, grounding and saved deck with
     [
       {
         unit: exampleUnits.paper,
-        deck: { ...defaultDeck, speechScript: script },
+        deck: {
+          ...defaultDeck,
+          slides: defaultDeck.slides.map((slide) => ({
+            ...slide,
+            imageSource: "",
+          })),
+          speechScript: script,
+        },
       },
       {
         issues: [],

@@ -862,11 +862,18 @@ export class TaskManager {
             /缺.*(原图|图注|方法原文|论文.*参数)|未提供.*(原图|图注|方法原文)|需(?:要)?(?:提供|补充).*(归一化与校准|稳定性依据)|(?:图注|所给材料|当前论文|本文).*(?:未明确|缺少|未提供).*(?:分母|基线|筛选|参数)|基线.*(?:哪个时间|何时|测量时间|逐.*配对)/s.test(
               request.question,
             );
-          const matches = paperSpecific
-            ? []
-            : foundationCatalog.match(
-                request.concept + "\n" + request.question,
-              );
+          // A request can cite a paper figure and still ask for foundational
+          // definitions. Paper provenance must not suppress that second need.
+          const needsFoundation =
+            /代表什么|测量什么|生物学含义|基础来源|基础定义|概念含义|基础原理/.test(
+              request.concept + "\n" + request.question,
+            );
+          const matches =
+            paperSpecific && !needsFoundation
+              ? []
+              : foundationCatalog.match(
+                  request.concept + "\n" + request.question,
+                );
           const added = matches.filter(
             (s) => !sources.some((x) => x.id === s.id),
           );
@@ -898,10 +905,14 @@ export class TaskManager {
               : "未匹配到可用资料，或相关资料超过额度。",
             paperId: paper.id,
             sourceVersion: paper.version,
-            matchedIds:
-              paperSpecific && provided
-                ? providedPaperIds
-                : matches.map((s) => s.id),
+            matchedIds: provided
+              ? [
+                  ...new Set([
+                    ...(paperSpecific ? providedPaperIds : []),
+                    ...matches.map((s) => s.id),
+                  ]),
+                ]
+              : [],
             status: provided ? "provided" : "pending",
           });
         }

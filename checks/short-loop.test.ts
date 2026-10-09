@@ -136,7 +136,7 @@ test("frozen development fragments retain exact complete ranges and forbid holdo
     ["development", "development", "development"],
   );
 });
-test("output growth sustains production; RPC and usage activity cannot hide a stall", async () => {
+test("content growth sustains production; whitespace, RPC and usage cannot hide a stall", async () => {
   const events: ProviderEvent[] = [];
   const watch = watchRequest(
     new AbortController().signal,
@@ -169,6 +169,11 @@ test("output growth sustains production; RPC and usage activity cannot hide a st
     });
     watch.observe({ type: "response", at: new Date().toISOString() });
     watch.observe({ type: "usage", at: new Date().toISOString() });
+    watch.observe({
+      type: "output",
+      text: "one two" + " \t\n".repeat(500),
+      at: new Date().toISOString(),
+    });
     await wait(70);
     assert.equal(watch.signal.aborted, true);
     assert.equal(events.at(-1)?.layer, "output-idle");
@@ -189,6 +194,12 @@ test("first output and task total are distinct, and continuous output cannot ext
       },
       (e) => events.push(e),
     );
+    if (mode === "first")
+      watch.observe({
+        type: "output",
+        text: " \t\n".repeat(500),
+        at: new Date().toISOString(),
+      });
     const ticker =
       mode === "total"
         ? setInterval(

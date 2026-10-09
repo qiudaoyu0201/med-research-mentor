@@ -404,8 +404,14 @@ test("concurrent starts reserve a single task before asynchronous preparation", 
   await assert.rejects(() => manager.start(input, sample), /已有学习任务/);
   await wait(await first);
 });
-test("PPTX contains eight editable slides and missing-figure placeholders without speaking notes", async () => {
-  const path = await exportDeck(defaultDeck, sample, "test-deck");
+test("PPTX keeps editable text and separate notes, and rejects lost referenced images", async () => {
+  await assert.rejects(
+    exportDeck(defaultDeck, sample, "test-missing-image"),
+    /图片数据缺失/,
+  );
+  const textDeck = structuredClone(defaultDeck);
+  for (const slide of textDeck.slides) slide.imageSource = "";
+  const path = await exportDeck(textDeck, sample, "test-deck");
   const zip = unzipSync(new Uint8Array(await readFile(path)));
   const slides = Object.keys(zip).filter((k) =>
     /^ppt\/slides\/slide\d+\.xml$/.test(k),
@@ -422,7 +428,7 @@ test("PPTX contains eight editable slides and missing-figure placeholders withou
     assert.match(text, /^\d+$/); // PptxGenJS emits empty placeholders plus a page number.
   }
   assert.match(strFromU8(zip[slides[0]]), /<a:t>/);
-  assert.ok(slides.some((s) => strFromU8(zip[s]).includes("原图未提供")));
+  assert.ok(slides.every((s) => !strFromU8(zip[s]).includes("原图未提供")));
   assert.ok(defaultDeck.slides.some((s) => s.notes.length > 0));
 });
 test("PDF importer extracts actual pages and rejects malformed files", async () => {
