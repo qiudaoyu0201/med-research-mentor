@@ -1,6 +1,10 @@
 import test from "node:test";
 import assert from "node:assert/strict";
-import { prepareReading, completeReading } from "../server/reading-session.ts";
+import {
+  prepareReading,
+  completeReading,
+  readingAction,
+} from "../server/reading-session.ts";
 import type { PaperBundle } from "../shared/types.ts";
 const paper = (first: string, second: string): PaperBundle => ({
   id: "p",
@@ -17,6 +21,35 @@ const paper = (first: string, second: string): PaperBundle => ({
     verified: true,
     section: "results",
   })),
+});
+
+test("named figure questions escape the active background excerpt without moving its cursor", () => {
+  const p = paper(
+    "Background on senescence.",
+    "Figure 1 compares control and senescent cells.",
+  );
+  const active = completeReading(
+    prepareReading(p, undefined, "start", "带我读"),
+    "first",
+  );
+  for (const question of [
+    "背景我已经理解了，现在直接带我看Figure 1：先说设计和对照，再讲主要结果。解释关键坐标。",
+    "解释图一的实验方法",
+    "重点讲 Fig. 1 的对照",
+  ]) {
+    assert.equal(
+      readingAction({ clientMessageId: "q", mode: "live", question }, active),
+      undefined,
+    );
+  }
+  assert.equal(
+    readingAction({ clientMessageId: "q", mode: "live", question: "详细解释这段" }, active),
+    "deepen",
+  );
+  assert.equal(
+    readingAction({ clientMessageId: "q", mode: "live", question: "继续带读" }, active),
+    "continue",
+  );
 });
 
 test("a continued experiment crosses the PDF page boundary while preserving per-source evidence", () => {

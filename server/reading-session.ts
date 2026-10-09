@@ -4,7 +4,7 @@ import type {
   ReadingRange,
   ReadingSession,
 } from "../shared/reading-session.ts";
-import { digest } from "./materials.ts";
+import { digest, figureNumber } from "./materials.ts";
 
 // These are bounded original-text units, not a claim that a chapter was understood.
 export function readingUnits(
@@ -63,6 +63,10 @@ export function readingAction(
   )
     return;
   if (message.readingAction) return message.readingAction;
+  // A named figure is a new evidence target, even when the question also says
+  // “explain” or “key points”. Let figure routing select its image and caption;
+  // deepening the active paragraph would incorrectly hide available material.
+  if (figureNumber(message.question) !== undefined) return;
   if (!active)
     return /带我.*(?:读|理解)|开始带读|从头.*讲/.test(message.question)
       ? "start"

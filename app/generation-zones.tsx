@@ -194,7 +194,11 @@ export function PptGeneration({
       initialPaper?.id ?? readDraft("tutor-ppt-paper", ""),
     ),
     [request, setRequest] = useState(() => readDraft("tutor-ppt-request", "")),
-    [count, setCount] = useState(""),
+    [count, setCount] = useState(() =>
+      readDraft("tutor-ppt-count", "", (value) =>
+        ["", "6", "8", "10", "12", "16"].includes(value as string),
+      ),
+    ),
     [busy, setBusy] = useState(false),
     [error, setError] = useState(""),
     [turn, setTurn] = useState<AssistantTurn>(),
@@ -218,6 +222,9 @@ export function PptGeneration({
   useEffect(() => {
     writeDraft("tutor-ppt-request", request);
   }, [request]);
+  useEffect(() => {
+    writeDraft("tutor-ppt-count", count);
+  }, [count]);
   useEffect(() => {
     const token = ++epoch.current;
     conversation.current = undefined;
