@@ -447,6 +447,20 @@ export class CodexProvider implements Provider {
           ) {
             text = item.text;
             emit({ type: "output", text });
+            // Some configured relays deliver the complete agent message but
+            // delay or omit turn/completed. Once the complete message already
+            // satisfies the frozen schema, finish this request immediately;
+            // malformed output still waits for the terminal event so the
+            // existing error/timeout path remains authoritative.
+            if (!stopping && !signal.aborted) {
+              try {
+                schema.parse(JSON.parse(text));
+                remoteEnded = true;
+                finish();
+              } catch {
+                // Keep waiting for the terminal notification or watchdog.
+              }
+            }
           }
           if (msg.method === "thread/tokenUsage/updated") {
             usage = msg.params.tokenUsage;
