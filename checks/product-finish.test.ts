@@ -549,7 +549,7 @@ test("slide compositions preserve all content within the canvas and keep molecul
     [],
   );
   const boxes = layout.text.filter((b) => b.role === "bullet");
-  assert.equal(boxes[0].y, boxes[1].y);
+  assert.equal(layout.composition, "methods");
   assert.ok(boxes[1].x > boxes[0].x + boxes[0].w);
   for (const [i, b] of boxes.entries()) {
     assert.equal(
@@ -578,4 +578,77 @@ test("slide compositions preserve all content within the canvas and keep molecul
   ).text.filter((b) => b.role === "bullet");
   assert.equal(new Set(steps.map((b) => b.y)).size, 1);
   assert.equal(new Set(steps.map((b) => b.x)).size, 3);
+});
+
+test("scientific slide emphasis preserves labels, values and every source bullet", () => {
+  const examples = [
+    {
+      title: "背景与研究问题",
+      bullets: [
+        "对象：454名社区居民",
+        "背景：多维衰弱",
+        "问题：失眠是否与衰弱相关？",
+        "目标：评估关联",
+      ],
+      expected: "question",
+    },
+    {
+      title: "关键结果",
+      bullets: [
+        "平均年龄：69.1岁",
+        "失眠：211/454（46.5%）",
+        "衰弱：185/454（40.7%）",
+        "关联涉及三个维度",
+        "调整后OR 6.863（95% CI 4.237–11.116）",
+      ],
+      expected: "results",
+    },
+    {
+      title: "局限与研究启发",
+      bullets: [
+        "不能建立时间先后",
+        "存在混杂",
+        "关联不等于因果",
+        "摘要缺模型细节",
+        "启发：进一步纵向研究",
+      ],
+      expected: "takeaway",
+    },
+  ];
+  for (const example of examples) {
+    const layout = slideLayout(
+      { ...example, notes: "不放入页面", citations: [] },
+      [],
+    );
+    assert.equal(layout.composition, example.expected);
+    const body = layout.text.filter((b) => b.role === "bullet");
+    for (const [i, original] of example.bullets.entries()) {
+      assert.equal(
+        body
+          .filter((b) => b.sourceIndex === i)
+          .flatMap((b) => b.lines)
+          .join("")
+          .replace(/\s/g, ""),
+        original.replace(/\s/g, ""),
+      );
+    }
+    for (const [i, b] of body.entries()) {
+      assert.ok(
+        b.fontSize >= 18 && b.x >= 0.5 && b.y + b.h < 6.8 && b.x + b.w < 12.9,
+      );
+      assert.ok(
+        body
+          .slice(i + 1)
+          .every(
+            (next) =>
+              !(
+                b.x < next.x + next.w &&
+                next.x < b.x + b.w &&
+                b.y < next.y + next.h &&
+                next.y < b.y + b.h
+              ),
+          ),
+      );
+    }
+  }
 });

@@ -11,6 +11,14 @@ export type TextBox = {
   role?: "title" | "bullet" | "footer";
   marker?: string;
   markerAbove?: boolean;
+  sourceIndex?: number;
+};
+export type SlideShape = {
+  x: number;
+  y: number;
+  w: number;
+  h: number;
+  fill: string;
 };
 export const slideSize = { width: 13.333333, height: 7.5 };
 export function wrapSlideText(text: string, width: number, fontSize: number) {
@@ -98,6 +106,8 @@ export function slideLayout(
   imageSize?: { width: number; height: number },
 ) {
   const text: TextBox[] = [];
+  const shapes: SlideShape[] = [];
+  let composition = "standard";
   let titleSize = 32,
     titleLines = wrapSlideText(slide.title, 11.8, titleSize);
   while ((titleLines.length * titleSize * 1.18) / 72 > 0.9 && titleSize > 22) {
@@ -107,7 +117,7 @@ export function slideLayout(
   if ((titleLines.length * titleSize * 1.18) / 72 > 0.9)
     throw new Error("幻灯片标题太长，请精简后再导出。");
   text.push({
-    x: 0.85,
+    x: 0.75,
     y: 0.55,
     w: 11.8,
     h: 0.9,
@@ -119,67 +129,257 @@ export function slideLayout(
   });
   const hasImage = !!imageSize;
   const count = slide.bullets.length;
-  const steps =
-    !hasImage && count === 3 && /路径|步骤|流程|路线/.test(slide.title);
-  const columns = hasImage ? 1 : steps ? 3 : count >= 4 ? 2 : 1;
-  const bulletW = hasImage
-      ? 3.5
-      : columns === 3
-        ? 3.35
-        : columns === 2
-          ? 5.1
-          : 10.65,
-    startY = columns > 1 ? 2.1 : 1.7,
-    gap = hasImage ? 0.22 : columns > 1 ? 0.68 : 0.36,
-    bodyX = hasImage ? 9.05 : columns > 1 ? 0.9 : 1.35;
-  // Fit the whole column at one font size instead of shrinking each bullet or
-  // spreading a short sentence over a fixed, mostly empty slot.
-  let fontSize = hasImage ? 20 : columns > 1 ? 24 : 25;
-  const measure = () =>
-    slide.bullets.map((b) => {
-      const lines = wrapSlideText(b, bulletW, fontSize);
-      return {
-        lines,
-        h: (Math.max(1, lines.length) * fontSize * 1.18) / 72 + 0.09,
-      };
-    });
-  let blocks = measure();
-  const rowHeights = () =>
-    Array.from({ length: Math.ceil(count / columns) }, (_, row) =>
-      Math.max(
-        ...blocks.slice(row * columns, (row + 1) * columns).map((b) => b.h),
-      ),
-    );
-  const height = () =>
-    rowHeights().reduce((sum, h) => sum + h, 0) +
-    Math.max(0, Math.ceil(count / columns) - 1) * gap;
-  const available = 6.68 - startY;
-  while (height() > available && fontSize > 17) {
-    fontSize--;
-    blocks = measure();
-  }
-  if (height() > available)
-    throw new Error(
-      "幻灯片要点过密，请精简页面内容并将解释移入讲述提示后再导出。",
-    );
-  let y = startY;
-  for (const [i, b] of blocks.entries()) {
-    text.push({
-      x:
-        bodyX +
-        (i % columns) * (columns === 3 ? 4.08 : columns === 2 ? 6.1 : 0),
+  // Use the content's existing emphasis; do not invent claims, chart data, or
+  // causal arrows merely to make a scientific slide look more varied.
+  const questionIndex = slide.bullets.findIndex((b) =>
+    /^(?:核心|研究)?问题[：:]/.test(b),
+  );
+  const effectIndex = slide.bullets.findIndex((b) =>
+    /\b(?:OR|HR|RR)\b.*\d/i.test(b),
+  );
+  const takeawayIndex = slide.bullets.findIndex((b) =>
+    /^(?:启发|借鉴|下一步|建议|核心结论)[：:]/.test(b),
+  );
+  const customText: TextBox[] = [];
+  const put = (
+    index: number,
+    value: string,
+    x: number,
+    y: number,
+    w: number,
+    h: number,
+    preferred: number,
+    color = "26384A",
+    bold = false,
+  ) => {
+    let fontSize = preferred;
+    let lines = wrapSlideText(value, w, fontSize);
+    while ((lines.length * fontSize * 1.18) / 72 + 0.09 > h && fontSize > 18) {
+      fontSize--;
+      lines = wrapSlideText(value, w, fontSize);
+    }
+    if ((lines.length * fontSize * 1.18) / 72 + 0.09 > h) return false;
+    customText.push({
+      x,
       y,
-      w: bulletW,
-      h: b.h,
+      w,
+      h,
       fontSize,
-      lines: b.lines,
-      color: "303039",
+      lines,
+      color,
+      bold,
       role: "bullet",
-      marker: hasImage ? undefined : String(i + 1).padStart(2, "0"),
-      markerAbove: columns > 1,
+      sourceIndex: index,
     });
-    if (i % columns === columns - 1)
-      y += rowHeights()[Math.floor(i / columns)] + gap;
+    return true;
+  };
+  let custom = false;
+  if (
+    !hasImage &&
+    count >= 3 &&
+    count <= 5 &&
+    /背景|问题/.test(slide.title) &&
+    questionIndex >= 0
+  ) {
+    composition = "question";
+    shapes.push({ x: 0.65, y: 1.65, w: 6.15, h: 4.98, fill: "12384A" });
+    custom = put(
+      questionIndex,
+      slide.bullets[questionIndex],
+      1.03,
+      2.22,
+      5.38,
+      3.75,
+      34,
+      "FFFFFF",
+      true,
+    );
+    const rest = slide.bullets
+      .map((_, i) => i)
+      .filter((i) => i !== questionIndex);
+    rest.forEach((i, row) => {
+      custom =
+        put(
+          i,
+          slide.bullets[i],
+          7.35,
+          1.94 + row * (4.65 / rest.length),
+          5.18,
+          4.65 / rest.length - 0.3,
+          23,
+        ) && custom;
+    });
+  } else if (
+    !hasImage &&
+    count >= 3 &&
+    count <= 5 &&
+    /结果|数据/.test(slide.title) &&
+    effectIndex >= 0
+  ) {
+    composition = "results";
+    shapes.push({ x: 0.65, y: 5.03, w: 12.02, h: 1.6, fill: "12384A" });
+    custom = put(
+      effectIndex,
+      slide.bullets[effectIndex],
+      1.02,
+      5.29,
+      11.25,
+      1.14,
+      30,
+      "FFFFFF",
+      true,
+    );
+    const rest = slide.bullets
+      .map((_, i) => i)
+      .filter((i) => i !== effectIndex);
+    rest.forEach((i, order) => {
+      const x = 0.95 + (order % 2) * 6.05,
+        y = 1.76 + Math.floor(order / 2) * 1.58;
+      const parts = /^(.*?[：:])\s*(.+)$/.exec(slide.bullets[i]);
+      if (parts && parts[1].length <= 14 && /\d/.test(parts[2])) {
+        custom = put(i, parts[1], x, y, 5.32, 0.4, 18, "596B79") && custom;
+        custom =
+          put(i, parts[2], x, y + 0.47, 5.32, 0.93, 33, "146A71", true) &&
+          custom;
+      } else
+        custom =
+          put(i, slide.bullets[i], x, y + 0.18, 5.32, 1.12, 24) && custom;
+    });
+  } else if (
+    !hasImage &&
+    count >= 4 &&
+    count <= 5 &&
+    /设计|方法|测量/.test(slide.title)
+  ) {
+    composition = "methods";
+    shapes.push({ x: 0.65, y: 1.65, w: 3.15, h: 4.98, fill: "E8F2F2" });
+    custom = put(
+      0,
+      slide.bullets[0],
+      1.0,
+      2.16,
+      2.45,
+      3.98,
+      26,
+      "12535D",
+      true,
+    );
+    slide.bullets.slice(1).forEach((value, order) => {
+      custom =
+        put(
+          order + 1,
+          value,
+          4.32 + (order % 2) * 4.4,
+          2.0 + Math.floor(order / 2) * 2.35,
+          3.65,
+          1.95,
+          23,
+        ) && custom;
+    });
+  } else if (
+    !hasImage &&
+    count >= 3 &&
+    count <= 5 &&
+    /局限|启发|总结/.test(slide.title) &&
+    takeawayIndex >= 0
+  ) {
+    composition = "takeaway";
+    shapes.push({ x: 0.65, y: 5.03, w: 12.02, h: 1.6, fill: "E8F2F2" });
+    custom = put(
+      takeawayIndex,
+      slide.bullets[takeawayIndex],
+      1.02,
+      5.28,
+      11.25,
+      1.14,
+      27,
+      "12535D",
+      true,
+    );
+    slide.bullets
+      .map((_, i) => i)
+      .filter((i) => i !== takeawayIndex)
+      .forEach((i, order) => {
+        custom =
+          put(
+            i,
+            slide.bullets[i],
+            0.95 + (order % 2) * 6.05,
+            1.85 + Math.floor(order / 2) * 1.52,
+            5.32,
+            1.25,
+            23,
+          ) && custom;
+      });
+  }
+  if (custom) {
+    // Keep the source order in the document even when emphasis moves visually.
+    text.push(...customText.sort((a, b) => a.sourceIndex! - b.sourceIndex!));
+  } else {
+    shapes.length = 0;
+    composition = hasImage ? "evidence" : "standard";
+    const steps =
+      !hasImage && count === 3 && /路径|步骤|流程|路线/.test(slide.title);
+    const columns = hasImage ? 1 : steps ? 3 : count >= 4 ? 2 : 1;
+    const bulletW = hasImage
+        ? 3.5
+        : columns === 3
+          ? 3.35
+          : columns === 2
+            ? 5.1
+            : 10.65,
+      startY = columns > 1 ? 2.1 : 1.7,
+      gap = hasImage ? 0.22 : columns > 1 ? 0.68 : 0.36,
+      bodyX = hasImage ? 9.05 : columns > 1 ? 0.9 : 1.35;
+    // Fit the whole column at one font size instead of shrinking each bullet or
+    // spreading a short sentence over a fixed, mostly empty slot.
+    let fontSize = hasImage ? 20 : columns > 1 ? 24 : 25;
+    const measure = () =>
+      slide.bullets.map((b) => {
+        const lines = wrapSlideText(b, bulletW, fontSize);
+        return {
+          lines,
+          h: (Math.max(1, lines.length) * fontSize * 1.18) / 72 + 0.09,
+        };
+      });
+    let blocks = measure();
+    const rowHeights = () =>
+      Array.from({ length: Math.ceil(count / columns) }, (_, row) =>
+        Math.max(
+          ...blocks.slice(row * columns, (row + 1) * columns).map((b) => b.h),
+        ),
+      );
+    const height = () =>
+      rowHeights().reduce((sum, h) => sum + h, 0) +
+      Math.max(0, Math.ceil(count / columns) - 1) * gap;
+    const available = 6.68 - startY;
+    while (height() > available && fontSize > 17) {
+      fontSize--;
+      blocks = measure();
+    }
+    if (height() > available)
+      throw new Error(
+        "幻灯片要点过密，请精简页面内容并将解释移入讲述提示后再导出。",
+      );
+    let y = startY;
+    for (const [i, b] of blocks.entries()) {
+      text.push({
+        x:
+          bodyX +
+          (i % columns) * (columns === 3 ? 4.08 : columns === 2 ? 6.1 : 0),
+        y,
+        w: bulletW,
+        h: b.h,
+        fontSize,
+        lines: b.lines,
+        color: "303039",
+        role: "bullet",
+        marker: hasImage ? undefined : String(i + 1).padStart(2, "0"),
+        markerAbove: columns > 1,
+      });
+      if (i % columns === columns - 1)
+        y += rowHeights()[Math.floor(i / columns)] + gap;
+    }
   }
   const footer = wrapSlideText(citationLabel(sources), 11.2, 11).slice(0, 1);
   text.push({
@@ -205,5 +405,5 @@ export function slideLayout(
       h,
     };
   }
-  return { text, image };
+  return { text, image, shapes, composition, background: "FFFFFF" };
 }

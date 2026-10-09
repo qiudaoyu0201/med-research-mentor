@@ -63,15 +63,16 @@ export async function exportDeck(
         size,
       ),
       slide = pptx.addSlide();
-    slide.background = { color: "F5F5F7" };
-    slide.addShape(pptx.ShapeType.rect, {
-      x: 0.55,
-      y: 0.65,
-      w: 0.12,
-      h: 0.5,
-      fill: { color: "007AFF" },
-      line: { color: "007AFF" },
-    });
+    slide.background = { color: layout.background };
+    for (const shape of layout.shapes)
+      slide.addShape(pptx.ShapeType.rect, {
+        x: shape.x,
+        y: shape.y,
+        w: shape.w,
+        h: shape.h,
+        fill: { color: shape.fill },
+        line: { color: shape.fill, transparency: 100 },
+      });
     for (const b of layout.text) {
       if (b.role === "bullet" && b.marker) {
         slide.addText(b.marker, {

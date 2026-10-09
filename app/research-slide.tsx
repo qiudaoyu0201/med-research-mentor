@@ -82,8 +82,17 @@ export function ResearchSlide({
       role="img"
       aria-label={`第 ${page} 页幻灯片：${slide.title}`}
     >
-      <rect width="100%" height="100%" fill="#F5F5F7" />
-      <rect x="55" y="65" width="12" height="50" fill="#007AFF" />
+      <rect width="100%" height="100%" fill={`#${layout.background}`} />
+      {layout.shapes.map((shape, index) => (
+        <rect
+          key={`shape-${index}`}
+          x={shape.x * 100}
+          y={shape.y * 100}
+          width={shape.w * 100}
+          height={shape.h * 100}
+          fill={`#${shape.fill}`}
+        />
+      ))}
       {layout.image && img && !img.failed && (
         <image
           href={img.url}
