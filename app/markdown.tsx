@@ -1,11 +1,12 @@
 import Markdown from "react-markdown";
 import remarkGfm from "remark-gfm";
+import { remarkCjkStrong } from "./remark-cjk-strong.ts";
 
 export function ResearchMarkdown({ text }: { text: string }) {
   return (
     <div className="rw-markdown">
       <Markdown
-        remarkPlugins={[remarkGfm]}
+        remarkPlugins={[remarkGfm, remarkCjkStrong]}
         skipHtml
         components={{
           // Remote model-supplied images cannot leak reading context or displace paper figures.

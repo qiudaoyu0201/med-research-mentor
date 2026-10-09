@@ -10,12 +10,31 @@ import {
   groundingDisposition,
 } from "../evals/role-coordination-candidate.ts";
 import { noviceSchema, reviewSchema } from "../server/schemas.ts";
+import {
+  coverageReviewSchema,
+  checkReviewCoverage,
+  structuredCoverage,
+} from "../evals/review-coverage.ts";
 import type { TrainingBatch } from "../server/internal-training.ts";
-const third = process.argv[2] === "review-v3";
-const second = process.argv[2] === "review-v2" || third;
-if (process.argv[2] && !second)
-  throw new Error("仅支持默认四例校准或review-v2/review-v3两例窄修复测");
-const suffix = third ? "-review-v3" : second ? "-review-v2" : "";
+import {
+  claimAuditContract,
+  claimAuditInstructions,
+  sourceWitnessInstructions,
+  inlineAuditSources,
+  sharedCitationInstructions,
+} from "../evals/claim-audit.ts";
+const argument = process.argv[2];
+if (argument && !/^review-v[2-9]$/.test(argument))
+  throw new Error("仅支持默认四例校准或review-v2至review-v9两例窄修复测");
+const version = argument ? Number(argument.slice(-1)) : 1;
+const eighth = version >= 8,
+  seventh = version >= 7,
+  sixth = version >= 6;
+const fifth = version >= 5,
+  fourth = version >= 4,
+  third = version >= 3,
+  second = version >= 2;
+const suffix = version === 1 ? "" : `-review-v${version}`;
 const directory = resolve(
   "runs/internal-training/role-calibration-20261009" + suffix,
 );
@@ -31,21 +50,48 @@ const parent = resolve("runs/internal-training/development-20261009/records");
 const parentRaw = await readFile(join(parent, "training/report.json"), "utf8");
 const previous = JSON.parse(parentRaw);
 let predecessorHash: string | undefined;
+let inheritedAttempts = previous.calls;
 if (second) {
   const raw = await readFile(
     "runs/internal-training/role-calibration-20261009" +
-      (third ? "-review-v2" : "") +
+      (version > 2 ? `-review-v${version - 1}` : "") +
       "/records/training/report.json",
     "utf8",
   );
   const state = JSON.parse(raw);
-  if (
+  if (version === 5 || version === 8) {
+    // Preserve v4's unknown usage; require an acknowledged remote terminal.
+    const a = state.batch.budget.attempts.at(-1);
+    if (
+      state.status !== "stopped" ||
+      state.batch.budget.attempts.length !== (eighth ? 2 : 1) ||
+      state.batch.budget.attempts
+        .slice(0, -1)
+        .some((prior: any) => prior.status !== "succeeded") ||
+      a?.status !== "unknown" ||
+      !a.observation?.threadId ||
+      !a.observation?.turnId ||
+      a.observation.remoteTerminal !== "interrupted" ||
+      !a.observation.interruptAcknowledged ||
+      !a.observation.events.some(
+        (e: any) => e.type === "terminal" && e.status === "interrupted",
+      )
+    ) {
+      throw new Error("前批未确认远端中断，不派发下一候选");
+    }
+  } else if (
     state.status !== "awaiting-evaluation" ||
     state.batch.budget.attempts.length !== (third ? 2 : 4) ||
     state.batch.budget.attempts.some((a: any) => a.status !== "succeeded")
   )
     throw new Error("上一版校准未明确结束，不派发");
   predecessorHash = createHash("sha256").update(raw).digest("hex");
+  inheritedAttempts = state.parentNewAttempts + state.calls;
+  if (
+    !Number.isInteger(inheritedAttempts) ||
+    inheritedAttempts < previous.calls
+  )
+    throw new Error("前批累计请求数无效");
 }
 if (
   previous.status !== "diagnostic-passed" ||
@@ -89,7 +135,7 @@ try {
   if (!novice.input.explanation || !grounding.input.draft)
     throw new Error("历史角色输入位置不符");
   const wrong = structuredClone(grounding);
-  wrong.input.deck.slides[0].bullets[0] =
+  wrong.input.deck.slides[0].bullets[fifth ? 2 : 0] =
     "本文已在人体随机对照试验中证明该干预可以治愈人类衰老。";
   const unclear = structuredClone(novice);
   unclear.input.explanation = {
@@ -152,9 +198,80 @@ try {
       .filter((c) => c.id.startsWith("grounding-"))
       .map((c) => ({
         ...c,
+        schema: fourth ? coverageReviewSchema : c.schema,
         addition:
-          c.addition + groundingCoverage + (third ? groundingDisposition : ""),
+          c.addition +
+          groundingCoverage +
+          (third ? groundingDisposition : "") +
+          (fourth ? structuredCoverage : "") +
+          (fifth
+            ? "\n审核保持紧凑：每条suggestion和rationale仅写必要判断与修改，不重复全段原稿；quote取足以定位的短原句；同一事实缺口不换名重复报告。保留所有关键缺陷。"
+            : ""),
       }));
+  if (eighth) {
+    const narrow = structuredClone(grounding);
+    const slide = structuredClone(narrow.input.deck.slides[5]);
+    slide.bullets = [slide.bullets[2].split("；").slice(1).join("；")];
+    if (!slide.bullets[0]?.startsWith("ChIP"))
+      throw new Error("局部样本原句不匹配");
+    slide.notes = "";
+    narrow.input.deck.slides = [slide];
+    narrow.input.draft.sections = [];
+    narrow.input.feedback = { understood: [], breakpoints: [] };
+    narrow.input.question =
+      "仅核对原稿第6页所摘取的一条方法边界及它自己的引用，不评价未提供的其他页或教学完整性。";
+    const repaired = structuredClone(narrow);
+    const source = grounding.input.sources.references.find((r: any) =>
+      r.id.endsWith("-p5"),
+    );
+    if (!source) throw new Error("缺少冻结的定位边界原文");
+    repaired.input.deck.slides[0].citations.push(source.id);
+    cases = [
+      {
+        id: "citation-missing",
+        packet: narrow,
+        addition: "",
+        schema: reviewSchema,
+        expected:
+          "观点本身有来源，但本页漏引PDF第5页，必须发现citation gap，不得谎称其余页已经支持",
+      },
+      {
+        id: "citation-repaired",
+        packet: repaired,
+        addition: "",
+        schema: reviewSchema,
+        expected:
+          "只添加真实PDF第5页引用后应supported，不能继续误报漏引或要求不存在的临床证明",
+      },
+    ];
+  }
+  if (sixth)
+    cases = cases.map((c) => {
+      const audit = claimAuditContract(c.packet.input, seventh);
+      return {
+        ...c,
+        packet: {
+          ...c.packet,
+          input: {
+            ...(eighth ? inlineAuditSources(c.packet.input) : c.packet.input),
+            auditManifest: audit.manifest,
+          },
+        },
+        schema: audit.schema,
+        addition:
+          groundingCoordination +
+          claimAuditInstructions +
+          (seventh ? sourceWitnessInstructions : "") +
+          (version === 9 ? sharedCitationInstructions : "") +
+          (eighth
+            ? "\n本版sources.references已将key、sourceId(id)、页码locator和原文text放在同一条记录中；blocks为空是存储视图改变，不是缺失材料。witness.source必须填该条记录key，不是PDF页码。教学补充问题关联的claims状态用gap或question，不要同时标supported。"
+            : ""),
+        expected: eighth
+          ? c.expected
+          : c.expected +
+            "；逐要点覆盖，包括第6页ChIP定位边界的本页引用缺口；允许必要比较基准补讲但不改合法提问",
+      };
+    });
   const batch: TrainingBatch = {
     id: "role-calibration-20261009" + suffix,
     phase: "calibration",
@@ -168,15 +285,36 @@ try {
     ).state,
   };
   batch.budget.limit = batch.budget.groupLimit = limit;
+  if (fifth)
+    batch.budget.timing = {
+      version: "task-timing-v1",
+      scope: "full",
+      taskMs: 25 * 60_000,
+      requestMs: 420_000,
+      firstOutputMs: 90_000,
+      idleMs: 90_000,
+    };
   const report: any = {
     status: "running",
     parentReportHash: createHash("sha256").update(parentRaw).digest("hex"),
     predecessorHash,
-    parentNewAttempts: previous.calls + (third ? 6 : second ? 4 : 0),
+    parentNewAttempts: inheritedAttempts,
     historicalObservedAttempts: previous.historicalObservedAttempts,
     batch,
     results: [],
     scope: "隔离角色校准，未采用候选",
+    ...(version === 8
+      ? {
+          recovery:
+            "v7末次请求已收到interrupt确认及远端interrupted事件；保留未知用量。v8仅测试一条方法边界的缺引/补引配对，不重发全文。",
+        }
+      : {}),
+    ...(fifth && !sixth
+      ? {
+          recovery:
+            "v4有interrupt确认及远端interrupted事件；保留unknown用量，不重发原请求。v5修正反例、缩短审核文本，内部请求上限7分钟。",
+        }
+      : {}),
   };
   const persist = () => store.save("training", "report", report);
   await store.save(
@@ -185,10 +323,22 @@ try {
     cases.map((c) => ({ id: c.id, expected: c.expected })),
   );
   await store.save("freeze", "candidate", {
+    actualAdditions: cases.map((c) => ({ id: c.id, addition: c.addition })),
+    sourceView: eighth ? "inline-frozen-blocks" : "original",
     noviceCoordination,
     groundingCoordination,
     ...(second ? { groundingCoverage } : {}),
     ...(third ? { groundingDisposition } : {}),
+    ...(seventh ? { sourceWitnessInstructions } : {}),
+    ...(sixth
+      ? {
+          claimAuditInstructions,
+          schema: z.toJSONSchema(cases[0].schema),
+        }
+      : {}),
+    ...(fourth && !sixth
+      ? { structuredCoverage, schema: z.toJSONSchema(coverageReviewSchema) }
+      : {}),
   });
   await persist();
   const counted = new TrainingProvider(
@@ -216,6 +366,22 @@ try {
       );
       await store.save("results", c.id, response.output);
       report.results.push({ id: c.id, output: response.output });
+      if (fourth) {
+        const audit = sixth
+          ? claimAuditContract(c.packet.input, seventh)
+          : undefined;
+        const errors = audit
+          ? audit.validate(audit.schema.parse(response.output))
+          : checkReviewCoverage(
+              c.packet.input,
+              coverageReviewSchema.parse(response.output),
+            );
+        await store.save("validation", c.id, {
+          structuralErrors: errors,
+          scientificAcceptance: "pending",
+        });
+        report.results.at(-1).structuralErrors = errors;
+      }
       await persist();
       console.log(JSON.stringify({ id: c.id, status: "returned" }));
     }

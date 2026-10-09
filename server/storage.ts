@@ -27,6 +27,24 @@ export function missingRecord(error: unknown) {
   );
 }
 
+// Windows readers/scanners may briefly deny replacement. Never unlink the old record.
+export async function renameWithRetry(
+  source: string,
+  target: string,
+  replace: (source: string, target: string) => Promise<void> = rename,
+) {
+  for (let attempt = 0; ; attempt++) {
+    try {
+      await replace(source, target);
+      return;
+    } catch (error: any) {
+      if (!["EPERM", "EACCES", "EBUSY"].includes(error?.code) || attempt === 3)
+        throw error;
+      await new Promise((resolve) => setTimeout(resolve, 25 * (attempt + 1)));
+    }
+  }
+}
+
 // Serialize access to each record so an old corrupt read cannot move a newer
 // successful save into quarantine. Other records remain independent.
 export class RecordStorage {
@@ -50,7 +68,7 @@ export class RecordStorage {
     const temp = `${target}.${randomUUID()}.tmp`;
     try {
       await writeFile(temp, content, "utf8");
-      await rename(temp, target);
+      await renameWithRetry(temp, target);
     } catch (error) {
       await rm(temp, { force: true });
       throw error;
