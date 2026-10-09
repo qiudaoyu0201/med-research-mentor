@@ -36,6 +36,10 @@ export function wrapSlideText(text: string, width: number, fontSize: number) {
     // Keep closing punctuation with the preceding token before wrapping;
     // appending it after wrapping would overflow an already full line.
     for (const token of tokens) {
+      if (words.length && /^[（(《「『【“‘]+$/.test(words[words.length - 1])) {
+        words[words.length - 1] += token;
+        continue;
+      }
       if (
         words.length &&
         /^[，。；：！？、）》」』】”’…,.!?;:)\]]+$/.test(token)
@@ -138,7 +142,10 @@ export function slideLayout(
     /\b(?:OR|HR|RR)\b.*\d/i.test(b),
   );
   const takeawayIndex = slide.bullets.findIndex((b) =>
-    /^(?:启发|借鉴|下一步|建议|核心结论)[：:]/.test(b),
+    /^(?:启发|可?借鉴|下一步|建议|核心结论)[：:]/.test(b),
+  );
+  const comparisonIndices = slide.bullets.flatMap((b, i) =>
+    /\d.*\bvs\.?\s*\d/i.test(b) ? [i] : [],
   );
   const customText: TextBox[] = [];
   const put = (
@@ -213,7 +220,7 @@ export function slideLayout(
     !hasImage &&
     count >= 3 &&
     count <= 5 &&
-    /结果|数据/.test(slide.title) &&
+    /结果|数据|证据|终点/.test(slide.title) &&
     effectIndex >= 0
   ) {
     composition = "results";
@@ -244,6 +251,50 @@ export function slideLayout(
       } else
         custom =
           put(i, slide.bullets[i], x, y + 0.18, 5.32, 1.12, 24) && custom;
+    });
+  } else if (
+    !hasImage &&
+    count >= 3 &&
+    count <= 5 &&
+    /结果|数据|证据|终点/.test(slide.title) &&
+    comparisonIndices.length >= Math.max(2, count - 2) &&
+    comparisonIndices.length <= 3
+  ) {
+    composition = "comparisons";
+    const width =
+      (12.02 - (comparisonIndices.length - 1) * 0.28) /
+      comparisonIndices.length;
+    custom = true;
+    comparisonIndices.forEach((index, order) => {
+      const x = 0.65 + order * (width + 0.28);
+      shapes.push({ x, y: 1.65, w: width, h: 3.1, fill: "E8F2F2" });
+      custom =
+        put(
+          index,
+          slide.bullets[index],
+          x + 0.28,
+          2.0,
+          width - 0.56,
+          2.38,
+          29,
+          "12535D",
+          true,
+        ) && custom;
+    });
+    const rest = slide.bullets
+      .map((_, i) => i)
+      .filter((i) => !comparisonIndices.includes(i));
+    rest.forEach((index, order) => {
+      custom =
+        put(
+          index,
+          slide.bullets[index],
+          0.95 + order * 6.05,
+          5.13,
+          rest.length === 1 ? 11.3 : 5.32,
+          1.35,
+          24,
+        ) && custom;
     });
   } else if (
     !hasImage &&

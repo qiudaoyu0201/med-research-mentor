@@ -14,7 +14,15 @@ const aliases: Record<string, string[]> = {
     "Ct",
     "荧光",
   ],
-  "qpcr-basics": ["PCR", "qPCR", "RT-PCR", "real-time PCR", "Ct", "阈值"],
+  "qpcr-basics": [
+    "PCR",
+    "qPCR",
+    "RT-PCR",
+    "real-time PCR",
+    "Ct",
+    "循环阈值",
+    "阈值循环",
+  ],
   "qpcr-controls": ["PCR", "qPCR", "Ct", "NTC", "无模板对照"],
   "flow-basics": ["流式", "flow cytometry", "门控"],
 };
@@ -313,6 +321,16 @@ export const foundationSources: Source[] = [
 ];
 
 export function aliasMatches(text: string, alias: string) {
+  // CT imaging and clinical decision thresholds are not PCR cycle thresholds.
+  // Keep conventional mixed-case Ct queries and uppercase CT in PCR context.
+  if (alias === "Ct") {
+    const cycleContext = /(?:PCR|聚合酶|扩增|循环|逆转录)/i.test(text);
+    return (
+      cycleContext
+        ? /(?<![a-zA-Z0-9])ct(?![a-zA-Z0-9])/i
+        : /(?<![a-zA-Z0-9])Ct(?![a-zA-Z0-9])/
+    ).test(text);
+  }
   const normalize = (s: string) =>
     s
       .normalize("NFKC")

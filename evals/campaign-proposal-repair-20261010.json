@@ -1,0 +1,26 @@
+{
+  "id": "mainline-campaign-20261010-proposal-repair",
+  "parentReport": "runs/internal-training/common-flow-canaries-20261010-v1/records/training/report.json",
+  "cases": [
+    {
+      "id": "diabetes-rct",
+      "paperPath": "runs/internal-training/campaign-pool-20261010/diabetes-paper.json",
+      "readingQuestion": "我是医学科研新手，先讲研究背景和问题，再带我读这篇摘要的设计与主要结果。分小标题和适当短段，关键术语中英对照，解释为什么这样比较、数字说明什么以及结论边界。",
+      "slideCount": 4,
+      "planQuestion": "既往病历中评估恩格列净使用与心血管结局的关联，供导师讨论的临床观察研究方案",
+      "conditions": "只有本院2型糖尿病成人既往病历、用药起止记录、住院结局及部分门诊复查。不能随机分组、不能改变治疗，没有外院结局，随访长短不同。拟比较新开始用药与临床可比替代治疗者，选择偏倚、混杂、时间起点及失访都需考虑。没有样本量参数，不直接套用原RCT的样本量和效应。",
+      "planSourceIds": ["pmid-26378978"],
+      "transferScenario": "换成另一个数据集：只有低心血管风险、未确诊糖尿病成年人的一次体检记录，没有用药资料或随访。能否套用该试验结果，声称给这些人用药可以降低心血管死亡？请说明现有数据能做什么、原来的设计思路哪些仍有用。",
+      "transferCriteria": [
+        "保留低风险且未确诊糖尿病的人群区别",
+        "没有用药和随访时不声称能估计药物治疗效果",
+        "不把原RCT效应量或样本直接当新数据",
+        "区分随机试验证据与单次观察资料，并给出理由",
+        "提出符合现有数据的有限问题，不编造资源"
+      ],
+      "reuseFrom": "runs/internal-training/mainline-campaign-20261010-candidate2",
+      "proposalRevision": "根据上一版核对发现的时间顺序问题修订方案：必须给两组规定一致且可操作的起始场景和风险起点，明确不把促使用药的索引住院及其诊断计作药后新发结局。结合只有本院处方与住院记录的现实，选择并说明门诊/出院起始或排除索引住院的方案，不能只写待核实。同步校正暴露、入组、随访及结局章节，保留未知的样本量和实际字段条件，不新增未提供的资源。"
+    }
+  ],
+  "rules": "common-flow-candidate2"
+}
