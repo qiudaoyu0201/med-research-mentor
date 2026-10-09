@@ -72,6 +72,7 @@ export function validateCitations(
   review: ReviewResult,
   sources: Source[],
   deck?: DeckOutline,
+  deliveryPolicy: "internal" | "online" = "internal",
 ) {
   const ids = new Set(sources.map((s) => s.id));
   const used = [
@@ -93,14 +94,16 @@ export function validateCitations(
     throw new Error("事实或基础知识缺少可定位的引用。");
   if (deck?.slides.some((s) => s.citations.length === 0))
     throw new Error("汇报页缺少来源。");
-  for (const section of unit.sections) {
-    if (
-      ["paper", "foundation"].includes(section.kind) &&
-      !section.citations.some(
-        (id) => sources.find((s) => s.id === id)?.kind === section.kind,
+  if (deliveryPolicy === "internal") {
+    for (const section of unit.sections) {
+      if (
+        ["paper", "foundation"].includes(section.kind) &&
+        !section.citations.some(
+          (id) => sources.find((s) => s.id === id)?.kind === section.kind,
+        )
       )
-    )
-      throw new Error("论文事实与通用基础的引用类型不匹配。");
+        throw new Error("论文事实与通用基础的引用类型不匹配。");
+    }
   }
   if (
     sources.some((s) => s.kind === "paper" && s.paperId) &&
@@ -533,7 +536,7 @@ export class TaskManager {
     try {
       const profile = profiles.find((p) => p.id === run.input.profileId)!;
       if (run.cacheHit) {
-        validateCitations(run.result!, run.review!, sources, run.deck);
+        validateCitations(run.result!, run.review!, sources, run.deck, this.deliveryPolicy);
         await set("completed");
       } else if (run.input.mode === "example") {
         // Fixed, verified content has no fabricated role execution or progress.
@@ -555,7 +558,7 @@ export class TaskManager {
             "论文局部证据包，不是全文核验。",
           ],
         };
-        validateCitations(run.result, run.review, paper.sources, run.deck);
+        validateCitations(run.result, run.review, paper.sources, run.deck, this.deliveryPolicy);
         await set("completed");
       } else if (run.input.workflow === "direct") {
         const rules = await assistantRules();
@@ -592,7 +595,7 @@ export class TaskManager {
           checkedSources: [],
           limitations: ["本次为背景解释，未运行来源核对或模拟试读。"],
         };
-        validateCitations(result, run.review, sources);
+        validateCitations(result, run.review, sources, undefined, this.deliveryPolicy);
         run.result = result;
         await set("completed");
       } else {
@@ -735,6 +738,7 @@ export class TaskManager {
           review,
           sources,
           generated.deck || undefined,
+          this.deliveryPolicy,
         );
         const requestMap = new Map<
           string,
@@ -966,6 +970,7 @@ export class TaskManager {
           review,
           sources,
           generated.deck || undefined,
+          this.deliveryPolicy,
         );
         if (readCheck) run.novice = feedback;
         run.review = review;
