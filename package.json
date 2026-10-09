@@ -13,6 +13,7 @@
     "start": "tsx server/index.ts --production",
     "test": "tsx --test checks/*.test.ts",
     "check": "npm run build && npm test",
+    "rule:release": "tsx scripts/rule-release.ts",
     "model:check": "tsx scripts/model-check.ts",
     "assistant:check": "tsx scripts/assistant-check.ts",
     "eval": "tsx scripts/replay.ts",

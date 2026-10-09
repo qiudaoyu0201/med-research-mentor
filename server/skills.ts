@@ -1,3 +1,4 @@
+import { activeRuleRelease } from "./rule-release.ts";
 import { readFile, readdir } from "node:fs/promises";
 import { createHash } from "node:crypto";
 import { resolve, relative, isAbsolute } from "node:path";
@@ -29,13 +30,18 @@ const internalRules = new AsyncLocalStorage<RuleSnapshot>();
 export function withRuleSnapshot<T>(snapshot: RuleSnapshot, work: () => T): T {
   return internalRules.run(structuredClone(snapshot), work);
 }
+export async function effectiveRuleSnapshot() {
+  return internalRules.getStore() ?? (await activeRuleRelease())?.snapshot;
+}
 export async function sharedRules() {
   return (
-    internalRules.getStore()?.shared ??
+    (await effectiveRuleSnapshot())?.shared ??
     readFile("skills/shared/rules.md", "utf8")
   );
 }
 export async function freezeRules(): Promise<RuleSnapshot> {
+  const active = await effectiveRuleSnapshot();
+  if (active) return structuredClone(active);
   const catalog = await skillCatalog();
   const entries = await Promise.all(
     catalog.map(async ({ id }) => [id, await loadSkill(id)] as const),
@@ -87,7 +93,7 @@ export async function loadSkill(
   override?: { id: string; text: string; version: string },
 ) {
   if (!/^[a-z0-9]+(?:-[a-z0-9]+)*$/.test(id)) throw new Error("Skill 编号无效");
-  const frozen = internalRules.getStore()?.entries[id];
+  const frozen = (await effectiveRuleSnapshot())?.entries[id];
   if (frozen && !override) return { id, ...structuredClone(frozen) };
   const original = await readFile(resolve(skillRoot, id, "SKILL.md"), "utf8");
   const entry = parseSkill(original, id);
@@ -151,7 +157,11 @@ export async function loadSkills(
     readability: true,
     grounding: true,
   },
-) {
+): Promise<{ shared: string; teachingContract: string; explanationTracing: boolean | "compact-v1"; modules: Awaited<ReturnType<typeof loadSkill>>[]; versions: Record<string, string> }> {
+  if (!internalRules.getStore()) {
+    const active = await effectiveRuleSnapshot();
+    if (active) return withRuleSnapshot(active, () => loadSkills(module, override, roles));
+  }
   const ids = [
     ...new Set(
       (Array.isArray(module) ? module : [module]).flatMap((m) => routes[m]),

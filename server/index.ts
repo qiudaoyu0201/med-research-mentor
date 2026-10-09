@@ -1287,7 +1287,7 @@ if (process.argv.includes("--production")) {
   app.get("/{*path}", (_req, res) => res.sendFile(resolve("dist/index.html")));
 } else {
   const vite = await createVite({
-    server: { middlewareMode: true },
+    server: { middlewareMode: true, hmr: { port: port + 20000 } },
     appType: "spa",
   });
   app.use(vite.middlewares);

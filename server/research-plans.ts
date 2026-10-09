@@ -1,3 +1,4 @@
+import { effectiveRuleSnapshot } from "./skills.ts";
 import { randomUUID } from "node:crypto";
 import { z } from "zod";
 import { LiteratureService } from "./literature.ts";
@@ -440,11 +441,12 @@ export class ResearchPlans {
     });
   }
   private async capability() {
-    const shared = await sharedRules();
+    const effective = await effectiveRuleSnapshot();
+    const shared = effective?.shared ?? await sharedRules();
     const instructions = {
-      generation: shared + "\n" + generationRules + "\n" + teachingContract(),
+      generation: shared + "\n" + generationRules + "\n" + (effective?.teachingContract ?? teachingContract()),
       review: reviewRules,
-      ...(explanationTracing() ? { traced: explanationTracing() } : {}),
+      ...((effective?.explanationTracing ?? explanationTracing()) ? { traced: effective?.explanationTracing ?? explanationTracing() } : {}),
     };
     const modelFingerprint = digest({
       id: this.provider.id,
