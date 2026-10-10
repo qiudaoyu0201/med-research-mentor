@@ -1,0 +1,225 @@
+.rplan {
+  display: grid;
+  grid-template-columns: minmax(180px, 240px) minmax(0, 1fr);
+  flex: 1;
+  min-height: 0;
+  overflow: hidden;
+  background: var(--rw-background);
+}
+.rplan-list {
+  overflow: auto;
+  padding: 18px 12px;
+  border-right: 1px solid var(--rw-line);
+}
+.rplan-heading,
+.rplan-actions,
+.rplan-fields {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 12px;
+}
+.rplan-heading {
+  justify-content: space-between;
+}
+.rplan h2 {
+  font-size: 20px;
+  margin: 0;
+}
+.rplan-list > button {
+  display: flex;
+  flex-direction: column;
+  gap: 5px;
+  text-align: left;
+  width: 100%;
+  margin: 8px 0;
+  border: 1px solid transparent;
+  background: transparent;
+  color: var(--rw-text);
+}
+.rplan-list > button[aria-current="page"] {
+  background: var(--rw-surface);
+  border-color: var(--rw-line);
+  box-shadow: 0 2px 8px #00000008;
+}
+.rplan-list strong {
+  overflow-wrap: anywhere;
+  font-size: 14px;
+  font-weight: 550;
+}
+.rplan-main {
+  overflow: auto;
+  padding: 24px clamp(16px, 3vw, 44px);
+  scroll-behavior: smooth;
+}
+.rplan-main > * {
+  max-width: 960px;
+  margin-left: auto;
+  margin-right: auto;
+}
+.rplan-card {
+  background: var(--rw-surface);
+  border: 1px solid var(--rw-line);
+  border-radius: 18px;
+  padding: 20px;
+  margin-bottom: 18px;
+  box-shadow: 0 4px 16px #00000004;
+}
+.rplan summary {
+  cursor: pointer;
+  font-weight: 550;
+  padding: 6px 0;
+}
+.rplan label {
+  display: flex;
+  flex-direction: column;
+  gap: 7px;
+  font-size: 14px;
+  margin: 14px 0;
+}
+.rplan :is(textarea, input:not([type="checkbox"])) {
+  width: 100%;
+  box-sizing: border-box;
+  padding: 10px 12px;
+  border: 1px solid var(--rw-line);
+  line-height: 1.7;
+}
+.rplan textarea {
+  resize: vertical;
+}
+.rplan button {
+  color: var(--rw-accent);
+  background: var(--rw-surface);
+  border: 1px solid var(--rw-line);
+}
+.rplan .rplan-actions {
+  margin-bottom: 18px;
+}
+.rplan-fields label {
+  flex: 1;
+  min-width: 150px;
+}
+.rplan select {
+  padding: 8px;
+  max-width: 100%;
+  border: 1px solid var(--rw-line);
+}
+.rplan-section {
+  margin: 16px 0;
+  padding-top: 12px;
+  border-top: 1px solid var(--rw-line);
+}
+.rplan-preview-heading {
+  display: flex;
+  align-items: flex-start;
+  flex-wrap: wrap;
+  gap: 12px;
+}
+.rplan-preview-heading h2 {
+  flex: 1;
+  min-width: min(240px, 100%);
+  line-height: 1.6;
+}
+.rplan-preview-heading button {
+  flex-shrink: 0;
+}
+.rplan-preview h3 {
+  font-size: 17px;
+  margin: 8px 0 12px;
+  line-height: 1.6;
+}
+.rplan-preview .rplan-rationale {
+  font-size: 15px;
+  color: var(--rw-secondary);
+}
+.rplan-preview > details {
+  border-top: 1px solid var(--rw-line);
+  padding-top: 12px;
+  margin-top: 20px;
+}
+.rplan-preview > .rplan-actions {
+  margin-top: 18px;
+  margin-bottom: 0;
+}
+.rplan :is(p, article) {
+  line-height: 1.8;
+  overflow-wrap: anywhere;
+  white-space: pre-wrap;
+}
+.rplan-error,
+.rplan-warning {
+  background: var(--rw-warning-surface);
+  color: var(--rw-warning);
+  border: 1px solid var(--rw-warning);
+  border-radius: 12px;
+  padding: 12px;
+  margin-bottom: 16px;
+}
+.rplan-error button,
+.rplan-warning button {
+  margin: 8px;
+}
+.rplan-job {
+  padding: 12px;
+  margin-top: 12px;
+  border-radius: 12px;
+  background: var(--rw-background);
+}
+.rplan-job > small {
+  display: block;
+  margin-top: 6px;
+}
+.rplan-source-picker {
+  max-height: 320px;
+  overflow: auto;
+}
+.rplan-source-picker label {
+  flex-direction: row;
+  align-items: baseline;
+}
+.rplan-source-picker input {
+  width: auto;
+}
+@media (max-width: 1100px) {
+  .rplan {
+    grid-template-columns: 180px minmax(0, 1fr);
+  }
+  .rplan-main {
+    padding: 16px;
+  }
+}
+@media (max-width: 700px) {
+  .rplan {
+    display: flex;
+    flex-direction: column;
+    overflow: auto;
+  }
+  .rplan-list {
+    max-height: 200px;
+    flex-shrink: 0;
+    border-right: 0;
+    border-bottom: 1px solid var(--rw-line);
+  }
+  .rplan-main {
+    overflow: visible;
+  }
+}
+@media (prefers-reduced-motion: reduce) {
+  .rplan-main {
+    scroll-behavior: auto;
+  }
+  .rw *,
+  .rw *::before,
+  .rw *::after {
+    transition: none !important;
+    animation: none !important;
+  }
+}
+@media (prefers-reduced-transparency: reduce) {
+  .rw {
+    --rw-glass: var(--rw-surface);
+  }
+  .rw * {
+    backdrop-filter: none !important;
+  }
+}

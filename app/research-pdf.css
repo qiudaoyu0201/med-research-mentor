@@ -1,0 +1,132 @@
+/* Text-layer styling adapted and scoped from pdfjs-dist/web/pdf_viewer.css.
+ * Copyright 2014 Mozilla Foundation
+ * Licensed under the Apache License, Version 2.0 (the "License");
+ * you may not use this file except in compliance with the License.
+ * You may obtain a copy of the License at
+ * http://www.apache.org/licenses/LICENSE-2.0
+ * Unless required by applicable law or agreed to in writing, software
+ * distributed under the License is distributed on an "AS IS" BASIS,
+ * WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+ * See the License for the specific language governing permissions and
+ * limitations under the License.
+ */
+.rw-pdf-page {
+  position: relative;
+  margin-top: 12px;
+  background: white;
+}
+.rw-pdf-local-actions {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 8px;
+  margin: 10px 0;
+}
+.rw-pdf-crop-layer {
+  position: absolute;
+  inset: 0;
+  z-index: 3;
+  cursor: crosshair;
+  touch-action: none;
+  user-select: none;
+}
+.rw-pdf-crop-box {
+  position: absolute;
+  border: 2px solid var(--rw-accent);
+  box-sizing: border-box;
+  background: #007aff18;
+  pointer-events: none;
+}
+.rw-pdf-crop-preview {
+  padding: 12px;
+  border: 1px solid var(--rw-line);
+  border-radius: 12px;
+  background: var(--rw-surface);
+}
+.rw-pdf-crop-preview > img {
+  display: block;
+  width: auto;
+  max-width: 100%;
+  max-height: 420px;
+  height: auto;
+  margin: 12px auto;
+  background: white;
+}
+.rw-pdf-scroll[hidden] {
+  display: none;
+}
+.rw-pdf-page canvas {
+  display: block;
+  max-width: 100%;
+}
+.rw-pdf-controls {
+  display: flex;
+  gap: 12px;
+  justify-content: space-between;
+  align-items: center;
+}
+.rw-pdf-controls select {
+  margin-left: 10px;
+}
+.rw-pdf-quote {
+  position: sticky;
+  top: 0;
+  z-index: 2;
+  padding: 10px;
+  margin-top: 10px;
+}
+.rw-pdf-page .textLayer {
+  color-scheme: only light;
+  position: absolute;
+  text-align: initial;
+  inset: 0;
+  overflow: clip;
+  opacity: 1;
+  line-height: 1;
+  letter-spacing: normal;
+  word-spacing: normal;
+  text-size-adjust: none;
+  forced-color-adjust: none;
+  transform-origin: 0 0;
+  caret-color: CanvasText;
+  z-index: 1;
+  --min-font-size: 1;
+  --text-scale-factor: calc(var(--total-scale-factor) * var(--min-font-size));
+  --min-font-size-inv: calc(1 / var(--min-font-size));
+}
+.rw-pdf-page .textLayer :is(span, br) {
+  color: transparent;
+  position: absolute;
+  white-space: pre;
+  cursor: text;
+  transform-origin: 0% 0%;
+  user-select: text;
+}
+.rw-pdf-page .textLayer > :not(.markedContent),
+.rw-pdf-page .textLayer .markedContent span:not(.markedContent) {
+  z-index: 1;
+  --font-height: 0;
+  font-size: calc(var(--text-scale-factor) * var(--font-height));
+  --scale-x: 1;
+  --rotate: 0deg;
+  transform: rotate(var(--rotate)) scaleX(var(--scale-x))
+    scale(var(--min-font-size-inv));
+}
+.rw-pdf-page .textLayer .markedContent {
+  display: contents;
+}
+.rw-pdf-page .textLayer ::selection {
+  background: rgb(60 110 240 / 0.35);
+}
+.rw-reading-modes {
+  display: flex;
+  gap: 8px;
+  margin: 12px 0;
+}
+.rw-reading-modes button {
+  padding: 8px 10px;
+  border: 1px solid #496181;
+}
+.rw-reading-modes button[aria-pressed="true"] {
+  background: #334b6f;
+}

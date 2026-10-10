@@ -1,0 +1,43 @@
+{
+  "id": "mainline-campaign-20261010-figure-comparators",
+  "parentReport": "runs/internal-training/mainline-campaign-20261010-focused1/records/training/report.json",
+  "cases": [
+    {
+      "id": "senescence-first-experiment",
+      "paperPath": "data/papers/494f12de-ceee-402d-a282-9d5fd0a7d6f7.json",
+      "readingQuestion": "按顺序带读的第一步：用3到4个简短小标题先讲背景目的，再讲移植衰老细胞的第一组实验。重点解释为什么设非衰老细胞对照、测了哪些功能读数、结果支持到哪一步。每段围绕一个要点，关键术语中英对照，不在这一轮讲完后续药物实验。",
+      "slideCount": 4,
+      "planQuestion": "在体外培养条件下评估D+Q与细胞衰老相关表型变化的基础研究设计草案",
+      "conditions": "本科生与导师讨论。现有细胞培养、常规显微成像和细胞计数条件，可测细胞活性；没有动物平台、流式仪、组学或谱系追踪。细胞来源和衰老模型需确认，剂量时间、样本量和伦理均未确定。要区分衰老相关读数变化与一般细胞毒性，不能直接声称已证明选择性清除或临床有效。",
+      "planSourceIds": [
+        "494f12de-ceee-402d-a282-9d5fd0a7d6f7-p1",
+        "494f12de-ceee-402d-a282-9d5fd0a7d6f7-p2",
+        "494f12de-ceee-402d-a282-9d5fd0a7d6f7-p6-fig4-1"
+      ],
+      "transferScenario": "换为一次性采集的健康人血浆，只能测一种炎症蛋白，没有细胞培养、组织或干预。导师问能否根据蛋白降低断定某药清除了衰老细胞。请借鉴刚学的测量和对照思路回答，保留当前资源限制。",
+      "transferCriteria": [
+        "区分血浆单蛋白与组织或细胞衰老测量",
+        "无用药干预证据时不声称药物清除作用",
+        "单一炎症信号不能特异证明衰老细胞减少并解释原因",
+        "不凭空增加培养、动物、谱系或其他设备",
+        "提出当前材料可支持的有限观察问题及必要待确认项"
+      ],
+      "readingSourceIds": [
+        "494f12de-ceee-402d-a282-9d5fd0a7d6f7-p1",
+        "494f12de-ceee-402d-a282-9d5fd0a7d6f7-p2",
+        "494f12de-ceee-402d-a282-9d5fd0a7d6f7-p2-fig1-1",
+        "494f12de-ceee-402d-a282-9d5fd0a7d6f7-p3"
+      ],
+      "pptSourceIds": [
+        "494f12de-ceee-402d-a282-9d5fd0a7d6f7-p1",
+        "494f12de-ceee-402d-a282-9d5fd0a7d6f7-p2",
+        "494f12de-ceee-402d-a282-9d5fd0a7d6f7-p2-fig1-1",
+        "494f12de-ceee-402d-a282-9d5fd0a7d6f7-p3"
+      ],
+      "reuseFrom": "runs/internal-training/mainline-campaign-20261010-focused1",
+      "reuseModules": ["paper"],
+      "reuseProposal": true
+    }
+  ],
+  "rules": "common-flow-candidate3"
+}

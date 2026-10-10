@@ -1,0 +1,67 @@
+{
+  "name": "med-research-mentor",
+  "version": "0.1.0",
+  "private": false,
+  "type": "module",
+  "engines": {
+    "node": ">=22.13"
+  },
+  "scripts": {
+    "dev": "tsx server/index.ts",
+    "dev:relay": "powershell -NoProfile -ExecutionPolicy Bypass -File scripts/start-configured.ps1",
+    "build": "tsc --noEmit && vite build",
+    "start": "tsx server/index.ts --production",
+    "test": "tsx --test checks/*.test.ts",
+    "check": "npm run build && npm test",
+    "rule:release": "tsx scripts/rule-release.ts",
+    "model:check": "tsx scripts/model-check.ts",
+    "assistant:check": "tsx scripts/assistant-check.ts",
+    "eval": "tsx scripts/replay.ts",
+    "test:browser": "tsx checks/browser.ts",
+    "format": "prettier --write app server shared scripts checks evals examples vite.config.ts tsconfig.json package.json",
+    "transfer:check": "tsx scripts/transfer-check.ts",
+    "learner:check": "tsx scripts/learner-check.ts",
+    "training:prepare": "tsx scripts/internal-training-assets.ts && tsx scripts/internal-training.ts prepare",
+    "training:m1": "tsx scripts/internal-training.ts m1",
+    "training:recover": "tsx scripts/internal-training-recovery.ts",
+    "training:short": "tsx scripts/short-loop.ts",
+    "training:workflow": "tsx scripts/workflow-iteration.ts",
+    "training:calibrate": "tsx scripts/internal-training.ts calibrate",
+    "training:m2": "tsx scripts/internal-training-batches.ts",
+    "training:closures": "tsx scripts/learning-closures.ts",
+    "training:m3": "tsx scripts/internal-learning.ts",
+    "training:learning-calibrate": "tsx scripts/internal-learning.ts calibrate"
+  },
+  "dependencies": {
+    "@napi-rs/canvas": "^1.0.10",
+    "express": "^5.1.0",
+    "fflate": "^0.8.3",
+    "multer": "^2.0.2",
+    "pdfjs-dist": "^6.4.299",
+    "pptxgenjs": "^4.0.1",
+    "react": "^19.1.1",
+    "react-dom": "^19.1.1",
+    "react-markdown": "^10.1.0",
+    "remark-gfm": "^4.0.1",
+    "remark-parse": "^11.0.0",
+    "unified": "^11.0.5",
+    "yaml": "^2.9.1",
+    "zod": "^4.1.11"
+  },
+  "devDependencies": {
+    "@types/express": "^5.0.3",
+    "@types/multer": "^2.0.0",
+    "@types/node": "^24.5.2",
+    "@types/react": "^19.1.16",
+    "@types/react-dom": "^19.1.9",
+    "@vitejs/plugin-react": "^5.0.4",
+    "playwright": "^1.55.1",
+    "prettier": "^3.9.9",
+    "tsx": "^4.20.6",
+    "typescript": "^5.9.2",
+    "vite": "^7.1.7"
+  },
+  "overrides": {
+    "image-size": "2.0.3"
+  }
+}

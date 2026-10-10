@@ -1,0 +1,11 @@
+node_modules/
+dist/
+data/
+data-archived-*/
+exports/
+runs/
+.env*
+*.log
+test-results/
+
+!.env.example
