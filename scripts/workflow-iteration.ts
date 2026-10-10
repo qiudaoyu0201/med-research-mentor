@@ -166,7 +166,7 @@ try {
     );
     extendWorkflow(
       report,
-      await hashFile("docs/真实使用流程与前后端磨合_落地方案_v1.6.md"),
+      await hashFile("docs/ITERATION.md"),
     );
     await checkpoint();
     console.log(
