@@ -1,1 +1,10 @@
-{"id":"medical-term-explainer","title":"术语解释","version":"1.0.0","dependencies":["shared"],"origin":"project-original","referenceRecord":"docs/参考来源与复用记录.md"}
+{
+  "id": "medical-term-explainer",
+  "title": "术语解释",
+  "version": "1.0.0",
+  "dependencies": [
+    "shared"
+  ],
+  "origin": "project-original",
+  "referenceRecord": "docs/ARCHITECTURE.md"
+}

@@ -2,7 +2,9 @@
   "id": "medical-research-assistant",
   "title": "科研学习主助手",
   "version": "1.0.0",
-  "dependencies": ["shared"],
+  "dependencies": [
+    "shared"
+  ],
   "origin": "project-original",
-  "referenceRecord": "docs/主助手多智能体_效率成本效果落地方案.md"
+  "referenceRecord": "docs/ARCHITECTURE.md"
 }

@@ -1,0 +1,23 @@
+# 安装与模型配置
+
+安装 Node.js 22.13+，克隆仓库并进入目录，执行 `npm ci`。Windows 可使用 `npm.cmd`。
+
+## 独立兼容 API
+
+复制 `.env.example` 到 `.env`，填写 HTTPS 基础地址、模型和密钥。支持 Chat Completions 及结构化 JSON 输出。图像输入须由目标模型支持，再开启 `TUTOR_MODEL_IMAGES=true`。
+
+```powershell
+node --env-file=.env --import tsx server/index.ts
+```
+
+程序本身不自动读取 `.env`，上面的 Node 参数负责加载。生产运行先 `npm.cmd run build`，再在启动命令末尾加 `--production`。此路径不需要 Codex CLI 或原生订阅额度，计费由所选提供方决定。
+
+## Codex CLI
+
+默认 `npm.cmd run dev` 使用已安装并登录的 Codex CLI。CLI 不在 PATH 时设置 `CODEX_BIN`。若使用 CLI 已配置的 API 提供方，须显式指定 `TUTOR_PROVIDER=codex-configured`、`TUTOR_CODEX_PROVIDER`、`TUTOR_MODEL` 和 `TUTOR_CODEX_AUTH=apiKey`。不同路径不自动互相回退。
+
+## 检查与访问
+
+默认地址 http://127.0.0.1:4317/ ，以终端实际输出为准。`npm.cmd run check` 执行类型、构建和测试。`npm.cmd run model:check` 检查进程配置；加载 .env 时可用 `node --env-file=.env --import tsx scripts/model-check.ts`。只有显式加 `--generate` 才进行该诊断的模型生成请求。
+
+数据目录可通过 `TUTOR_DATA_DIR` 指定。备份本地数据与原论文，导出文件另存。不要将此单用户服务直接作为多用户公网服务部署。
