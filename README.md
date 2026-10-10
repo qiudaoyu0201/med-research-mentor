@@ -9,7 +9,7 @@ Med Research Mentor is a local-first research learning workbench for medical sci
 - **论文带读**：按论文逻辑从背景、问题、方法、证据到结论逐步讲解；支持中英文术语、图表定位、原文对照、选句追问和当前/下一步阅读范围。
 - **医学 PPT**：从论文生成适合组会或向导师汇报的幻灯片，绑定原文图件，独立生成讲述提示，支持 PPTX 导出。
 - **研究方案**：从研究问题、已有线索、限制条件和参考论文生成可与导师讨论的方案草案，支持 DOCX 和 Markdown 导出。
-- **协作闭环**：导师 Agent 负责教学与生成，新手模拟/来源检查 Agent 暴露理解断点，修订与核验 Agent 根据证据修正输出。
+- **协作闭环**：导师 Agent 负责教学与生成，新手模拟 Agent 暴露理解断点，来源核验 Agent 检查证据；导师根据两者反馈修订，再由新手和核验角色复验。
 - **模块化 Skill**：`skills/` 中的医学证据链、图表教学、术语解释、论文带读、PPT 和研究方案模块可以按需组合。
 
 ## 架构
@@ -23,7 +23,7 @@ Med Research Mentor is a local-first research learning workbench for medical sci
       调度器 Scheduler
        ┌────┼────┐
        ▼    ▼    ▼
-    导师  新手/来源  修订/核验
+    导师    新手    来源核验
        └────┼────┘
             ▼
   带读 / PPT / 研究方案
@@ -51,7 +51,7 @@ npm.cmd run build
 npm.cmd start
 ```
 
-程序默认使用本机已配置的模型运行时，也支持兼容 Chat Completions 服务。复制 [`.env.example`](.env.example) 后按目标服务填写环境变量；密钥只放在本地环境，不写入前端或 Git。
+程序默认使用本机已配置的模型运行时，也支持兼容 Chat Completions 服务。默认路径需要安装并登录 Codex CLI；独立兼容 API 路径不依赖 Codex 订阅。程序不会自动加载 `.env`。可复制 `.env.example` 为 `.env`，填写本地配置，然后运行 `node --env-file=.env --import tsx server/index.ts`。生产启动追加 `--production`，并先运行构建。图表理解应选择支持图像输入的模型并设置 `TUTOR_MODEL_IMAGES=true`。详细配置与模型检查见 [运行说明](docs/SETUP.md)。
 
 ## Skill 包
 
@@ -78,3 +78,5 @@ npm.cmd run check
 ## English summary
 
 Med Research Mentor is a local-first medical research learning workbench. It guides beginners through papers, creates evidence-grounded journal-club slides, drafts research plans, and coordinates three specialized agents through reusable skills.
+
+作者：秋刀鱼 / [qiudaoyu0201](https://github.com/qiudaoyu0201)。第三方字体和 PDF 样式保留各自许可证，见 [第三方说明](docs/THIRD_PARTY.md)。

@@ -9,3 +9,5 @@ runs/
 test-results/
 
 !.env.example
+
+.vite/

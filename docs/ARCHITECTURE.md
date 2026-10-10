@@ -1,25 +1,38 @@
-# Med Research Mentor architecture
+# 架构与三功能协作闭环
 
-## Product model
+## 三个角色，由调度器组织
 
-The application has three connected workstreams:
+三个角色是导师、新手模拟、来源核验。修订是导师的职责，不是替代来源核验的第四个角色。普通带读工作流在 `server/orchestrator.ts` 中组织：导师生成 → 新手试读 → 来源核验 → 汇总断点与证据问题 → 导师有界修订 → 新手复读与来源复核。调度器按任务决定必要阶段，管理队列、预算、取消、缓存与记录。
 
-1. **Paper guide** turns a PDF into a paced learning conversation. It keeps the paper's order, expands important figures and methods, and links explanations back to source ranges.
-2. **Journal-club deck** turns the same evidence model into a visual presentation and a separate speaking guide. Source figures remain traceable to the paper.
-3. **Research-plan draft** turns a question and constraints into a discussion-ready proposal while marking unknowns instead of inventing parameters.
+新手检查是否看懂实验目的、对照和结果含义，不能用专家先验替用户回答；核验角色对照原始材料检查事实、引用、图件和结论。导师既要讲清楚，也要根据这些反馈补教。普通问答按需运行，不强制每次完整调用所有角色。
 
-The workstreams share source ranges, paper metadata, user intent, and review feedback. A reading question can improve a deck or plan; a plan constraint can focus the next reading step.
+## 带读、PPT、研究方案之间的交叉
 
-## Three-agent loop
+三条功能不只是并列按钮。内部三主线流程 `scripts/three-mainlines.ts` 将真实带读、PPT 和方案产物连同原始来源交给交叉核验；`server/cross-function-review.ts` 同时核对：
 
-- **Mentor agent** explains, structures, and drafts. It adapts depth to the learner and keeps the next action visible.
-- **Novice/source agent** simulates a beginner reading the result and checks whether claims, figures, methods, and source ranges are understandable and grounded.
-- **Revision/verification agent** repairs the highest-impact gaps, checks evidence bindings and output contracts, and returns a publishable result with unresolved uncertainty stated plainly.
+- 同一研究的背景、实验设计、对照、结果与局限在三类产物中是否一致且有来源。
+- PPT 精简是否遗漏改变结论的条件，讲述提示是否被错误当作页面证据。
+- 方案是否区分论文已知结果、机制假设和新研究预期；条件与资源是否被凭空补齐。
+- 原图、图注、引用是否绑定实际证据，不能用三个产物相互一致代替原文核验。
 
-The scheduler chooses the smallest useful set of roles for each task. Internal review can be stricter than the user-facing delivery gate: major factual, evidence, privacy, or structural errors block delivery; minor wording or formatting issues may be left for later refinement.
+来源聚合在 `server/cross-function-sources.ts` 中保留跨产物证据。复核绑定产物和来源指纹，产物更新后旧复核不能继续充当通过证明。交叉复核至少需要两类实际产物；没有生成的产物不会被补造为已验收。
 
-## Runtime boundaries
+这些完整交叉与迁移阶段属于内部迭代流程，并不表示每次用户生成 PPT 都自动执行整个三功能实验。
 
-The browser talks to the local Express server. The server owns storage, PDF extraction, figure assets, model calls, exports, and orchestration. Model credentials are read only from process environment variables. The browser never receives provider keys.
+## 学习、补教与迁移
 
-The repository publishes reusable source and Skill instructions. It does not publish user data, real papers, generated exports, evaluation ledgers, or provider credentials.
+内部流程让模拟新手使用教学产物完成汇报或研究设计任务，再用原始来源评价。存在理解断点时，导师针对性补教，新手修正，再在改变人群、资源、时间或结局条件的新情境独立作答，核验是否仍机械照搬原论文。
+
+`server/learning-closure.ts` 保存补教、核对补教、修正、核对修正、迁移、核对迁移各阶段。流程完成和迁移通过分别记录。模拟新手的结果用于比较 Skill，不作为真人已经掌握科研能力的证明。
+
+## 迭代到实际使用
+
+Skill 候选使用冻结快照，和在线基线隔离；评估来源、角色可见材料、模型配置、预算与恢复状态一起记录。小样本用于定位具体问题，整篇论文与跨功能产物用于检查连贯性和迁移。通过发布流程采用的规则才影响在线服务，不把一轮评分直接当作上线。
+
+在线交付允许少量不影响主要学习目标的措辞建议；内部比较更严格。来源失实、关键实验条件丢失、虚构图件或实质性结论错误不能以流畅度抵消。
+
+## 用户体验与数据
+
+带读支持顺序推进、当前及下一步、选句追问、原文/PDF/图件对照和按需术语解释。PPT 保留可编辑文字与原图，讲述提示单独导出；研究方案保存约束和未知条件，导出 DOCX/Markdown。用户可从独立生成专区开始，不必先完成带读。
+
+React/Vite 前端负责阅读、对照与生成界面；Express/TypeScript 后端负责 PDF、模型、调度、存储与导出。服务为本机单用户运行；材料保存在本地，推理时所需材料发送给所选提供方。
