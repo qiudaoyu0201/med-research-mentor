@@ -52,7 +52,8 @@ function setup(outputs: LearnerAnswer[], persist: typeof save = discard) {
 }
 test("catalog exposes only trigger metadata and loads selected instructions with safe references", async () => {
   const catalog = await skillCatalog();
-  assert.equal(catalog.length, 10);
+  assert.equal(catalog.length, 11);
+  assert.ok(catalog.some((s) => s.id === "medical-research-plan"));
   assert.ok(catalog.every((s) => !Object.hasOwn(s, "body") && s.name === s.id));
   const skill = await loadSkill("medical-learner-simulation");
   assert.match(skill.text, /choice/);
