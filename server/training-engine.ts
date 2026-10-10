@@ -2,7 +2,7 @@ import { readFile, readdir } from "node:fs/promises";
 import { join } from "node:path";
 import { createHash } from "node:crypto";
 import { digest } from "./materials.ts";
-export const recoveryPlanPath = "docs/内部训练下一轮_落地方案_v1.3.md";
+export const recoveryPlanPath = "docs/ITERATION.md";
 export const hashFile = async (path: string) =>
   createHash("sha256")
     .update(await readFile(path))

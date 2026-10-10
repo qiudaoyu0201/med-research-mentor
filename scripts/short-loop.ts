@@ -206,7 +206,7 @@ if (command === "pause") {
         rules,
         fingerprint,
         engineHash: digest(await trainingEngine()),
-        planHash: await hashFile("docs/小样本闭环与整体交付_落地方案_v1.4.md"),
+        planHash: await hashFile("docs/ITERATION.md"),
         reservedMaterials,
         historicalBatchHash: report.shortLoops.historicalBatchHash,
       };
