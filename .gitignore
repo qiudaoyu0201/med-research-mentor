@@ -7,3 +7,5 @@ runs/
 .env*
 *.log
 test-results/
+
+!.env.example
