@@ -191,6 +191,7 @@ test("candidate rule scope stays isolated across concurrent baseline/online load
 test("research-plan service freezes the scoped candidate into actual generation instructions", async () => {
   const baseline = await freezeRules(),
     candidate = candidateRules(baseline);
+  candidate.entries["medical-research-plan"].text += "\nPLAN_SKILL_CANDIDATE_MARKER";
   const calls: string[] = [];
   const provider: Provider = {
     model: "fixture",
@@ -252,5 +253,8 @@ test("research-plan service freezes the scoped candidate into actual generation 
   });
   assert.equal(calls.length, 2);
   assert.ok(calls[0].includes(feedbackCandidate));
+  assert.ok(calls[0].includes("PLAN_SKILL_CANDIDATE_MARKER"));
+  assert.equal(calls[1].includes("PLAN_SKILL_CANDIDATE_MARKER"), false);
+  assert.equal((await freezeRules()).entries["medical-research-plan"].text.includes("PLAN_SKILL_CANDIDATE_MARKER"), false);
   assert.equal((await sharedRules()).includes(feedbackCandidate), false);
 });
