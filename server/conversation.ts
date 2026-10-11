@@ -104,6 +104,7 @@ export class ConversationStore {
         .sort(
           (a, b) =>
             Number(Boolean(b.mainChat)) - Number(Boolean(a.mainChat)) ||
+            Number(b.recentTurnIds.length > 0) - Number(a.recentTurnIds.length > 0) ||
             (b.updatedAt ?? "").localeCompare(a.updatedAt ?? ""),
         )[0];
       const state = existing ?? (await this.create({ paperId, projectId }));
