@@ -944,13 +944,66 @@
 }
 .rw .rw-version-picker {
   display: flex;
-  align-items: center;
+  align-items: flex-start;
+  flex-direction: column;
   gap: 12px;
   margin: 0;
   font-size: 14px;
 }
+.rw .rw-version-cards {
+  display: flex;
+  gap: 8px;
+  max-width: 100%;
+  overflow-x: auto;
+  padding: 2px 2px 6px;
+}
+.rw .rw-version-card {
+  display: flex;
+  flex: 0 0 190px;
+  align-items: stretch;
+  gap: 4px;
+  border: 1px solid var(--rw-line);
+  border-radius: 10px;
+  background: var(--rw-surface);
+  overflow: hidden;
+}
+.rw .rw-version-card.is-selected {
+  border-color: var(--rw-accent);
+  box-shadow: 0 0 0 1px color-mix(in srgb, var(--rw-accent) 25%, transparent);
+}
+.rw .rw-version-card > button:first-child {
+  display: flex;
+  min-width: 0;
+  flex: 1;
+  flex-direction: column;
+  align-items: flex-start;
+  gap: 3px;
+  border: 0;
+  background: transparent;
+  text-align: left;
+}
+.rw .rw-version-card small {
+  color: var(--rw-muted);
+  font-size: 11px;
+  white-space: nowrap;
+}
+.rw .rw-version-card > button:last-child {
+  align-self: center;
+  padding: 5px 7px;
+  border: 0;
+  color: var(--rw-muted);
+  background: transparent;
+  font-size: 11px;
+}
+.rw .rw-version-picker-compact {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  color: var(--rw-muted);
+  font-size: 12px;
+}
 .rw .rw-version-picker select {
-  width: min(440px, 75%);
+  width: min(360px, 75%);
 }
 .rw .rw-ppt-list,
 .rw .rw-ppt-editor {

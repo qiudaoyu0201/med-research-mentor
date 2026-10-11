@@ -552,7 +552,39 @@ export function ResearchPpt({
           )}
           {!!versions.length && (
             <div className="rw-version-picker">
-              保存版本
+              <strong>保存版本</strong>
+              <div className="rw-version-cards" aria-label="保存版本列表">
+                {[...versions].reverse().map((v) => (
+                  <div
+                    className={`rw-version-card ${selected === v.id ? "is-selected" : ""}`}
+                    key={v.id}
+                  >
+                    <button
+                      type="button"
+                      onClick={() => {
+                        setPage(0);
+                        setSelected(v.id);
+                      }}
+                    >
+                      <span>{v.displayName ?? "未命名汇报"}</span>
+                      <small>
+                        {new Date(v.createdAt).toLocaleString("zh-CN")} · {v.status === "completed" ? "已完成" : v.status === "failed" ? "失败" : v.status === "cancelled" ? "已取消" : "处理中"}
+                      </small>
+                    </button>
+                    {done(v) && (
+                      <button
+                        type="button"
+                        aria-label={`删除 ${v.displayName ?? "未命名汇报"}`}
+                        onClick={() => void deleteVersion(v)}
+                      >
+                        删除
+                      </button>
+                    )}
+                  </div>
+                ))}
+              </div>
+              <label className="rw-version-picker-compact">
+                快速切换
               <select
                 aria-label="保存版本"
                 value={selected ?? ""}
@@ -580,15 +612,7 @@ export function ResearchPpt({
                   </option>
                 ))}
               </select>
-              {current && done(current) && (
-                <button
-                  type="button"
-                  disabled={busy}
-                  onClick={() => void deleteVersion(current)}
-                >
-                  删除此版本
-                </button>
-              )}
+              </label>
             </div>
           )}
           <div className={`rw-ppt-body ${editing ? "rw-ppt-editing" : ""}`}>

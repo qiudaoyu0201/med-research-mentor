@@ -1294,37 +1294,9 @@ export function ResearchPlanPanel({
               >
                 {plan.archived ? "取消归档" : "归档方案"}
               </button>
-              <details>
-                <summary>删除方案及关联任务记录</summary>
-                <p>
-                  删除这份方案的保存版本、来源副本和任务记录；原论文与论文讨论保留。本机手稿副本同时清除。
-                </p>
-                <button
-                  disabled={working}
-                  onClick={() =>
-                    void action(async () => {
-                      await researchApi(
-                        `/api/research-plans/${plan.id}`,
-                        {},
-                        "DELETE",
-                      );
-                      try {
-                        for (const key of [
-                          `research-plan-draft:${plan.id}`,
-                          `research-plan-topic-draft:${plan.id}`,
-                          `research-plan-conflict-draft:${plan.id}`,
-                        ])
-                          localStorage.removeItem(key);
-                      } catch {}
-                      setSelected(null);
-                      localWrite("research-plan-selected", null);
-                      await listPlans();
-                    })
-                  }
-                >
-                  删除这份方案
-                </button>
-              </details>
+              <p className="hint">
+                日常移除使用归档；彻底删除放到归档管理中，避免误删版本和来源副本。
+              </p>
             </details>
           </>
         )}
