@@ -28,6 +28,7 @@ export interface SourceSelector {
   range?: { start: number; end: number };
 }
 export interface SourceRef extends Partial<SourceSelector> {
+  snapshotHash?: string;
   sourceType?: "local" | "pubmed";
   bibliography?: {
     pmid: string;

@@ -22,6 +22,7 @@ import type { Provider } from "./provider.ts";
 import { exportDeck } from "./export.ts";
 import { slideImageKey } from "../shared/image-region.ts";
 import { pptImagePacket } from "./ppt-image-packet.ts";
+import { snapshotPaper } from "./paper-snapshot.ts";
 
 type DeckChange =
   | { slideIndex: number; question: string; slide?: Slide }
@@ -35,6 +36,14 @@ export class DeckVersions {
   }
   private controllers = new Map<string, AbortController>();
   private completions = new Map<string, Promise<void>>();
+  private exporting = new Set<string>();
+  inFlight(conversationId: string) {
+    return [...this.versions.values()].some(
+      (v) =>
+        v.conversationId === conversationId &&
+        (this.controllers.has(v.id) || this.exporting.has(v.id)),
+    );
+  }
   constructor(
     private provider: Provider,
     private paperById: (id: string) => Promise<PaperBundle>,
@@ -74,27 +83,37 @@ export class DeckVersions {
       throw new Error("汇报版本不属于本会话。");
     return structuredClone(version);
   }
+  async paperForConversation(paperId: string, conversationId?: string) {
+    const saved = conversationId
+      ? [...this.versions.values()]
+          .filter(
+            (v) =>
+              v.conversationId === conversationId &&
+              v.paperId === paperId &&
+              v.sourceSnapshot,
+          )
+          .sort((a, b) => b.createdAt.localeCompare(a.createdAt))[0]
+      : undefined;
+    return saved?.sourceSnapshot
+      ? structuredClone(saved.sourceSnapshot)
+      : this.paperById(paperId);
+  }
   async delete(id: string, conversationId: string) {
     const version = this.get(id, conversationId);
-    if (this.activeIds.has(id) || ["queued", "revising", "checking"].includes(version.status))
+    if (
+      this.controllers.has(id) ||
+      this.exporting.has(id) ||
+      ["queued", "revising", "checking"].includes(version.status)
+    )
       throw new Error("正在处理的版本不能删除，请先取消任务。");
-    const assetIds = Object.values(version.displayAssets ?? {});
     await remove("deck-versions", id);
     this.versions.delete(id);
-    const remainingAssets = new Set(
-      [...this.versions.values()].flatMap((item) =>
-        Object.values(item.displayAssets ?? {}),
-      ),
-    );
-    await Promise.all(
-      assetIds
-        .filter((assetId) => !remainingAssets.has(assetId))
-        .map((assetId) => remove("display-assets", assetId)),
-    );
     return { ok: true, id };
   }
   private async sources(version: DeckVersion) {
-    const paper = withFoundationSources(await this.paperById(version.paperId));
+    const paper = version.sourceSnapshot
+      ? structuredClone(version.sourceSnapshot)
+      : withFoundationSources(await this.paperById(version.paperId));
     const sources = paper.sources.filter((s) =>
       version.sourceIds.includes(s.id),
     );
@@ -105,6 +124,24 @@ export class DeckVersions {
     )
       throw new Error("汇报资料版本已变化，请重新核对。");
     return { ...paper, sources };
+  }
+  async preservePaper(paperId: string) {
+    const versions = [...this.versions.values()].filter(
+      (v) => v.paperId === paperId,
+    );
+    if (versions.some((v) => this.controllers.has(v.id)))
+      throw new Error("汇报任务仍在处理，请先取消后再删除来源论文。");
+    for (const old of versions) {
+      if (old.sourceSnapshot) continue;
+      // Validate legacy provenance before migrating; a mismatch must not be hidden.
+      await this.sources(old);
+      const version = structuredClone(old);
+      version.sourceSnapshot = await snapshotPaper(
+        withFoundationSources(await this.paperById(paperId)),
+      );
+      await this.bindDisplayAssets(version, version.sourceSnapshot);
+      await this.store(version);
+    }
   }
   private async store(version: DeckVersion) {
     await this.persist("deck-versions", version.id, version);
@@ -134,7 +171,9 @@ export class DeckVersions {
     }
   }
   async seed(conversationId: string, paperId: string, run?: TaskRun) {
-    const paper = withFoundationSources(await this.paperById(paperId));
+    const paper = withFoundationSources(
+      await this.paperForConversation(paperId, conversationId),
+    );
     if (
       run &&
       (run.status !== "completed" ||
@@ -170,6 +209,7 @@ export class DeckVersions {
       sourceVersion: paper.version,
       sourceIds: sources.map((s) => s.id),
       sourceHash: digest(sources),
+      sourceSnapshot: await snapshotPaper(paper),
       createdAt: new Date().toISOString(),
       runId: run?.id,
       learningIntent: run?.input.learningIntent,
@@ -219,6 +259,7 @@ export class DeckVersions {
     await this.sources(base);
     const version: DeckVersion = {
       ...structuredClone(base),
+      exportIds: undefined,
       id: randomUUID(),
       parentId: base.id,
       learningIntent: external?.learningIntent ?? parent.learningIntent,
@@ -261,7 +302,9 @@ export class DeckVersions {
         input.slide?.imageSource &&
         !paper.sources.some((s) => s.id === input.slide!.imageSource)
       ) {
-        const all = withFoundationSources(await this.paperById(base.paperId));
+        const all = base.sourceSnapshot
+          ? structuredClone(base.sourceSnapshot)
+          : withFoundationSources(await this.paperById(base.paperId));
         const image = all.sources.find(
           (s) =>
             s.id === input.slide!.imageSource &&
@@ -734,6 +777,7 @@ export class DeckVersions {
       throw new Error("不能恢复未完成或其他资料版本。");
     const version: DeckVersion = {
       ...target,
+      exportIds: undefined,
       id: randomUUID(),
       parentId: current.id,
       restoredFrom: target.id,
@@ -748,40 +792,52 @@ export class DeckVersions {
     return version;
   }
   async export(id: string, conversationId: string) {
-    const version = this.get(id, conversationId);
-    if (
-      version.status !== "completed" ||
-      version.review.issues.some(
-        (i) => !i.resolved && i.severity === "blocking",
+    if (this.exporting.has(id)) throw new Error("此版本正在导出，请稍候。");
+    this.exporting.add(id);
+    try {
+      const version = this.get(id, conversationId);
+      if (
+        version.status !== "completed" ||
+        version.review.issues.some(
+          (i) => !i.resolved && i.severity === "blocking",
+        )
       )
-    )
-      throw new Error("此版本尚未完成核对，不能导出。");
-    const paper = structuredClone(await this.sources(version)),
-      artifactId = randomUUID();
-    for (const slide of version.outline.slides) {
-      const source = paper.sources.find((s) => s.id === slide.imageSource);
-      if (!source) continue;
-      const key = slideImageKey(slide)!;
-      const assetId = version.displayAssets?.[key];
-      if (assetId)
-        paper.sources.push({
-          ...source,
-          id: key,
-          locator:
-            source.locator +
-            (slide.imageCrop
-              ? `；局部选区：${JSON.stringify(slide.imageCrop)}`
-              : ""),
-          image: (await read<DisplayAsset>("display-assets", assetId)).image,
-        });
-    }
-    const outline = structuredClone(version.outline);
-    for (const slide of outline.slides)
-      if (slide.imageSource && version.displayAssets?.[slideImageKey(slide)!]) {
-        slide.imageSource = slideImageKey(slide);
-        delete slide.imageCrop;
+        throw new Error("此版本尚未完成核对，不能导出。");
+      const paper = structuredClone(await this.sources(version)),
+        artifactId = randomUUID();
+      for (const slide of version.outline.slides) {
+        const source = paper.sources.find((s) => s.id === slide.imageSource);
+        if (!source) continue;
+        const key = slideImageKey(slide)!;
+        const assetId = version.displayAssets?.[key];
+        if (assetId)
+          paper.sources.push({
+            ...source,
+            id: key,
+            locator:
+              source.locator +
+              (slide.imageCrop
+                ? `；局部选区：${JSON.stringify(slide.imageCrop)}`
+                : ""),
+            image: (await read<DisplayAsset>("display-assets", assetId)).image,
+          });
       }
-    await this.exporter(outline, paper, artifactId);
-    return { id: artifactId, url: `/api/decks/${artifactId}`, versionId: id };
+      const outline = structuredClone(version.outline);
+      for (const slide of outline.slides)
+        if (
+          slide.imageSource &&
+          version.displayAssets?.[slideImageKey(slide)!]
+        ) {
+          slide.imageSource = slideImageKey(slide);
+          delete slide.imageCrop;
+        }
+      await this.exporter(outline, paper, artifactId);
+      const latest = this.get(id, conversationId);
+      latest.exportIds = [...(latest.exportIds ?? []), artifactId];
+      await this.store(latest);
+      return { id: artifactId, url: `/api/decks/${artifactId}`, versionId: id };
+    } finally {
+      this.exporting.delete(id);
+    }
   }
 }

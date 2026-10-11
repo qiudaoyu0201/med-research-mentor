@@ -47,6 +47,7 @@ export interface ReadingPosition {
   panel: "sources" | "notes" | null;
 }
 export interface WorkspaceIndex {
+  artifacts?: ArtifactMetadata[];
   projects: Project[];
   papers: PaperMetadata[];
   notes: ResearchNote[];
@@ -54,6 +55,30 @@ export interface WorkspaceIndex {
   lastConversationId?: string;
   currentPaperId?: string | null;
   currentProjectId?: string | null;
+}
+export interface ArtifactMetadata {
+  draftOnly?: boolean;
+  intake?: GenerationDraft;
+  id: string;
+  kind: "ppt" | "plan";
+  displayName?: string;
+  projectId: string | null;
+  archived: boolean;
+}
+export interface ArtifactSummary extends ArtifactMetadata {
+  title: string;
+  updatedAt: string;
+  paperId?: string;
+  versionCount: number;
+}
+export interface GenerationDraft {
+  paperId?: string;
+  request?: string;
+  count?: string;
+  question?: string;
+  conditions?: string;
+  instruction?: string;
+  paperIds?: string[];
 }
 export interface ReadingStart {
   coverage?: {

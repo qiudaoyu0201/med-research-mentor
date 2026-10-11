@@ -14,6 +14,10 @@ import { planJobDone, planVersionReady } from "../shared/research-plan.ts";
 import { importPaper, researchApi } from "./research-api.ts";
 import { ResearchMarkdown } from "./markdown.tsx";
 import { ResearchSlide } from "./research-slide.tsx";
+import { ArtifactNavigation } from "./artifact-navigation.tsx";
+import type { WorkspaceIndex, ArtifactSummary } from "../shared/workspace.ts";
+import { useArtifactIntake } from "./artifact-intake.ts";
+import { slideImageKey } from "../shared/image-region.ts";
 
 const terminal = (status: string) =>
   [
@@ -117,14 +121,23 @@ function PaperPicker({
     [error, setError] = useState("");
   return (
     <div className="tg-papers">
-      <label>
-        {multiple ? "参考论文（可选）" : "选择论文"}
-        <div className="tg-paper-picker" role={multiple ? "group" : "radiogroup"} aria-label={multiple ? "参考论文" : "选择论文"}>
-          {!papers.length && <span className="hint">暂无可选论文，请先导入 PDF。</span>}
+      <div>
+        <span>{multiple ? "参考论文（可选）" : "选择论文"}</span>
+        <div
+          className="tg-paper-picker"
+          role={multiple ? "group" : "radiogroup"}
+          aria-label={multiple ? "参考论文" : "选择论文"}
+        >
+          {!papers.length && (
+            <span className="hint">暂无可选论文，请先导入 PDF。</span>
+          )}
           {papers.map((p) => {
             const checked = selected.includes(p.id);
             return (
-              <label className={`tg-paper-option ${checked ? "is-selected" : ""}`} key={p.id}>
+              <label
+                className={`tg-paper-option ${checked ? "is-selected" : ""}`}
+                key={p.id}
+              >
                 <input
                   type={multiple ? "checkbox" : "radio"}
                   name={multiple ? undefined : "generation-paper"}
@@ -145,8 +158,8 @@ function PaperPicker({
             );
           })}
         </div>
-      </label>
-      {multiple && <small>可按 Ctrl 多选，也可以不选，由助手检索文献。</small>}
+      </div>
+      {multiple && <small>可勾选多篇，也可以不选，由助手检索文献。</small>}
       <input
         ref={input}
         type="file"
@@ -191,15 +204,32 @@ export function PptGeneration({
   papers: initial,
   initialPaper,
   onImported,
+  index,
+  onCreateProject,
+  onEditProject,
 }: {
   papers: PaperBundle[];
   initialPaper?: PaperBundle;
   onImported: (paper: PaperBundle) => void;
+  index: WorkspaceIndex;
+  onCreateProject: () => void;
+  onEditProject: (id: string) => void;
 }) {
+  const [artifactId, setArtifactId] = useState(() =>
+    readDraft("tutor-ppt-artifact", ""),
+  );
+  const [draftOnly, setDraftOnly] = useState(() =>
+    readDraft("tutor-ppt-draft-only", false),
+  );
+  useEffect(() => {
+    writeDraft("tutor-ppt-draft-only", draftOnly);
+  }, [draftOnly]);
   const [papers, setPapers] = useState(initial);
   useEffect(() => setPapers(initial), [initial]);
   const [paperId, setPaperId] = useState(
-      initialPaper?.id ?? readDraft("tutor-ppt-paper", ""),
+      artifactId
+        ? readDraft("tutor-ppt-paper", "")
+        : (initialPaper?.id ?? readDraft("tutor-ppt-paper", "")),
     ),
     [request, setRequest] = useState(() => readDraft("tutor-ppt-request", "")),
     [count, setCount] = useState(() =>
@@ -223,20 +253,34 @@ export function PptGeneration({
     [awaiting, setAwaiting] = useState(false),
     [restoreFailed, setRestoreFailed] = useState(false),
     [restoreAttempt, setRestoreAttempt] = useState(0);
-  const pendingKey = `tutor-ppt-pending:${paperId}`;
-  const paper = papers.find((p) => p.id === paperId),
-    current = versions.find((v) => v.id === selected) ?? versions.at(-1);
+  const pendingKey = "tutor-ppt-pending";
+  const current = versions.find((v) => v.id === selected) ?? versions.at(-1);
+  const paper = current?.sourceSnapshot ?? papers.find((p) => p.id === paperId);
   const running = turn && !terminal(turn.status);
+  useArtifactIntake(
+    "ppt",
+    artifactId,
+    { paperId, request, count },
+    !loading && !busy && !running && !awaiting,
+    setError,
+  );
   useEffect(() => {
     writeDraft("tutor-ppt-request", request);
-  }, [request]);
+    if (artifactId) writeDraft(`tutor-ppt-request:${artifactId}`, request);
+  }, [request, artifactId]);
   useEffect(() => {
     writeDraft("tutor-ppt-count", count);
-  }, [count]);
+    if (artifactId) writeDraft(`tutor-ppt-count:${artifactId}`, count);
+  }, [count, artifactId]);
+  useEffect(() => {
+    if (artifactId && !loading && selected)
+      writeDraft(`tutor-ppt-view:${artifactId}`, { selected, page });
+  }, [artifactId, selected, page, loading]);
   useEffect(() => {
     const token = ++epoch.current;
     conversation.current = undefined;
-    pending.current = pendingPpt(pendingKey);
+    pending.current =
+      pendingPpt(pendingKey) ?? pendingPpt(`tutor-ppt-pending:${paperId}`);
     setAwaiting(!!pending.current);
     setLoading(true);
     setRestoreFailed(false);
@@ -247,18 +291,50 @@ export function PptGeneration({
     setPage(0);
     setDownload("");
     writeDraft("tutor-ppt-paper", paperId);
-    if (!paperId) {
+    writeDraft("tutor-ppt-artifact", artifactId);
+    if (!paperId && !artifactId && !pending.current) {
       setLoading(false);
       return;
     }
     void researchApi<ConversationState[]>("/api/conversations")
       .then(async (all) => {
-        const histories = chronological(all.filter((c) => c.paperId === paperId));
-        const matches = histories.filter((c) => c.purpose === "ppt-generation");
+        if (token !== epoch.current) return;
+        if (artifactId) {
+          const items = await researchApi<ArtifactSummary[]>("/api/artifacts");
+          const item = items.find(
+            (a) => a.kind === "ppt" && a.id === artifactId && !a.archived,
+          );
+          if (token !== epoch.current) return;
+          if (!item) {
+            setArtifactId("");
+            setRequest("");
+            setCount("");
+            return;
+          }
+          if (item.draftOnly) {
+            setDraftOnly(true);
+            return;
+          }
+        }
+        const histories = chronological(
+          all.filter(
+            (c) =>
+              c.id === artifactId || c.id === pending.current?.conversationId,
+          ),
+        );
+        const matches = histories;
         const c =
           matches.find((c) => c.id === pending.current?.conversationId) ??
           matches.at(-1);
         if (token !== epoch.current) return;
+        if (c?.paperId && c.paperId !== paperId) {
+          setPaperId(c.paperId);
+          return;
+        }
+        if (c && !artifactId) {
+          setArtifactId(c.id);
+          return;
+        }
         const [decks, turns] = await Promise.all([
           Promise.all(
             histories.map((item) =>
@@ -267,10 +343,13 @@ export function PptGeneration({
               ),
             ),
           ),
-          c ? researchApi<AssistantTurn[]>(`/api/conversations/${c.id}/turns`) : Promise.resolve([]),
+          c
+            ? researchApi<AssistantTurn[]>(`/api/conversations/${c.id}/turns`)
+            : Promise.resolve([]),
         ]);
         if (token !== epoch.current) return;
         conversation.current = c;
+        setDraftOnly(false);
         const accepted =
           pending.current &&
           turns.find(
@@ -278,12 +357,38 @@ export function PptGeneration({
               t.message.clientMessageId ===
               pending.current!.body.clientMessageId,
           );
+        if (c && !readDraft(`tutor-ppt-request:${c.id}`, "")) {
+          const last = chronological(turns).at(-1)?.message;
+          if (last) {
+            setRequest(last.question.split("用户要求：")[1] ?? "");
+            setCount(last.slideCount ? String(last.slideCount) : "");
+          }
+        }
         if (accepted) {
           pending.current = undefined;
           writeDraft(pendingKey, null);
+          writeDraft(`tutor-ppt-pending:${paperId}`, null);
           setAwaiting(false);
         }
-        setVersions(chronological(decks.flat()));
+        const ordered = chronological(decks.flat());
+        setVersions(ordered);
+        const view = readDraft(`tutor-ppt-view:${artifactId}`, {
+          selected: "",
+          page: 0,
+        });
+        setSelected(
+          ordered.some((v) => v.id === view.selected)
+            ? view.selected
+            : (ordered.at(-1)?.id ?? ""),
+        );
+        const chosen =
+          ordered.find((v) => v.id === view.selected) ?? ordered.at(-1);
+        setPage(
+          Math.max(
+            0,
+            Math.min(view.page, (chosen?.outline.slides.length ?? 1) - 1),
+          ),
+        );
         setTurn(accepted || chronological(turns).at(-1));
       })
       .catch((e) => {
@@ -298,7 +403,7 @@ export function PptGeneration({
     return () => {
       epoch.current++;
     };
-  }, [paperId, pendingKey, restoreAttempt]);
+  }, [paperId, artifactId, pendingKey, restoreAttempt]);
   useEffect(() => {
     if (!running || !turn) return;
     let stopped = false,
@@ -362,8 +467,14 @@ export function PptGeneration({
             paperId,
             goal: "论文汇报生成专区",
             purpose: "ppt-generation",
+            ...(draftOnly && artifactId ? { draftId: artifactId } : {}),
           }));
         conversation.current = c;
+        setDraftOnly(false);
+        if (artifactId !== c.id) {
+          // Keep the current request mounted; adopt the artifact after submission.
+          writeDraft("tutor-ppt-artifact", c.id);
+        }
         const submission: PendingPpt = {
           conversationId: c.id,
           body: {
@@ -394,6 +505,8 @@ export function PptGeneration({
       if (token === epoch.current) {
         setAwaiting(false);
         setTurn(next);
+        setBusy(false);
+        if (!artifactId) setArtifactId(next.conversationId);
       }
       if (terminal(next.status)) {
         const decks = await researchApi<DeckVersion[]>(
@@ -431,39 +544,100 @@ export function PptGeneration({
     !current.review.issues.some(
       (i) => !i.resolved && i.severity === "blocking",
     );
-  async function deletePptVersion(version: DeckVersion) {
-    if (!window.confirm("删除这份 PPT 版本？")) return;
+  function newPpt() {
+    if (busy || running || awaiting) return;
+    setArtifactId("");
+    setPaperId("");
+    setVersions([]);
+    setSelected("");
+    setTurn(undefined);
+    setRequest("");
+    setCount("");
+    setDownload("");
+    conversation.current = undefined;
+    setDraftOnly(false);
+  }
+  async function createPptDraft() {
+    if (lock.current || busy || running || awaiting) return;
+    lock.current = true;
+    setBusy(true);
     try {
-      await researchApi(
-        `/api/deck-versions/${version.id}`,
-        { conversationId: version.conversationId },
-        "DELETE",
+      const draft = await researchApi<ArtifactSummary>(
+        "/api/artifacts/ppt",
+        {},
       );
-      const remaining = versions.filter((v) => v.id !== version.id);
-      setVersions(remaining);
-      if (selected === version.id) setSelected(remaining.at(-1)?.id ?? "");
+      setArtifactId(draft.id);
+      setDraftOnly(true);
+      setPaperId("");
+      setRequest("");
+      setCount("");
+      setVersions([]);
+      setTurn(undefined);
+      setSelected("");
+      setDownload("");
+      conversation.current = undefined;
     } catch (e) {
       setError((e as Error).message);
+    } finally {
+      lock.current = false;
+      setBusy(false);
     }
   }
   return (
     <section className="tg-zone" aria-label="PPT生成专区">
+      <ArtifactNavigation
+        kind="ppt"
+        index={index}
+        onCreateProject={onCreateProject}
+        onEditProject={onEditProject}
+        selected={artifactId}
+        revision={`${artifactId}:${versions.length}:${turn?.status}`}
+        disabled={loading || busy || importing || awaiting || !!running}
+        onNew={() => void createPptDraft()}
+        onSelect={(a) => {
+          setRequest(
+            readDraft(`tutor-ppt-request:${a.id}`, a.intake?.request ?? ""),
+          );
+          setCount(readDraft(`tutor-ppt-count:${a.id}`, a.intake?.count ?? ""));
+          setDraftOnly(!!a.draftOnly);
+          setArtifactId(a.id);
+          setPaperId(a.paperId ?? a.intake?.paperId ?? "");
+        }}
+        onArchived={(id) => {
+          if (id === artifactId) newPpt();
+        }}
+      />
       <header>
         <h2>论文汇报</h2>
         <p>选一篇论文，生成汇报 PPT 与独立讲述提示。下载后可自行修改。</p>
       </header>
       <div className="tg-card">
-        <PaperPicker
-          papers={papers}
-          selected={paperId ? [paperId] : []}
-          disabled={loading || busy || awaiting || !!running}
-          onSelect={(ids) => setPaperId(ids[0] ?? "")}
-          onBusyChange={setImporting}
-          onImported={(p) => {
-            setPapers((old) => [...old.filter((x) => x.id !== p.id), p]);
-            onImported(p);
-          }}
-        />
+        {artifactId && paper && !papers.some((p) => p.id === paper.id) && (
+          <p className="hint">
+            来源论文已归档或移除，当前汇报继续使用保存的资料副本。
+          </p>
+        )}
+        {artifactId && !draftOnly && paper ? (
+          <p>来源：{paper.title}</p>
+        ) : (
+          <PaperPicker
+            papers={papers}
+            selected={paperId ? [paperId] : []}
+            disabled={
+              (!!artifactId && !draftOnly) ||
+              loading ||
+              busy ||
+              awaiting ||
+              !!running
+            }
+            onSelect={(ids) => setPaperId(ids[0] ?? "")}
+            onBusyChange={setImporting}
+            onImported={(p) => {
+              setPapers((old) => [...old.filter((x) => x.id !== p.id), p]);
+              onImported(p);
+            }}
+          />
+        )}
         <label>
           补充要求（可选）
           <textarea
@@ -505,7 +679,11 @@ export function PptGeneration({
               ? "正在提交…"
               : awaiting
                 ? "查询／重试提交"
-                : "生成汇报"}
+                : turn?.status === "cancelled" || turn?.status === "failed"
+                  ? "按当前要求重试"
+                  : artifactId && !draftOnly
+                    ? "按当前要求生成新版本"
+                    : "生成汇报"}
         </button>
       </div>
       {awaiting && !busy && (
@@ -525,12 +703,17 @@ export function PptGeneration({
           正在思考…{" "}
           <button
             onClick={() =>
-              void researchApi(`/api/turns/${turn.id}/cancel`, {}).catch((e) =>
-                setError(e.message),
+              void researchApi<{ turn?: AssistantTurn }>(
+                `/api/turns/${turn.id}/cancel`,
+                {},
               )
+                .then((r) => {
+                  if (r.turn) setTurn(r.turn);
+                })
+                .catch((e) => setError(e.message))
             }
           >
-            停止
+            取消生成
           </button>
         </p>
       )}
@@ -541,10 +724,13 @@ export function PptGeneration({
       )}
       {!!versions.length && (
         <div className="tg-version-browser">
-          <strong>已生成汇报</strong>
+          <strong>当前汇报的版本</strong>
           <div className="tg-version-cards" aria-label="已生成汇报列表">
             {versions.map((v) => (
-              <div className={`tg-version-card ${current?.id === v.id ? "is-selected" : ""}`} key={v.id}>
+              <div
+                className={`tg-version-card ${current?.id === v.id ? "is-selected" : ""}`}
+                key={v.id}
+              >
                 <button
                   type="button"
                   disabled={busy}
@@ -555,35 +741,40 @@ export function PptGeneration({
                   }}
                 >
                   <span>{new Date(v.createdAt).toLocaleString("zh-CN")}</span>
-                  <small>{v.status === "completed" ? "已完成" : "未完成"}</small>
+                  <small>
+                    {v.status === "completed" ? "已完成" : "未完成"}
+                  </small>
                 </button>
-                {terminal(v.status) && (
-                  <button type="button" onClick={() => void deletePptVersion(v)}>
-                    删除
-                  </button>
-                )}
               </div>
             ))}
           </div>
-          <label>
-            快速切换
-          <select
-            disabled={busy}
-            value={current?.id ?? ""}
-            onChange={(e) => {
-              setSelected(e.target.value);
-              setPage(0);
-              setDownload("");
-            }}
-          >
-            {versions.map((v) => (
-              <option key={v.id} value={v.id}>
-                {new Date(v.createdAt).toLocaleString()} ·{" "}
-                {v.status === "completed" ? "已完成" : "未完成"}
-              </option>
-            ))}
-          </select>
-          </label>
+          {current && current.id !== versions.at(-1)?.id && ready && (
+            <button
+              disabled={busy || !!running}
+              onClick={async () => {
+                setBusy(true);
+                setError("");
+                try {
+                  const restored = await researchApi<DeckVersion>(
+                    `/api/deck-versions/${versions.at(-1)!.id}/restore`,
+                    {
+                      conversationId: current.conversationId,
+                      targetId: current.id,
+                    },
+                  );
+                  setVersions((old) => chronological([...old, restored]));
+                  setSelected(restored.id);
+                  setPage(0);
+                } catch (e) {
+                  setError((e as Error).message);
+                } finally {
+                  setBusy(false);
+                }
+              }}
+            >
+              以此版本继续修改
+            </button>
+          )}
         </div>
       )}
       {current && slide && paper && (
@@ -594,11 +785,17 @@ export function PptGeneration({
             page={page + 1}
             total={current.outline.slides.length}
             url={
-              slide.imageSource
-                ? paper.sources.find((s) => s.id === slide.imageSource)?.image
-                : undefined
+              current.displayAssets?.[slideImageKey(slide) ?? ""]
+                ? `/api/display-assets/${current.displayAssets[slideImageKey(slide)!]}`
+                : slide.imageSource
+                  ? paper.sources.find((s) => s.id === slide.imageSource)?.image
+                  : undefined
             }
-            crop={slide.imageCrop}
+            crop={
+              current.displayAssets?.[slideImageKey(slide) ?? ""]
+                ? undefined
+                : slide.imageCrop
+            }
           />
           <div className="tg-actions">
             <button disabled={!page} onClick={() => setPage((p) => p - 1)}>
@@ -673,10 +870,19 @@ export function PptGeneration({
 export function PlanGeneration({
   papers: initial,
   onImported,
+  index,
+  onCreateProject,
+  onEditProject,
 }: {
   papers: PaperBundle[];
   onImported: (paper: PaperBundle) => void;
+  index: WorkspaceIndex;
+  onCreateProject: () => void;
+  onEditProject: (id: string) => void;
 }) {
+  const [draftId, setDraftId] = useState(() =>
+    readDraft("tutor-plan-draft-id", ""),
+  );
   const [papers, setPapers] = useState(initial);
   useEffect(() => setPapers(initial), [initial]);
   const [form, setForm] = useState(() =>
@@ -701,9 +907,21 @@ export function PlanGeneration({
     [restoreFailed, setRestoreFailed] = useState(false),
     [restoreAttempt, setRestoreAttempt] = useState(0);
   const active = job && !planJobDone(job);
+  useArtifactIntake(
+    "plan",
+    plan?.id || draftId,
+    form,
+    !loading && !busy && !active && !awaiting,
+    setError,
+  );
+  useEffect(() => {
+    writeDraft("tutor-plan-draft-id", draftId);
+  }, [draftId]);
   useEffect(() => {
     writeDraft("tutor-plan-intake", form);
-  }, [form]);
+    if (plan) writeDraft(`tutor-plan-intake:${plan.id}`, form);
+    else if (draftId) writeDraft(`tutor-plan-intake:${draftId}`, form);
+  }, [form, plan?.id, draftId]);
   useEffect(() => {
     const token = ++generation.current;
     setLoading(true);
@@ -714,10 +932,24 @@ export function PlanGeneration({
     void researchApi<ResearchPlan[]>("/api/research-plans")
       .then(async (all) => {
         if (token !== generation.current) return;
-        setPlans(chronological(all));
+        setPlans(chronological(all.filter((p) => !p.archived)));
         const id = pending.current?.id ?? readDraft("tutor-plan-selected", "");
-        const p = all.find((p) => p.id === id);
+        const p = all.find((p) => p.id === id && !p.archived);
         if (!p) {
+          if (draftId) {
+            const drafts =
+              await researchApi<ArtifactSummary[]>("/api/artifacts");
+            if (token !== generation.current) return;
+            const draft = drafts.find(
+              (a) =>
+                a.kind === "plan" &&
+                a.id === draftId &&
+                a.draftOnly &&
+                !a.archived,
+            );
+            if (draft) return;
+            setDraftId("");
+          }
           // A successful list response confirms that the selected record was
           // removed. Do not keep retrying a submission for a nonexistent plan.
           pending.current = undefined;
@@ -776,6 +1008,7 @@ export function PlanGeneration({
         if (!stopped) {
           setJob(next);
           setPlan(p);
+          if (planJobDone(next)) setSelectedVersion(p.currentVersion ?? "");
           if (all) setPlans(chronological(all));
         }
       } catch (e) {
@@ -806,18 +1039,44 @@ export function PlanGeneration({
     let accepted = false;
     try {
       if (!pending.current) {
-        const sources = selectPlanSources(papers, form.paperIds,
-          `${form.question}\n${form.conditions}\n${form.instruction}`);
-        const p = await researchApi<ResearchPlan>("/api/research-plans", {
+        const sources = selectPlanSources(
+          papers,
+          form.paperIds,
+          `${form.question}\n${form.conditions}\n${form.instruction}`,
+        );
+        const retained = (plan?.topic.sources ?? [])
+          .filter(
+            (r) =>
+              r.paperId &&
+              form.paperIds.includes(r.paperId) &&
+              !papers.some((p) => p.id === r.paperId),
+          )
+          .map((r) => ({
+            paperId: r.paperId!,
+            sourceId: r.sourceId!,
+            sourceVersion: r.sourceVersion!,
+            ...(r.range ? { range: r.range } : {}),
+          }));
+        const topic = {
           question: form.question,
           conditions: form.conditions,
-          sources,
-        });
+          sources: [...sources, ...retained],
+        };
+        const p = plan
+          ? await researchApi<ResearchPlan>(
+              `/api/research-plans/${plan.id}/topic`,
+              { expectedTopicVersion: plan.topic.version, topic },
+              "PUT",
+            )
+          : await researchApi<ResearchPlan>("/api/research-plans", {
+              ...topic,
+              ...(draftId ? { draftId } : {}),
+            });
         const submission: PendingPlan = {
           id: p.id,
           body: {
             requestKey: crypto.randomUUID(),
-            expectedVersion: null,
+            expectedVersion: p.currentVersion,
             expectedTopicVersion: p.topic.version,
             action: "generate",
             requestedScope: "full-plan",
@@ -830,6 +1089,7 @@ export function PlanGeneration({
         writeDraft("tutor-plan-selected", p.id);
         if (token === generation.current) {
           setPlan(p);
+          setDraftId("");
           setJob(undefined);
           setPlans((old) =>
             chronological([...old.filter((item) => item.id !== p.id), p]),
@@ -866,7 +1126,7 @@ export function PlanGeneration({
       if (token === generation.current) setBusy(false);
     }
   }
-  async function showPlan(id: string) {
+  async function showPlan(id: string, intake?: ArtifactSummary["intake"]) {
     if (!id || busy || active || awaiting) return;
     const token = ++generation.current;
     setLoading(true);
@@ -879,6 +1139,19 @@ export function PlanGeneration({
       if (token === generation.current) {
         setPlan(p);
         setJob(chronological(jobs).at(-1));
+        setDraftId("");
+        setForm(
+          readDraft(`tutor-plan-intake:${id}`, {
+            question: intake?.question ?? p.topic.question,
+            conditions: intake?.conditions ?? p.topic.conditions,
+            instruction: intake?.instruction ?? "",
+            paperIds: intake?.paperIds ?? [
+              ...new Set(
+                p.topic.sources.flatMap((s) => (s.paperId ? [s.paperId] : [])),
+              ),
+            ],
+          }),
+        );
         writeDraft("tutor-plan-selected", id);
       }
     } catch (e) {
@@ -887,13 +1160,86 @@ export function PlanGeneration({
       if (token === generation.current) setLoading(false);
     }
   }
-  const version = plan?.versions.find((v) => v.id === plan.currentVersion);
-  const ready =
-    version &&
-    planVersionReady(version) &&
-    (!job || job.status === "completed");
+  const [selectedVersion, setSelectedVersion] = useState("");
+  useEffect(
+    () => setSelectedVersion(readDraft(`tutor-plan-view:${plan?.id}`, "")),
+    [plan?.id],
+  );
+  useEffect(() => {
+    if (
+      plan &&
+      selectedVersion &&
+      plan.versions.some((v) => v.id === selectedVersion)
+    )
+      writeDraft(`tutor-plan-view:${plan.id}`, selectedVersion);
+  }, [plan?.id, selectedVersion]);
+  const version =
+    plan?.versions.find((v) => v.id === selectedVersion) ??
+    plan?.versions.find((v) => v.id === plan.currentVersion);
+  function newPlan() {
+    if (busy || active || awaiting) return;
+    generation.current++;
+    setPlan(undefined);
+    setJob(undefined);
+    setError("");
+    setDraftId("");
+    setForm({ question: "", conditions: "", instruction: "", paperIds: [] });
+    writeDraft("tutor-plan-selected", "");
+  }
+  async function createPlanDraft() {
+    if (lock.current || busy || active || awaiting) return;
+    lock.current = true;
+    setBusy(true);
+    try {
+      const draft = await researchApi<ArtifactSummary>(
+        "/api/artifacts/plan",
+        {},
+      );
+      setPlan(undefined);
+      setJob(undefined);
+      setError("");
+      setDraftId(draft.id);
+      setForm({ question: "", conditions: "", instruction: "", paperIds: [] });
+      writeDraft("tutor-plan-selected", "");
+    } catch (e) {
+      setError((e as Error).message);
+    } finally {
+      lock.current = false;
+      setBusy(false);
+    }
+  }
+  const ready = version && planVersionReady(version);
   return (
     <section className="tg-zone" aria-label="研究方案生成专区">
+      <ArtifactNavigation
+        kind="plan"
+        index={index}
+        onCreateProject={onCreateProject}
+        onEditProject={onEditProject}
+        selected={plan?.id || draftId}
+        revision={`${draftId}:${plans.length}:${plan?.updatedAt}:${job?.status}`}
+        disabled={loading || busy || importing || awaiting || !!active}
+        onNew={() => void createPlanDraft()}
+        onSelect={(a) => {
+          if (!a.draftOnly) return void showPlan(a.id, a.intake);
+          setPlan(undefined);
+          setJob(undefined);
+          setDraftId(a.id);
+          writeDraft("tutor-plan-selected", "");
+          setForm(
+            readDraft(`tutor-plan-intake:${a.id}`, {
+              question: a.intake?.question ?? "",
+              conditions: a.intake?.conditions ?? "",
+              instruction: a.intake?.instruction ?? "",
+              paperIds: a.intake?.paperIds ?? [],
+            }),
+          );
+        }}
+        onArchived={(id) => {
+          setPlans((old) => old.filter((p) => p.id !== id));
+          if (plan?.id === id || draftId === id) newPlan();
+        }}
+      />
       <header>
         <h2>研究方案</h2>
         <p>描述一个医学研究想法，获得适合与老师讨论的完整草案。</p>
@@ -961,7 +1307,11 @@ export function PlanGeneration({
               ? "正在提交…"
               : awaiting
                 ? "查询／重试提交"
-                : "生成完整草案"}
+                : job?.status === "cancelled" || job?.status === "failed"
+                  ? "按当前要求重试"
+                  : plan
+                    ? "按当前要求生成新版本"
+                    : "生成完整草案"}
         </button>
       </div>
       {awaiting && !busy && (
@@ -981,47 +1331,64 @@ export function PlanGeneration({
           正在思考…{" "}
           <button
             onClick={() =>
-              void researchApi(
+              void researchApi<PlanJob>(
                 `/api/research-plan-jobs/${job.id}/cancel`,
                 {},
-              ).catch((e) => setError(e.message))
+              )
+                .then(setJob)
+                .catch((e) => setError(e.message))
             }
           >
-            停止
+            取消生成
           </button>
         </p>
       )}
       {job?.error && (
         <p role="alert">{job.error} 已有内容保留，可调整输入重新生成。</p>
       )}
-      {!!plans.length && (
+      {!!plan?.versions.length && (
         <div className="tg-version-browser">
-          <strong>历史方案</strong>
-          <div className="tg-version-cards" aria-label="历史方案列表">
-            {plans.map((p) => (
-              <div className={`tg-version-card ${plan?.id === p.id ? "is-selected" : ""}`} key={p.id}>
-                <button type="button" disabled={loading || busy || importing || awaiting || !!active} onClick={() => void showPlan(p.id)}>
-                  <span>{p.topic.question}</span>
-                  <small>{p.archived ? "已归档" : `${p.versions.length} 个版本`}</small>
+          <strong>当前方案的版本</strong>
+          <div className="tg-version-cards" aria-label="方案版本列表">
+            {plan.versions.map((v) => (
+              <div
+                className={`tg-version-card ${version?.id === v.id ? "is-selected" : ""}`}
+                key={v.id}
+              >
+                <button type="button" onClick={() => setSelectedVersion(v.id)}>
+                  <span>{v.content.title}</span>
+                  <small>{new Date(v.createdAt).toLocaleString("zh-CN")}</small>
                 </button>
               </div>
             ))}
           </div>
-          <label>
-            快速切换
-          <select
-            disabled={loading || busy || importing || awaiting || !!active}
-            value={plan?.id ?? ""}
-            onChange={(e) => void showPlan(e.target.value)}
-          >
-            <option value="">选择已生成方案</option>
-            {plans.map((p) => (
-              <option key={p.id} value={p.id}>
-                {p.topic.question}
-              </option>
-            ))}
-          </select>
-          </label>
+          {version && version.id !== plan.currentVersion && (
+            <button
+              disabled={loading || busy || !!active}
+              onClick={async () => {
+                setBusy(true);
+                setError("");
+                try {
+                  const restored = await researchApi<ResearchPlan>(
+                    `/api/research-plans/${plan.id}/restore`,
+                    {
+                      versionId: version.id,
+                      expectedVersion: plan.currentVersion,
+                      expectedTopicVersion: plan.topic.version,
+                    },
+                  );
+                  setPlan(restored);
+                  setSelectedVersion(restored.currentVersion ?? "");
+                } catch (e) {
+                  setError((e as Error).message);
+                } finally {
+                  setBusy(false);
+                }
+              }}
+            >
+              以此版本继续修改
+            </button>
+          )}
         </div>
       )}
       {version && (
@@ -1049,12 +1416,16 @@ export function PlanGeneration({
               <h3>需与导师讨论</h3>
               {version.review.issues.map((issue) => (
                 <p key={issue.id}>
-                  {version.content.sections.find((s) => s.id === issue.sectionId)?.title ?? "整体方案"}
+                  {version.content.sections.find(
+                    (s) => s.id === issue.sectionId,
+                  )?.title ?? "整体方案"}
                   {issue.severity === "blocking" ? " · 尚需修正：" : "："}
                   {issue.message}
                 </p>
               ))}
-              {version.review.limitations.map((text, index) => <p key={index}>{text}</p>)}
+              {version.review.limitations.map((text, index) => (
+                <p key={index}>{text}</p>
+              ))}
             </section>
           )}
           {version.content.sections.map((s) => (

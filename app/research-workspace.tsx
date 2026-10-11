@@ -861,7 +861,8 @@ export function ResearchWorkspace() {
       }
       await refresh();
       setManagement(undefined);
-      setNotice("已保存名称与归属。");
+      if (!(management.kind === "paper" && management.archived))
+        setNotice("已保存名称与归属。");
     });
   }
   const readingPanel = panel ? (
@@ -1081,119 +1082,134 @@ export function ResearchWorkspace() {
                   : currentName}
             </strong>
           </div>
-          <button
-            aria-expanded={!!panel}
-            disabled={loading || mode !== "research" || !paper}
-            onClick={() => {
-              if (panel) closeReading();
-              else {
-                rememberAnswer();
-                setPanel("sources");
-              }
-            }}
-          >
-            资料
-          </button>
-          <ObjectMenu
-            objectKey={paper?.id ?? conversation?.id ?? "idea"}
-            label="当前论文更多操作"
-            actions={[
-              ...(paper
-                ? [
-                    {
-                      label: "论文名称与归组",
-                      run: () =>
-                        setManagement({
-                          kind: "paper",
-                          id: paper.id,
-                          name: currentName,
-                          projectId,
-                        }),
-                    },
-                  ]
-                : [
-                    {
-                      label: "导入论文",
-                      run: () => fileInput.current?.click(),
-                    },
-                  ]),
-              {
-                label: "讨论记录",
-                children: [
-                  ...(conversation
+          {mode === "research" && (
+            <>
+              <button
+                aria-expanded={!!panel}
+                disabled={loading || mode !== "research" || !paper}
+                onClick={() => {
+                  if (panel) closeReading();
+                  else {
+                    rememberAnswer();
+                    setPanel("sources");
+                  }
+                }}
+              >
+                资料
+              </button>
+              <ObjectMenu
+                objectKey={paper?.id ?? conversation?.id ?? "idea"}
+                label="当前论文更多操作"
+                actions={[
+                  ...(paper
                     ? [
                         {
-                          label: "重命名讨论",
+                          label: "论文名称与归组",
                           run: () =>
                             setManagement({
-                              kind: "discussion",
-                              id: conversation.id,
-                              name: titleOf(conversation),
+                              kind: "paper",
+                              id: paper.id,
+                              name: currentName,
+                              projectId,
                             }),
                         },
                       ]
-                    : []),
-                  ...conversations
-                    .filter(
-                      (c) =>
-                        c.paperId === (paper?.id ?? null) &&
-                        (paper || (c.projectId ?? null) === projectId),
-                    )
-                    .map((c) => ({
-                      label: titleOf(c),
-                      run: () => void openConversation(c.id),
-                    })),
-                  ...(!paper
-                    ? [{ label: "开始新讨论", run: () => blank(projectId) }]
-                    : []),
-                ],
-              },
+                    : [
+                        {
+                          label: "导入论文",
+                          run: () => fileInput.current?.click(),
+                        },
+                      ]),
+                  {
+                    label: "讨论记录",
+                    children: [
+                      ...(conversation
+                        ? [
+                            {
+                              label: "重命名讨论",
+                              run: () =>
+                                setManagement({
+                                  kind: "discussion",
+                                  id: conversation.id,
+                                  name: titleOf(conversation),
+                                }),
+                            },
+                          ]
+                        : []),
+                      ...conversations
+                        .filter(
+                          (c) =>
+                            c.paperId === (paper?.id ?? null) &&
+                            (paper || (c.projectId ?? null) === projectId),
+                        )
+                        .map((c) => ({
+                          label: titleOf(c),
+                          run: () => void openConversation(c.id),
+                        })),
+                      ...(!paper
+                        ? [{ label: "开始新讨论", run: () => blank(projectId) }]
+                        : []),
+                    ],
+                  },
 
-              {
-                label: "PPT 汇报",
-                run: () => {
-                  setPanel(null);
-                  setMode("ppt");
-                },
-              },
-              {
-                label: "研究方案",
-                run: () => {
-                  setPanel(null);
-                  setMode("plan");
-                },
-              },
-              {
-                label: "更多问题",
-                children: [
-                  "这篇论文提出了什么研究问题？",
-                  "这篇论文采用了什么研究方法，为什么这样选择？",
-                  "这篇论文的结果有哪些证据？",
-                  "这篇论文有哪些局限，对后续研究有什么启发？",
-                ].map((q) => ({ label: q, run: () => suggest(q) })),
-              },
-              ...(archived.length
-                ? [
-                    {
-                      label: "已归档课题",
-                      children: archived.map((p) => ({
-                        label: p.name,
-                        run: () =>
-                          setManagement({
-                            kind: "project",
-                            id: p.id,
-                            name: p.name,
-                            archived: true,
-                          }),
-                      })),
+                  {
+                    label: "PPT 汇报",
+                    run: () => {
+                      setPanel(null);
+                      setMode("ppt");
                     },
-                  ]
-                : []),
-            ]}
-          />
+                  },
+                  {
+                    label: "研究方案",
+                    run: () => {
+                      setPanel(null);
+                      setMode("plan");
+                    },
+                  },
+                  {
+                    label: "更多问题",
+                    children: [
+                      "这篇论文提出了什么研究问题？",
+                      "这篇论文采用了什么研究方法，为什么这样选择？",
+                      "这篇论文的结果有哪些证据？",
+                      "这篇论文有哪些局限，对后续研究有什么启发？",
+                    ].map((q) => ({ label: q, run: () => suggest(q) })),
+                  },
+                  ...(archived.length
+                    ? [
+                        {
+                          label: "已归档课题",
+                          children: archived.map((p) => ({
+                            label: p.name,
+                            run: () =>
+                              setManagement({
+                                kind: "project",
+                                id: p.id,
+                                name: p.name,
+                                archived: true,
+                              }),
+                          })),
+                        },
+                      ]
+                    : []),
+                ]}
+              />
+            </>
+          )}
         </header>
         {mode === "plan" ? (
           <PlanGeneration
+            index={index}
+            onCreateProject={() => setManagement({ kind: "create", name: "" })}
+            onEditProject={(id) => {
+              const p = index.projects.find((p) => p.id === id)!;
+              setManagement({
+                kind: "project",
+                id,
+                name: p.name,
+                archived: p.archived,
+              });
+            }}
             papers={papers}
             onImported={(p) => {
               setPapers((old) => [...old.filter((x) => x.id !== p.id), p]);
@@ -1202,6 +1218,17 @@ export function ResearchWorkspace() {
           />
         ) : mode === "ppt" ? (
           <PptGeneration
+            index={index}
+            onCreateProject={() => setManagement({ kind: "create", name: "" })}
+            onEditProject={(id) => {
+              const p = index.projects.find((p) => p.id === id)!;
+              setManagement({
+                kind: "project",
+                id,
+                name: p.name,
+                archived: p.archived,
+              });
+            }}
             papers={papers}
             initialPaper={paper}
             onImported={(p) => {

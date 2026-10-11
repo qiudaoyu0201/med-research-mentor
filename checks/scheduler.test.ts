@@ -250,6 +250,7 @@ test("cancel a queued speech job without a call; saved deck operations remain av
     id: "other-saved-deck",
     conversationId: other.id,
     paperId: "other-paper",
+    sourceSnapshot: withFoundationSources(h.papers.get("other-paper")!),
     sourceHash: digest(
       withFoundationSources(h.papers.get("other-paper")!).sources.filter((s) =>
         base.sourceIds.includes(s.id),

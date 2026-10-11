@@ -1,6 +1,7 @@
 import { useEffect, useRef, useState } from "react";
 import type { ConversationState, Profile } from "../shared/types.ts";
 import { researchApi } from "./research-api.ts";
+import type { ArtifactSummary } from "../shared/workspace.ts";
 import type { LearningPreferences } from "../shared/types.ts";
 import type { ResearchFont, ResearchTheme } from "./research-theme.ts";
 import {
@@ -49,6 +50,9 @@ export function ResearchSettings({
   const [error, setError] = useState(""),
     [working, setWorking] = useState(false);
   const [archived, setArchived] = useState<{ id: string; title: string }[]>([]);
+  const [archivedArtifacts, setArchivedArtifacts] = useState<ArtifactSummary[]>(
+    [],
+  );
   const [defaults, setDefaults] = useState<{
     learningPreferences: LearningPreferences;
     webLookup: boolean;
@@ -76,7 +80,16 @@ export function ResearchSettings({
       });
     void researchApi<{ id: string; title: string }[]>("/api/papers/archived")
       .then(setArchived)
-      .catch(() => setArchived([]));
+      .catch((e) => {
+        if (!closed) setError(e.message);
+      });
+    void researchApi<ArtifactSummary[]>("/api/artifacts")
+      .then((items) => {
+        if (!closed) setArchivedArtifacts(items.filter((a) => a.archived));
+      })
+      .catch((e) => {
+        if (!closed) setError(e.message);
+      });
     return () => {
       closed = true;
     };
@@ -95,6 +108,32 @@ export function ResearchSettings({
       );
     } catch (err) {
       setError((err as Error).message);
+    } finally {
+      setWorking(false);
+    }
+  }
+  async function manageArtifact(item: ArtifactSummary, erase: boolean) {
+    if (working) return;
+    if (
+      erase &&
+      !window.confirm("彻底删除这份成果及其全部版本？此操作无法恢复。")
+    )
+      return;
+    setWorking(true);
+    setError("");
+    try {
+      await researchApi(
+        `/api/artifacts/${item.kind}/${item.id}`,
+        erase ? {} : { archived: false },
+        erase ? "DELETE" : "PATCH",
+      );
+      setArchivedArtifacts((old) =>
+        old.filter((a) => a.kind !== item.kind || a.id !== item.id),
+      );
+      window.dispatchEvent(new Event("artifacts-changed"));
+      await onArchiveChange();
+    } catch (e) {
+      setError((e as Error).message);
     } finally {
       setWorking(false);
     }
@@ -234,7 +273,9 @@ export function ResearchSettings({
           >
             保存设置
           </button>
-          <small>联网补充和减少重复解释是全局开关，保存后从下一次请求起生效，包括已有聊天。</small>
+          <small>
+            联网补充和减少重复解释是全局开关，保存后从下一次请求起生效，包括已有聊天。
+          </small>
         </fieldset>
       )}
       <label>
@@ -276,6 +317,25 @@ export function ResearchSettings({
       <button onClick={reset}>恢复默认布局</button>
       <details>
         <summary>归档管理</summary>
+        {archivedArtifacts.map((item) => (
+          <div className="rw-archive-row" key={`${item.kind}:${item.id}`}>
+            <span>
+              {item.kind === "ppt" ? "PPT" : "方案"} · {item.title}
+            </span>
+            <button
+              disabled={working}
+              onClick={() => void manageArtifact(item, false)}
+            >
+              恢复
+            </button>
+            <button
+              disabled={working}
+              onClick={() => void manageArtifact(item, true)}
+            >
+              彻底删除
+            </button>
+          </div>
+        ))}
         {!archived.length && <small>暂无已归档论文。</small>}
         {archived.map((paper) => (
           <div className="rw-archive-row" key={paper.id}>
@@ -286,7 +346,9 @@ export function ResearchSettings({
                 setWorking(true);
                 try {
                   await researchApi(`/api/papers/${paper.id}/restore`, {});
-                  setArchived((old) => old.filter((item) => item.id !== paper.id));
+                  setArchived((old) =>
+                    old.filter((item) => item.id !== paper.id),
+                  );
                   await onArchiveChange();
                 } catch (e) {
                   setError((e as Error).message);
@@ -300,11 +362,18 @@ export function ResearchSettings({
             <button
               disabled={working}
               onClick={async () => {
-                if (!window.confirm("彻底删除这篇论文及其论文资料？已有成果保留副本。")) return;
+                if (
+                  !window.confirm(
+                    "彻底删除这篇论文及其论文资料？已有成果保留副本。",
+                  )
+                )
+                  return;
                 setWorking(true);
                 try {
                   await researchApi(`/api/papers/${paper.id}`, {}, "DELETE");
-                  setArchived((old) => old.filter((item) => item.id !== paper.id));
+                  setArchived((old) =>
+                    old.filter((item) => item.id !== paper.id),
+                  );
                 } catch (e) {
                   setError((e as Error).message);
                 } finally {

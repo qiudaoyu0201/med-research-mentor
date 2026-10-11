@@ -91,6 +91,8 @@ export interface MaterialSnapshot {
   addedIds: string[];
 }
 export interface PaperBundle {
+  /** Immutable PDF retained for an artifact's evidence. */
+  pdfAssetId?: string;
   id: string;
   title: string;
   version: string;
@@ -152,6 +154,8 @@ export interface DeckOutline {
   speechScript?: string;
 }
 export interface DeckVersion {
+  exportIds?: string[];
+  sourceSnapshot?: PaperBundle;
   operation?: "speech";
   learningIntent?: LearningIntent;
   displayAssets?: Record<string, string>;

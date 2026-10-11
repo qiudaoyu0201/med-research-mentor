@@ -41,6 +41,7 @@ const bibliography = object({
   notices: strings,
 });
 const referenceFields = {
+  snapshotHash: str.optional(),
   id: str,
   title: str,
   locator: str,
@@ -223,7 +224,35 @@ const shapes: Record<string, z.ZodType> = {
         updatedAt: str,
       }),
     ),
-    papers: z.array(object({ paperId: str, projectId: str.nullable() })),
+    papers: z.array(
+      object({
+        paperId: str,
+        projectId: str.nullable(),
+        displayName: str.optional(),
+        archived: bool.optional(),
+      }),
+    ),
+    artifacts: z
+      .array(
+        object({
+          id: str,
+          kind: z.enum(["ppt", "plan"]),
+          displayName: str.optional(),
+          projectId: str.nullable(),
+          archived: bool,
+          draftOnly: bool.optional(),
+          intake: object({
+            paperId: str.optional(),
+            request: str.optional(),
+            count: str.optional(),
+            question: str.optional(),
+            conditions: str.optional(),
+            instruction: str.optional(),
+            paperIds: strings.optional(),
+          }).optional(),
+        }),
+      )
+      .optional(),
     notes: z.array(
       object({
         id: str,
@@ -304,6 +333,16 @@ const shapes: Record<string, z.ZodType> = {
     deck: deck.optional(),
   }),
   "deck-versions": object({
+    exportIds: strings.optional(),
+    sourceSnapshot: object({
+      id: str,
+      title: str,
+      version: str,
+      scope: str,
+      sources: z.array(source),
+      pdfUrl: str.optional(),
+      pdfAssetId: str.optional(),
+    }).optional(),
     id: str,
     conversationId: str,
     paperId: str,

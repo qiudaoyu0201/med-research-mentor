@@ -207,9 +207,25 @@ export class ResearchPlans {
       .filter((j) => j.planId === id)
       .map((j) => this.job(j.id));
   }
-  private async sourceRefs(input: TopicInput): Promise<SourceRef[]> {
+  private async sourceRefs(
+    input: TopicInput,
+    retained: SourceRef[] = [],
+  ): Promise<SourceRef[]> {
     const refs: SourceRef[] = [];
     for (const s of input.sources) {
+      const frozen = retained.find(
+        (r) =>
+          r.snapshotHash &&
+          r.paperId === s.paperId &&
+          r.sourceVersion === s.sourceVersion &&
+          r.sourceId === s.sourceId &&
+          digest(r.range ?? null) === digest(s.range ?? null),
+      );
+      if (frozen) {
+        await this.checkSources([frozen]);
+        refs.push(structuredClone(frozen));
+        continue;
+      }
       const paper = await this.paperById(s.paperId);
       if (paper.version !== s.sourceVersion)
         throw new ResearchConflict("来源版本已变化，请重新选择。");
@@ -248,6 +264,10 @@ export class ResearchPlans {
     return unique;
   }
   private async checkSources(refs: SourceRef[]) {
+    for (const { snapshotHash, ...ref } of refs.filter((r) => r.snapshotHash)) {
+      if (digest(ref) !== snapshotHash)
+        throw new ResearchConflict("成果来源副本校验失败，请恢复完整记录。");
+    }
     const external = refs.filter((r) => r.sourceType === "pubmed");
     for (const r of external)
       if (
@@ -259,7 +279,9 @@ export class ResearchPlans {
         throw new ResearchConflict(
           "文献证据内容或来源绑定已变化，未派发模型。",
         );
-    const local = refs.filter((r) => r.sourceType !== "pubmed");
+    const local = refs.filter(
+      (r) => r.sourceType !== "pubmed" && !r.snapshotHash,
+    );
     const current = await this.sourceRefs({
       question: "核对来源",
       conditions: "",
@@ -282,7 +304,7 @@ export class ResearchPlans {
         "来源内容或许可状态已变化，请更新课题来源再继续。",
       );
   }
-  async create(raw: unknown) {
+  async create(raw: unknown, id: string = randomUUID()) {
     const input = topicInput(raw),
       now = new Date().toISOString();
     const topic: ResearchTopic = {
@@ -293,7 +315,7 @@ export class ResearchPlans {
       sources: await this.sourceRefs(input),
     };
     const plan: ResearchPlan = {
-      id: randomUUID(),
+      id,
       topic,
       currentVersion: null,
       versions: [],
@@ -326,7 +348,7 @@ export class ResearchPlans {
   }
   async updateTopic(id: string, expectedTopicVersion: string, raw: unknown) {
     const input = topicInput(raw),
-      refs = await this.sourceRefs(input);
+      refs = await this.sourceRefs(input, this.get(id).topic.sources);
     return this.locked(id, async () => {
       const plan = this.get(id);
       if (plan.topic.version !== expectedTopicVersion)
@@ -1031,10 +1053,41 @@ export class ResearchPlans {
   async archive(id: string, archived: boolean) {
     return this.locked(id, async () => {
       const p = this.get(id);
+      if (this.planJobs(id).some((j) => !planJobDone(j)))
+        throw new ResearchConflict("请先取消正在处理的方案，再归档或恢复。");
       p.archived = archived;
       await this.storePlan(p);
       return this.get(id);
     });
+  }
+  async preservePaper(paperId: string) {
+    for (const value of this.plans.values()) {
+      if (
+        ![value.topic, ...value.versions.map((v) => v.topic)].some((t) =>
+          t.sources.some((r) => r.paperId === paperId),
+        )
+      )
+        continue;
+      await this.locked(value.id, async () => {
+        if (this.planJobs(value.id).some((j) => !planJobDone(j)))
+          throw new ResearchConflict(
+            "引用此论文的研究方案仍在处理，请先取消任务。",
+          );
+        const plan = this.get(value.id);
+        for (const topic of [
+          plan.topic,
+          ...plan.versions.map((v) => v.topic),
+        ]) {
+          for (const ref of topic.sources.filter(
+            (r) => r.paperId === paperId && !r.snapshotHash,
+          )) {
+            // Historical evidence already contains its exact excerpt and locator.
+            ref.snapshotHash = digest(ref);
+          }
+        }
+        await this.storePlan(plan);
+      });
+    }
   }
   async delete(id: string) {
     this.get(id);

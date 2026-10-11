@@ -1,11 +1,10 @@
 import { readFile } from "node:fs/promises";
-import { join } from "node:path";
 import { createCanvas, loadImage } from "@napi-rs/canvas";
 import { getDocument } from "pdfjs-dist/legacy/build/pdf.mjs";
 import { pdfRuntime } from "./pdf-runtime.ts";
 import type { PaperBundle, Source } from "../shared/types.ts";
-import { root, read, save, safeId, missingRecord } from "./storage.ts";
-import { samplePdf } from "./sample.ts";
+import { read, save, safeId, missingRecord } from "./storage.ts";
+import { paperPdfPath } from "./paper-snapshot.ts";
 import { digest } from "./materials.ts";
 import {
   validRegion,
@@ -44,11 +43,7 @@ export async function saveDisplayAsset(
       (source.imagePurpose === "figure" || source.figure === "用户圈选")
     )
   ) {
-    bytes = await readFile(
-      paper.id === "xu-2018"
-        ? samplePdf
-        : join(root, "uploads", `${safeId(paper.id)}.pdf`),
-    );
+    bytes = await readFile(paperPdfPath(paper));
     purpose = "page";
   } else {
     bytes = Buffer.from(source.image!.split(",")[1], "base64");

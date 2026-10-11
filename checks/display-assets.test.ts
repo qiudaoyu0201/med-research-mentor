@@ -90,7 +90,10 @@ test("new deck assets persist across store restart; legacy versions remain uncha
   restarted.versions.set(version.id, structuredClone(version));
   await restarted.export(version.id, "asset-chat");
   assert.equal(outputs.length, 1);
-  assert.deepEqual(restarted.get(version.id), immutable);
+  const exportedVersion = restarted.get(version.id);
+  assert.equal(exportedVersion.exportIds?.length, 1);
+  const { exportIds, ...unchangedContent } = exportedVersion;
+  assert.deepEqual(unchangedContent, immutable);
   const legacy = {
     ...version,
     id: "legacy-deck",

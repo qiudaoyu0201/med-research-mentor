@@ -36,6 +36,10 @@ interface ResearchRecord {
 }
 
 export class TutorResearch {
+  forgetPaper(paperId: string) {
+    for (const [id, record] of this.records)
+      if (record.paperId === paperId) this.records.delete(id);
+  }
   private records = new Map<string, ResearchRecord>();
   constructor(
     private literature: Pick<

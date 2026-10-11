@@ -243,7 +243,10 @@ export class AssistantService {
     private provider: Provider,
     readonly manager: TaskManager,
     readonly conversations: ConversationStore,
-    private paperById: (id: string) => Promise<PaperBundle>,
+    private paperById: (
+      id: string,
+      conversationId?: string,
+    ) => Promise<PaperBundle>,
     private persist: typeof save = save,
     private cache?: ResultCache,
     private exporter: typeof exportDeck = exportDeck,
@@ -354,7 +357,7 @@ export class AssistantService {
       return this.attachments.get(id, state.id);
     });
     const paper = state.paperId
-      ? await this.paperById(state.paperId)
+      ? await this.paperById(state.paperId, state.id)
       : undefined;
     const id = randomUUID();
     const ledger = new BudgetLedger(id, async () =>
@@ -563,7 +566,7 @@ export class AssistantService {
       throw new Error("请等待这条问题完成后重试该附件。");
     const state = this.conversations.get(turn.conversationId);
     const paper = state.paperId
-      ? await this.paperById(state.paperId)
+      ? await this.paperById(state.paperId, state.id)
       : {
           id: "foundation-only",
           title: "研究想法",
@@ -675,7 +678,7 @@ export class AssistantService {
         message.paperId === undefined ? state.paperId : message.paperId;
       const original: PaperBundle =
         binding || message.mode === "example"
-          ? await this.paperById(binding ?? sample.id)
+          ? await this.paperById(binding ?? sample.id, state.id)
           : {
               id: "foundation-only",
               title: "独立基础课程",

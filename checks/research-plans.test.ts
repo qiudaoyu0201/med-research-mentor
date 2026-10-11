@@ -110,6 +110,36 @@ const plain = (p: PlanContent) => ({
   ...p,
   sections: p.sections.map(({ author: _a, ...s }) => s),
 });
+
+test("paper removal preserves plan evidence across restart, requirement edits and generation", async () => {
+  const h = harness();
+  const selection = { paperId: "a", sourceVersion: "1", sourceId: "duplicate" };
+  const p = await h.store.create({ ...topic, sources: [selection] });
+  await h.store.preservePaper("a");
+  h.papers.splice(0, 1);
+  const restored = new ResearchPlans(
+    h.provider,
+    async () => {
+      throw new Error("来源已删除");
+    },
+    new TaskScheduler(),
+    h.persist,
+    h.erase,
+  );
+  await restored.restore([h.store.get(p.id)], []);
+  const changed = await restored.updateTopic(p.id, p.topic.version, {
+    ...topic,
+    conditions: "新的条件",
+    sources: [selection],
+  });
+  assert.equal(changed.topic.sources[0].excerpt, "a 的可见原文");
+  const job = await restored.start(p.id, input(changed));
+  assert.equal((await restored.wait(job.id)).status, "completed");
+  assert.match(
+    restored.exportMarkdown(p.id, restored.get(p.id).currentVersion!),
+    /测量与对照/,
+  );
+});
 test("local reference fingerprints survive schema key order and restart but reject actual source changes", async () => {
   const h = harness();
   const p = await h.store.create({

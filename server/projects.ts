@@ -7,6 +7,7 @@ import type {
   ReadingPosition,
   ResearchNote,
   ResearchTurn,
+  ArtifactMetadata,
 } from "../shared/workspace.ts";
 import { read, save, missingRecord } from "./storage.ts";
 
@@ -29,10 +30,43 @@ export class Projects {
   snapshot() {
     return structuredClone(this.index);
   }
+  artifact(
+    kind: "ppt" | "plan",
+    id: string,
+    patch: Partial<Omit<ArtifactMetadata, "id" | "kind">>,
+  ) {
+    return this.change((index) => {
+      if (patch.projectId) this.project(patch.projectId, index);
+      index.artifacts ??= [];
+      let metadata = index.artifacts.find(
+        (a) => a.id === id && a.kind === kind,
+      );
+      if (!metadata) {
+        metadata = { id, kind, projectId: null, archived: false };
+        index.artifacts.push(metadata);
+      }
+      Object.assign(metadata, patch);
+      return metadata;
+    });
+  }
+  removeArtifact(kind: "ppt" | "plan", id: string) {
+    return this.change((index) => {
+      index.artifacts = index.artifacts?.filter(
+        (a) => a.kind !== kind || a.id !== id,
+      );
+    });
+  }
   removePaper(paperId: string) {
     return this.change((index) => {
       index.papers = index.papers.filter((paper) => paper.paperId !== paperId);
-      index.positions = index.positions.filter((position) => position.paperId !== paperId);
+      index.positions = index.positions.filter(
+        (position) => position.paperId !== paperId,
+      );
+      index.notes = index.notes.filter((note) => note.paperId !== paperId);
+      if (index.currentPaperId === paperId) {
+        index.currentPaperId = null;
+        index.lastConversationId = undefined;
+      }
       return { paperId };
     });
   }
@@ -81,7 +115,9 @@ export class Projects {
   }
   paper(
     paperId: string,
-    patch: Partial<Pick<PaperMetadata, "projectId" | "displayName" | "archived">>,
+    patch: Partial<
+      Pick<PaperMetadata, "projectId" | "displayName" | "archived">
+    >,
   ) {
     return this.change((index) => {
       if (patch.projectId) this.project(patch.projectId, index);

@@ -120,142 +120,148 @@ export function ResearchNavigation({
             <span>PPT 汇报</span>
           </button>
         </nav>
-        <button
-          className="rp-new-task"
-          aria-label="＋ 导入论文"
-          title="导入论文"
-          disabled={busy}
-          onClick={onImport}
-        >
-          <ResearchIcon name="plus" />
-          <span>＋ 导入论文</span>
-        </button>
-        <label className="rp-search">
-          <ResearchIcon name="search" />
-          <input
-            aria-label="搜索论文"
-            placeholder="搜索我的论文"
-            value={search}
-            onChange={(e) => setSearch(e.target.value)}
-          />
-        </label>
-        <div className="rp-sidebar-scroll">
-          <div className="rp-section-label">
-            我的课题{" "}
+        {mode !== "research" ? (
+          <div id="generation-navigation" className="tg-navigation-slot" />
+        ) : (
+          <>
             <button
-              aria-label="新建课题"
+              className="rp-new-task"
+              aria-label="＋ 导入论文"
+              title="导入论文"
               disabled={busy}
-              onClick={onCreateProject}
+              onClick={onImport}
             >
-              ＋
+              <ResearchIcon name="plus" />
+              <span>＋ 导入论文</span>
             </button>
-          </div>
-          {groups.map((group) => {
-            const items = filtered.filter((p) => {
-              const owner = index.papers.find(
-                (m) => m.paperId === p.id,
-              )?.projectId;
-              const visible = index.projects.some(
-                (g) => g.id === owner && !g.archived,
-              )
-                ? owner
-                : "";
-              return visible === group.id;
-            });
-            return (
-              <details
-                key={group.id}
-                className="rw-project"
-                open={!!search || projectId === (group.id || null)}
-              >
-                <summary>
-                  <ObjectMenu
-                    objectKey={group.id}
-                    label={`课题操作 ${group.name}`}
-                    actions={[
-                      {
-                        label: "讨论方向",
-                        run: () => onProject(group.id || null),
-                      },
-                      ...(group.id
-                        ? [
-                            {
-                              label: "重命名／归档课题",
-                              run: () => onEditProject(group.id),
-                            },
-                          ]
-                        : []),
-                    ]}
+            <label className="rp-search">
+              <ResearchIcon name="search" />
+              <input
+                aria-label="搜索论文"
+                placeholder="搜索我的论文"
+                value={search}
+                onChange={(e) => setSearch(e.target.value)}
+              />
+            </label>
+            <div className="rp-sidebar-scroll">
+              <div className="rp-section-label">
+                我的课题{" "}
+                <button
+                  aria-label="新建课题"
+                  disabled={busy}
+                  onClick={onCreateProject}
+                >
+                  ＋
+                </button>
+              </div>
+              {groups.map((group) => {
+                const items = filtered.filter((p) => {
+                  const owner = index.papers.find(
+                    (m) => m.paperId === p.id,
+                  )?.projectId;
+                  const visible = index.projects.some(
+                    (g) => g.id === owner && !g.archived,
+                  )
+                    ? owner
+                    : "";
+                  return visible === group.id;
+                });
+                return (
+                  <details
+                    key={group.id}
+                    className="rw-project"
+                    open={!!search || projectId === (group.id || null)}
                   >
-                    <span>{group.name}</span>
-                    <small>{items.length}</small>
-                  </ObjectMenu>
-                </summary>
-                <div className="rp-task-list">
-                  {items.map((paper) => (
-                    <ObjectMenu
-                      key={paper.id}
-                      objectKey={paper.id}
-                      label={`论文操作 ${paperName(paper, index)}`}
-                      actions={[
-                        {
-                          label: "重命名／移动到课题",
-                          run: () => onEditPaper(paper),
-                        },
-                        {
-                          label: "查看论文信息",
-                          run: () => onEditPaper(paper),
-                        },
-                        {
-                          label: "归档论文",
-                          run: () => onEditPaper(paper, true),
-                        },
-                      ]}
-                    >
-                      <button
-                        className={`rp-task ${paperId === paper.id ? "rp-task-active" : ""}`}
-                        disabled={busy}
-                        onClick={() => onPaper(paper)}
-                        title={paperName(paper, index)}
+                    <summary>
+                      <ObjectMenu
+                        objectKey={group.id}
+                        label={`课题操作 ${group.name}`}
+                        actions={[
+                          {
+                            label: "讨论方向",
+                            run: () => onProject(group.id || null),
+                          },
+                          ...(group.id
+                            ? [
+                                {
+                                  label: "重命名／归档课题",
+                                  run: () => onEditProject(group.id),
+                                },
+                              ]
+                            : []),
+                        ]}
                       >
-                        <span>{paperName(paper, index)}</span>
-                        {paper.id === "xu-2018" && <small>示例材料</small>}
-                      </button>
-                    </ObjectMenu>
-                  ))}
-                </div>
-                {!items.length && (
-                  <p className="rp-search-empty">
-                    {search ? "没有匹配论文" : "可在此课题导入论文"}
-                  </p>
-                )}
+                        <span>{group.name}</span>
+                        <small>{items.length}</small>
+                      </ObjectMenu>
+                    </summary>
+                    <div className="rp-task-list">
+                      {items.map((paper) => (
+                        <ObjectMenu
+                          key={paper.id}
+                          objectKey={paper.id}
+                          label={`论文操作 ${paperName(paper, index)}`}
+                          actions={[
+                            {
+                              label: "重命名／移动到课题",
+                              run: () => onEditPaper(paper),
+                            },
+                            {
+                              label: "查看论文信息",
+                              run: () => onEditPaper(paper),
+                            },
+                            {
+                              label: "归档论文",
+                              run: () => onEditPaper(paper, true),
+                            },
+                          ]}
+                        >
+                          <button
+                            className={`rp-task ${paperId === paper.id ? "rp-task-active" : ""}`}
+                            disabled={busy}
+                            onClick={() => onPaper(paper)}
+                            title={paperName(paper, index)}
+                          >
+                            <span>{paperName(paper, index)}</span>
+                            {paper.id === "xu-2018" && <small>示例材料</small>}
+                          </button>
+                        </ObjectMenu>
+                      ))}
+                    </div>
+                    {!items.length && (
+                      <p className="rp-search-empty">
+                        {search ? "没有匹配论文" : "可在此课题导入论文"}
+                      </p>
+                    )}
+                  </details>
+                );
+              })}
+              <details className="rw-recents">
+                <summary>最近讨论</summary>
+                {recent.map((c) => (
+                  <button
+                    key={c.id}
+                    className="rp-task"
+                    disabled={busy}
+                    onClick={() => onResume(c.id)}
+                  >
+                    <span>
+                      {c.title || c.goal || "科研讨论"}
+                      <small className="rw-recent-paper">
+                        {papers.find((p) => p.id === c.paperId)
+                          ? paperName(
+                              papers.find((p) => p.id === c.paperId)!,
+                              index,
+                            )
+                          : "研究想法"}
+                      </small>
+                    </span>
+                  </button>
+                ))}
               </details>
-            );
-          })}
-          <details className="rw-recents">
-            <summary>最近讨论</summary>
-            {recent.map((c) => (
-              <button
-                key={c.id}
-                className="rp-task"
-                disabled={busy}
-                onClick={() => onResume(c.id)}
-              >
-                <span>
-                  {c.title || c.goal || "科研讨论"}
-                  <small className="rw-recent-paper">
-                    {papers.find((p) => p.id === c.paperId)
-                      ? paperName(
-                          papers.find((p) => p.id === c.paperId)!,
-                          index,
-                        )
-                      : "研究想法"}
-                  </small>
-                </span>
-              </button>
-            ))}
-          </details>
-        </div>
+            </div>
+          </>
+        )}
         <footer className="rw-sidebar-footer">
           <small>PDF · 上限 30 MiB / 100 页</small>
           <button aria-label="设置" title="设置" onClick={onSettings}>

@@ -1017,12 +1017,24 @@
 }
 .rw .tg-paper-option {
   display: flex;
+  flex-direction: row;
+  margin: 0;
   align-items: center;
   gap: 8px;
   min-width: 0;
   padding: 7px 8px;
   border-radius: 7px;
   cursor: pointer;
+}
+.rw .tg-paper-option input {
+  flex: 0 0 auto;
+  width: 16px;
+  height: 16px;
+  margin: 0;
+}
+.rw .tg-paper-option span {
+  flex: 1;
+  font-weight: 400;
 }
 .rw .tg-paper-option.is-selected {
   background: var(--rw-surface);
@@ -1067,7 +1079,7 @@
   color: var(--rw-muted);
   font-size: 11px;
 }
-.rw .tg-version-card button:last-child {
+.rw .tg-version-card button + button {
   align-self: center;
   padding: 5px;
   border: 0;
@@ -1081,6 +1093,12 @@
   gap: 8px;
   padding: 7px 0;
   border-bottom: 1px solid var(--rw-line);
+}
+.rw .tg-navigation-slot {
+  display: flex;
+  flex-direction: column;
+  min-height: 0;
+  flex: 1;
 }
 .rw .rw-archive-row span {
   min-width: 0;

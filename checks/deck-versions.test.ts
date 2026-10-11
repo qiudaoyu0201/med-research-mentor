@@ -9,6 +9,36 @@ import { save } from "../server/storage.ts";
 const review = { issues: [], checkedSources: ["xu-question"], limitations: [] };
 const speechText =
   "# 开场\n今天分享研究问题与证据。\n\n# 逐页讲述\n按已保存的页面说明方法、结果及限制。\n\n# 转场\n接下来回到证据边界。\n\n# 结尾\n谢谢，欢迎讨论。";
+
+test("saved deck survives source removal and restart; tampered evidence still blocks export", async () => {
+  const h = harness([review]);
+  const original = await h.store.seed("retained", sample.id);
+  const restarted = new DeckVersions(
+    h.provider,
+    async () => {
+      throw new Error("论文已删除");
+    },
+    async () => {},
+    async (_outline, paper) => {
+      assert.equal(paper.version, original.sourceVersion);
+      return "fixture.pptx";
+    },
+  );
+  restarted.versions.set(original.id, structuredClone(original));
+  await restarted.export(original.id, "retained");
+  const revised = await restarted.start(original.id, "retained", {
+    slideIndex: 0,
+    question: "修改标题",
+    slide: { ...original.outline.slides[0], title: "保留来源后的修改" },
+  });
+  assert.equal((await restarted.wait(revised.id)).status, "completed");
+  const tampered = structuredClone(original);
+  tampered.sourceSnapshot!.sources.find((s) =>
+    original.sourceIds.includes(s.id),
+  )!.text += "篡改";
+  restarted.versions.set(original.id, tampered);
+  await assert.rejects(restarted.export(original.id, "retained"), /版本已变化/);
+});
 function harness(
   outputs: unknown[],
   paper: PaperBundle = structuredClone(sample),
@@ -84,7 +114,7 @@ test("full speech supplements and manual edits preserve the exact deck and previ
   assert.equal(await h.store.speech(restored.id, "speech-chat"), manualText);
   await assert.rejects(h.store.speech(saved.id, "other-chat"), /本会话/);
   h.paper.version = "changed";
-  await assert.rejects(h.store.speech(saved.id, "speech-chat"), /版本已变化/);
+  assert.equal(await h.store.speech(saved.id, "speech-chat"), manualText);
 });
 
 test("manual full-speech check receives actual figures used by the saved deck", async () => {
@@ -248,10 +278,8 @@ test("single page edits preserve all other content and pictures, restore appends
   assert.deepEqual(h.exports[0].outline, edited.outline);
   await assert.rejects(h.store.export(base.id, "conversation-b"), /本会话/);
   h.paper.version = "changed";
-  await assert.rejects(
-    h.store.export(edited.id, "conversation-a"),
-    /版本已变化/,
-  );
+  await h.store.export(edited.id, "conversation-a");
+  assert.equal(h.exports.at(-1).materials.version, base.sourceVersion);
 });
 test("model edits only receive the target page; one revision retains a blocking failure and old export", async () => {
   const slide = { ...defaultDeck.slides[1], title: "改写后的问题" };

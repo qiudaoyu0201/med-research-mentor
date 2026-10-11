@@ -60,6 +60,9 @@ import {
   type PreparedRecording,
 } from "./prepared-recording.ts";
 import { loadPreparedDeck } from "./prepared-generations.ts";
+import { visibleWorkspace } from "./workspace-visibility.ts";
+import type { ArtifactSummary } from "../shared/workspace.ts";
+import { removePaperCaches } from "./paper-cleanup.ts";
 
 const tutorSettings = new TutorSettings();
 await tutorSettings.restore();
@@ -156,7 +159,7 @@ const assistant = new AssistantService(
   provider,
   manager,
   new ConversationStore(save, () => tutorSettings.get().learningPreferences),
-  paperById,
+  (id, conversationId) => deckVersions.paperForConversation(id, conversationId),
   save,
   new ResultCache(),
   exportDeck,
@@ -217,9 +220,203 @@ const researchPlans = new ResearchPlans(
 );
 await researchPlans.restore();
 app.get("/api/research-plans", (_req, res) => res.json(researchPlans.all()));
-app.post("/api/research-plans", async (req, res) =>
-  res.status(201).json(await researchPlans.create(req.body)),
-);
+function artifactList(): ArtifactSummary[] {
+  const metadata = projects.snapshot().artifacts ?? [];
+  const ppt = new Map<string, ArtifactSummary>();
+  for (const v of deckVersions.versions.values()) {
+    const previous = ppt.get(v.conversationId);
+    const m = metadata.find(
+      (a) => a.id === v.conversationId && a.kind === "ppt",
+    );
+    ppt.set(v.conversationId, {
+      id: v.conversationId,
+      kind: "ppt",
+      projectId: null,
+      archived: false,
+      ...m,
+      draftOnly: false,
+      paperId: v.paperId,
+      title:
+        m?.displayName ||
+        v.sourceSnapshot?.title ||
+        v.outline.slides[0]?.title ||
+        "论文汇报",
+      updatedAt:
+        previous && previous.updatedAt > v.createdAt
+          ? previous.updatedAt
+          : v.createdAt,
+      versionCount: (previous?.versionCount ?? 0) + 1,
+    });
+  }
+  for (const c of assistant.conversations.states.values()) {
+    if (c.purpose !== "ppt-generation" || ppt.has(c.id)) continue;
+    const m = metadata.find((a) => a.id === c.id && a.kind === "ppt");
+    ppt.set(c.id, {
+      id: c.id,
+      kind: "ppt",
+      projectId: null,
+      archived: false,
+      ...m,
+      draftOnly: false,
+      title: m?.displayName || c.title || "新建汇报",
+      paperId: c.paperId ?? undefined,
+      updatedAt: c.updatedAt ?? "",
+      versionCount: 0,
+    });
+  }
+  const real = [
+    ...ppt.values(),
+    ...researchPlans.all().map((p): ArtifactSummary => {
+      const m = metadata.find((a) => a.id === p.id && a.kind === "plan");
+      return {
+        id: p.id,
+        kind: "plan",
+        projectId: null,
+        ...m,
+        archived: p.archived,
+        draftOnly: false,
+        title: m?.displayName || p.topic.question,
+        updatedAt: p.updatedAt,
+        versionCount: p.versions.length,
+      };
+    }),
+  ];
+  return [
+    ...real,
+    ...metadata
+      .filter(
+        (a) =>
+          a.draftOnly && !real.some((r) => r.kind === a.kind && r.id === a.id),
+      )
+      .map((a) => ({
+        ...a,
+        title: a.displayName || (a.kind === "ppt" ? "新建汇报" : "新建方案"),
+        updatedAt: "",
+        versionCount: 0,
+      })),
+  ];
+}
+app.get("/api/artifacts", (_req, res) => res.json(artifactList()));
+app.post("/api/artifacts/:kind", async (req, res) => {
+  const kind = z.enum(["ppt", "plan"]).parse(req.params.kind);
+  const id = randomUUID();
+  await projects.artifact(kind, id, { draftOnly: true, intake: {} });
+  res.status(201).json(artifactList().find((a) => a.id === id));
+});
+app.patch("/api/artifacts/:kind/:id", async (req, res) => {
+  const kind = z.enum(["ppt", "plan"]).parse(req.params.kind),
+    id = safeId(req.params.id);
+  if (!artifactList().some((a) => a.kind === kind && a.id === id))
+    throw new Error("成果不存在。");
+  const patch = z
+    .object({
+      displayName: nameInput.optional(),
+      projectId: entityId.nullable().optional(),
+      archived: z.boolean().optional(),
+      intake: z
+        .object({
+          paperId: entityId.or(z.literal("")).optional(),
+          request: z.string().max(1400).optional(),
+          count: z.enum(["", "6", "8", "10", "12", "16"]).optional(),
+          question: z.string().max(3000).optional(),
+          conditions: z.string().max(5000).optional(),
+          instruction: z.string().max(3000).optional(),
+          paperIds: z.array(entityId).max(20).optional(),
+        })
+        .strict()
+        .optional(),
+    })
+    .strict()
+    .parse(req.body);
+  const draft = artifactList().find(
+    (a) => a.kind === kind && a.id === id,
+  )?.draftOnly;
+  if (patch.projectId) projects.project(patch.projectId);
+  if (
+    kind === "ppt" &&
+    !draft &&
+    (patch.archived !== undefined ||
+      patch.displayName !== undefined ||
+      patch.projectId !== undefined)
+  ) {
+    recordsIdle(id);
+    if (deckVersions.inFlight(id))
+      throw new Error("请等待汇报修改或导出完成后管理成果。");
+  }
+  if (kind === "plan" && !draft && patch.archived !== undefined)
+    await researchPlans.archive(id, patch.archived);
+  res.json(await projects.artifact(kind, id, patch));
+});
+app.delete("/api/artifacts/:kind/:id", async (req, res) => {
+  const kind = z.enum(["ppt", "plan"]).parse(req.params.kind),
+    id = safeId(req.params.id);
+  const artifact = artifactList().find((a) => a.id === id && a.kind === kind);
+  if (!artifact?.archived)
+    throw new Error("请先归档成果，再从设置中彻底删除。");
+  if (artifact.draftOnly) {
+    await projects.removeArtifact(kind, id);
+    return res.json({ ok: true });
+  }
+  if (kind === "plan") await researchPlans.delete(id);
+  else {
+    recordsIdle(id);
+    if (deckVersions.inFlight(id))
+      throw new Error("请等待汇报修改或导出完成后删除。");
+    const versions = [...deckVersions.versions.values()].filter(
+      (v) => v.conversationId === id,
+    );
+    if (
+      versions.some((v) =>
+        ["queued", "revising", "checking"].includes(v.status),
+      )
+    )
+      throw new Error("请先取消汇报任务。");
+    for (const version of versions) {
+      for (const exportId of version.exportIds ?? [])
+        await rm(resolve("exports", `${safeId(exportId)}.pptx`), {
+          force: true,
+        });
+      await deckVersions.delete(version.id, id);
+    }
+    const state = assistant.conversations.get(id);
+    if (state.purpose === "ppt-generation") {
+      for (const turn of [...assistant.turns.values()].filter(
+        (t) => t.conversationId === id,
+      )) {
+        await remove("turns", turn.id);
+        assistant.turns.delete(turn.id);
+      }
+      await remove("conversations", id);
+      assistant.conversations.states.delete(id);
+    } else {
+      await assistant.conversations.update(id, (c) => ({
+        ...c,
+        latestDeckVersionId: undefined,
+      }));
+    }
+  }
+  await projects.removeArtifact(kind, id);
+  res.json({ ok: true });
+});
+app.post("/api/research-plans", async (req, res) => {
+  const { draftId, ...topic } = req.body;
+  if (draftId !== undefined) {
+    safeId(draftId);
+    if (
+      !projects
+        .snapshot()
+        .artifacts?.some(
+          (a) => a.id === draftId && a.kind === "plan" && !a.archived,
+        )
+    )
+      throw new Error("方案草稿不存在或已归档。");
+    const existing = researchPlans.all().find((p) => p.id === draftId);
+    if (existing) return res.json(existing);
+  }
+  const plan = await researchPlans.create(topic, draftId);
+  if (draftId) await projects.artifact("plan", draftId, { draftOnly: false });
+  res.status(201).json(plan);
+});
 app.get("/api/research-plans/:id", (req, res) =>
   res.json(researchPlans.get(req.params.id)),
 );
@@ -277,6 +474,8 @@ app.patch("/api/research-plans/:id", async (req, res) => {
   res.json(await researchPlans.archive(req.params.id, body.archived));
 });
 app.delete("/api/research-plans/:id", async (req, res) => {
+  if (!researchPlans.get(req.params.id).archived)
+    throw new Error("请先归档方案，再从设置中彻底删除。");
   await researchPlans.delete(req.params.id);
   res.json({ ok: true });
 });
@@ -402,9 +601,6 @@ const workspaceSnapshot: express.RequestHandler = async (req, res) => {
       papers.find((paper) => paper.id === p.paperId),
     ),
   );
-  const paperRevisions = Object.fromEntries(
-    papers.map((p) => [p.id, digest(p)]),
-  );
   const known =
     req.method === "POST"
       ? z
@@ -415,17 +611,13 @@ const workspaceSnapshot: express.RequestHandler = async (req, res) => {
   res.setHeader("Cache-Control", "no-store");
   res.json({
     index,
-    papers: (known
-      ? papers.filter((p) => known[p.id] !== paperRevisions[p.id])
-      : papers).filter(
-        (p) => !index.papers.find((m) => m.paperId === p.id)?.archived,
-      ),
-    paperIds: papers
-      .filter((p) => !index.papers.find((m) => m.paperId === p.id)?.archived)
-      .map((p) => p.id),
-    paperRevisions,
+    ...visibleWorkspace(
+      index,
+      papers,
+      [...assistant.conversations.states.values()],
+      known,
+    ),
     recoveryNotice: recoveryNotice(),
-    conversations: [...assistant.conversations.states.values()],
   });
 };
 app.get("/api/workspace", workspaceSnapshot);
@@ -439,7 +631,10 @@ app.get("/api/papers/archived", async (_req, res) => {
         const paper = await read<PaperBundle>("papers", metadata.paperId);
         return { id: paper.id, title: metadata.displayName ?? paper.title };
       } catch {
-        return { id: metadata.paperId, title: metadata.displayName ?? "已归档论文" };
+        return {
+          id: metadata.paperId,
+          title: metadata.displayName ?? "已归档论文",
+        };
       }
     }),
   );
@@ -470,6 +665,10 @@ app.patch("/api/papers/:id/metadata", async (req, res) => {
       archived: z.boolean().optional(),
     })
     .parse(req.body);
+  if (body.archived) {
+    await deckVersions.preservePaper(req.params.id);
+    await researchPlans.preservePaper(req.params.id);
+  }
   res.json(await projects.paper(req.params.id, body));
 });
 app.post("/api/papers/:id/restore", async (req, res) => {
@@ -478,12 +677,71 @@ app.post("/api/papers/:id/restore", async (req, res) => {
 });
 app.delete("/api/papers/:id", async (req, res) => {
   const id = safeId(req.params.id);
-  const metadata = projects.snapshot().papers.find((paper) => paper.paperId === id);
+  const metadata = projects
+    .snapshot()
+    .papers.find((paper) => paper.paperId === id);
   if (!metadata?.archived) throw new Error("请先归档论文，再进行彻底删除。");
+  if (id === sample.id) throw new Error("内置示例可归档隐藏，无需彻底删除。");
+  const running = [...assistant.turns.values()].some(
+    (t) =>
+      t.paperId === id &&
+      ![
+        "completed",
+        "failed",
+        "cancelled",
+        "interrupted",
+        "clarification",
+        "conflict",
+      ].includes(t.status),
+  );
+  if (running) throw new Error("论文仍有运行中的任务，请先取消后再删除。");
+  if (
+    assistant.scheduler.has(taskKey(id, "")) ||
+    deckVersions.scheduler.has(taskKey(id, ""))
+  )
+    throw new Error("论文仍有后台处理，请稍后再删除。");
+  await deckVersions.preservePaper(id);
+  await researchPlans.preservePaper(id);
+  const retainedConversations = new Set(
+    [...deckVersions.versions.values()]
+      .filter((v) => v.paperId === id)
+      .map((v) => v.conversationId),
+  );
+  for (const state of [...assistant.conversations.states.values()].filter(
+    (c) => c.paperId === id,
+  )) {
+    if (
+      retainedConversations.has(state.id) ||
+      state.purpose === "ppt-generation"
+    )
+      continue;
+    for (const turn of [...assistant.turns.values()].filter(
+      (t) => t.conversationId === state.id,
+    )) {
+      await remove("turns", turn.id);
+      assistant.turns.delete(turn.id);
+      if (turn.runId) {
+        await remove("runs", turn.runId);
+        manager.runs.delete(turn.runId);
+      }
+    }
+    await remove("conversations", state.id);
+    assistant.conversations.states.delete(state.id);
+  }
+  await removePaperCaches(id);
+  translations.forgetPaper(id);
+  tutorResearch.forgetPaper(id);
+  for (const [key, record] of readingGuides.records)
+    if (record.paperId === id) readingGuides.records.delete(key);
   await remove("papers", id);
   await rm(join(root, "uploads", id + ".pdf"), { force: true });
   await projects.removePaper(id);
   res.json({ ok: true, id });
+});
+app.get("/api/evidence-pdfs/:id", (req, res) => {
+  res
+    .type("application/pdf")
+    .sendFile(join(root, "evidence-pdfs", `${safeId(req.params.id)}.pdf`));
 });
 app.post("/api/papers/:id/chat", async (req, res) => {
   await paperById(req.params.id);
@@ -717,10 +975,27 @@ app.delete("/api/conversations/:id/records/:recordId", async (req, res) => {
   );
 });
 app.post("/api/conversations", async (req, res) => {
-  const input = conversationSchema.parse(req.body);
+  const { draftId, ...raw } = req.body;
+  const input = conversationSchema.parse(raw);
+  if (draftId !== undefined) {
+    safeId(draftId);
+    if (
+      input.purpose !== "ppt-generation" ||
+      !projects
+        .snapshot()
+        .artifacts?.some(
+          (a) => a.kind === "ppt" && a.id === draftId && !a.archived,
+        )
+    )
+      throw new Error("汇报草稿不存在或已归档。");
+    if (assistant.conversations.states.has(draftId))
+      return res.json(assistant.conversations.get(draftId));
+  }
   if (input.paperId) await paperById(input.paperId);
   if (input.projectId) projects.project(input.projectId);
-  res.status(201).json(await assistant.conversations.create(input));
+  const state = await assistant.conversations.create(input, draftId);
+  if (draftId) await projects.artifact("ppt", draftId, { draftOnly: false });
+  res.status(201).json(state);
 });
 app.get("/api/conversations", (_req, res) => {
   res.json(
@@ -772,6 +1047,14 @@ app.put("/api/conversations/:id/progress", async (req, res) => {
 });
 app.post("/api/conversations/:id/messages", async (req, res) => {
   assistant.conversations.get(req.params.id);
+  if (
+    projects
+      .snapshot()
+      .artifacts?.some(
+        (a) => a.kind === "ppt" && a.id === req.params.id && a.archived,
+      )
+  )
+    throw new Error("请先恢复已归档汇报，再生成新版本。");
   readingGuides.cancelAll();
   if (replayController) throw new Error("开发回放运行中，请先取消或等待。");
   res
@@ -1167,10 +1450,9 @@ app.get("/api/deck-versions/:id", (req, res) =>
   res.json(deckVersions.get(req.params.id)),
 );
 app.delete("/api/deck-versions/:id", async (req, res) => {
-  const body = z.object({ conversationId: entityId }).parse(req.body);
-  const result = await deckVersions.delete(req.params.id, body.conversationId);
-  await rm(resolve("exports", safeId(req.params.id) + ".pptx"), { force: true });
-  res.json(result);
+  res
+    .status(409)
+    .json({ error: "版本属于汇报成果，请归档整个汇报，再从设置中彻底删除。" });
 });
 app.post("/api/deck-versions/:id/edit", async (req, res) => {
   if (replayController) throw new Error("开发回放运行中，请先取消或等待。");
