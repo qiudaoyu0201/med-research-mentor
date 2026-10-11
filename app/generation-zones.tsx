@@ -668,7 +668,17 @@ export function PlanGeneration({
         setPlans(chronological(all));
         const id = pending.current?.id ?? readDraft("tutor-plan-selected", "");
         const p = all.find((p) => p.id === id);
-        if (!p) return;
+        if (!p) {
+          // A successful list response confirms that the selected record was
+          // removed. Do not keep retrying a submission for a nonexistent plan.
+          pending.current = undefined;
+          writeDraft("tutor-plan-pending", null);
+          writeDraft("tutor-plan-selected", null);
+          setAwaiting(false);
+          setPlan(undefined);
+          setJob(undefined);
+          return;
+        }
         const jobs = await researchApi<PlanJob[]>(
           `/api/research-plans/${p.id}/jobs`,
         );
