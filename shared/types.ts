@@ -437,6 +437,8 @@ export interface AssistantReply {
   deckVersionId?: string;
 }
 export interface AssistantTurn {
+  /** Presentation-only transition for locally prepared recording answers. */
+  preparedDisplayAt?: string;
   learningIntent?: LearningIntent;
   id: string;
   conversationId: string;

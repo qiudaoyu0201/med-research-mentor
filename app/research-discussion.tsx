@@ -198,6 +198,15 @@ export function ResearchDiscussion({
     text: string;
   }>();
   const messages = useRef<HTMLDivElement>(null);
+  const [presentationTick, setPresentationTick] = useState(0);
+  useEffect(() => {
+    const pending = turns.map((turn) => Date.parse(turn.preparedDisplayAt ?? ""))
+      .filter((time) => time > Date.now());
+    if (!pending.length) return;
+    const timer = setTimeout(() => setPresentationTick((tick) => tick + 1),
+      Math.max(0, Math.min(...pending) - Date.now()) + 20);
+    return () => clearTimeout(timer);
+  }, [turns, presentationTick]);
   const [cancelling, setCancelling] = useState<string[]>([]);
   const cancelLocks = useRef(new Set<string>());
   const measureAnswers = () => {
@@ -219,7 +228,7 @@ export function ResearchDiscussion({
       cancelAnimationFrame(first);
       cancelAnimationFrame(second);
     };
-  }, [turns]);
+  }, [turns, presentationTick]);
   async function cancel(turn: ResearchTurn) {
     if (cancelLocks.current.has(turn.id)) return;
     cancelLocks.current.add(turn.id);
@@ -407,7 +416,9 @@ export function ResearchDiscussion({
         </section>
       )}
       {turns.map((turn) => {
-        const unit = turn.reply?.content;
+        const preparing = turn.status === "completed" &&
+          Date.parse(turn.preparedDisplayAt ?? "") > Date.now();
+        const unit = preparing ? undefined : turn.reply?.content;
         const complete = turn.status === "completed";
         const actions: ObjectAction[] =
           complete && unit
@@ -469,6 +480,7 @@ export function ResearchDiscussion({
             </div>
             <ObjectMenu objectKey={turn.id} label="回答操作" actions={actions}>
               <div className="rw-answer">
+                {preparing && <small role="status">正在准备讲解…</small>}
                 {!complete && (
                   <small>
                     {statusLabel[

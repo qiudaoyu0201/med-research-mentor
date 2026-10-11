@@ -411,6 +411,7 @@ export class AssistantService {
       }
       turn.status = "completed";
       turn.endedAt = new Date().toISOString();
+      turn.preparedDisplayAt = new Date(Date.now() + 4000).toISOString();
       const run: TaskRun = {
         id: randomUUID(),
         input: {
