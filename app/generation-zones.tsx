@@ -119,24 +119,32 @@ function PaperPicker({
     <div className="tg-papers">
       <label>
         {multiple ? "参考论文（可选）" : "选择论文"}
-        <select
-          aria-label={multiple ? "参考论文" : "选择论文"}
-          multiple={multiple}
-          disabled={busy || disabled}
-          value={multiple ? selected : (selected[0] ?? "")}
-          onChange={(e) =>
-            onSelect(
-              [...e.target.selectedOptions].map((o) => o.value).filter(Boolean),
-            )
-          }
-        >
-          {!multiple && <option value="">选择已有论文或导入 PDF</option>}
-          {papers.map((p) => (
-            <option key={p.id} value={p.id}>
-              {p.title}
-            </option>
-          ))}
-        </select>
+        <div className="tg-paper-picker" role={multiple ? "group" : "radiogroup"} aria-label={multiple ? "参考论文" : "选择论文"}>
+          {!papers.length && <span className="hint">暂无可选论文，请先导入 PDF。</span>}
+          {papers.map((p) => {
+            const checked = selected.includes(p.id);
+            return (
+              <label className={`tg-paper-option ${checked ? "is-selected" : ""}`} key={p.id}>
+                <input
+                  type={multiple ? "checkbox" : "radio"}
+                  name={multiple ? undefined : "generation-paper"}
+                  checked={checked}
+                  disabled={busy || disabled}
+                  onChange={() =>
+                    onSelect(
+                      multiple
+                        ? checked
+                          ? selected.filter((id) => id !== p.id)
+                          : [...selected, p.id]
+                        : [p.id],
+                    )
+                  }
+                />
+                <span>{p.title}</span>
+              </label>
+            );
+          })}
+        </div>
       </label>
       {multiple && <small>可按 Ctrl 多选，也可以不选，由助手检索文献。</small>}
       <input
