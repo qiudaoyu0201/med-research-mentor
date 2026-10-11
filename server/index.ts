@@ -55,6 +55,10 @@ import { researchId } from "./research-plan-schemas.ts";
 import { TutorSettings } from "./tutor-settings.ts";
 import { TutorResearch } from "./tutor-research.ts";
 import { SourceTranslations } from "./source-translation.ts";
+import {
+  preparedRecordingSchema,
+  type PreparedRecording,
+} from "./prepared-recording.ts";
 
 const tutorSettings = new TutorSettings();
 await tutorSettings.restore();
@@ -137,6 +141,14 @@ const paperById = async (id: string): Promise<PaperBundle> => {
 };
 const deckVersions = new DeckVersions(provider, paperById);
 await deckVersions.restoreDisk();
+let preparedAnswers: PreparedRecording | undefined;
+if (process.env.TUTOR_RECORDING_PREPARED === "true") {
+  preparedAnswers = preparedRecordingSchema.parse(
+    JSON.parse(
+      await readFile(resolve("runs/video-prepared/answers.json"), "utf8"),
+    ),
+  );
+}
 const assistant = new AssistantService(
   provider,
   manager,
@@ -149,6 +161,7 @@ const assistant = new AssistantService(
   undefined,
   attachments,
   { settings: () => tutorSettings.get(), research: tutorResearch },
+  preparedAnswers,
 );
 const readingGuides = new ReadingGuides(provider, assistant.scheduler);
 app.get("/api/tutor-settings", (_req, res) => res.json(tutorSettings.get()));

@@ -1,7 +1,10 @@
 import { deliveredFigureBasics } from "./figure-familiarity.ts";
 import { randomUUID } from "node:crypto";
 import { containsRenderedQuote } from "../shared/markdown.ts";
-import { needsBackgroundDecision, type TutorResearch } from "./tutor-research.ts";
+import {
+  needsBackgroundDecision,
+  type TutorResearch,
+} from "./tutor-research.ts";
 import {
   readingAction,
   prepareReading,
@@ -55,6 +58,10 @@ import {
 } from "./depth.ts";
 import { legacyDepth } from "../shared/learning-intent.ts";
 import { validateAnchor } from "../shared/workspace.ts";
+import {
+  recordingAnswer,
+  type PreparedRecording,
+} from "./prepared-recording.ts";
 
 const terminal = new Set([
   "completed",
@@ -247,6 +254,7 @@ export class AssistantService {
       settings: () => { webLookup: boolean; rememberTerms: boolean };
       research: TutorResearch;
     },
+    private preparedAnswers?: PreparedRecording,
   ) {
     if (decks) decks.scheduler = scheduler;
   }
@@ -384,6 +392,80 @@ export class AssistantService {
       turn.error = "会话保存失败，未发送模型请求。";
       await this.persist("turns", id, turn);
       throw error;
+    }
+    const prepared = recordingAnswer(this.preparedAnswers, paper, message);
+    if (prepared) {
+      if (message.focus) {
+        const quoted = this.manager.runs.get(message.focus.runId);
+        const section = quoted?.result?.sections[message.focus.sectionIndex];
+        if (
+          quoted?.input.conversationId !== conversationId ||
+          !section ||
+          !containsRenderedQuote(section.text, message.focus.excerpt)
+        ) {
+          turn.status = "failed";
+          turn.error = "引用不属于当前会话的已交付回答。";
+          await this.persist("turns", id, turn);
+          return turn;
+        }
+      }
+      turn.status = "completed";
+      turn.endedAt = new Date().toISOString();
+      const run: TaskRun = {
+        id: randomUUID(),
+        input: {
+          paperId: paper!.id,
+          conversationId,
+          turnId: id,
+          module: message.module ?? "paper",
+          mode: "live",
+          question: message.question,
+          profileId: state.profileId,
+          taughtConcepts: [],
+          sourceIds: [
+            ...new Set(
+              prepared.answer.sections.flatMap((section) => section.citations),
+            ),
+          ],
+        },
+        status: "completed",
+        createdAt: turn.createdAt,
+        endedAt: turn.endedAt,
+        calls: 0,
+        model: this.preparedAnswers!.model,
+        skillVersions: {},
+        profileVersion: "prepared-recording",
+        sourceVersion: paper!.version,
+        events: [{ status: "completed", time: turn.endedAt }],
+        roles: [],
+        result: structuredClone(prepared.answer),
+        cacheHit: `prepared-recording:${this.preparedAnswers!.preparedAt}:${prepared.index}`,
+        review: structuredClone(
+          this.preparedAnswers!.reviews.reviews[prepared.index],
+        ),
+      };
+      turn.runId = run.id;
+      turn.reply = {
+        content: structuredClone(prepared.answer),
+        artifacts: [],
+        pendingQuestions: [],
+        nextStep: prepared.answer.nextQuestion,
+      };
+      await this.persist("runs", run.id, run);
+      this.manager.runs.set(run.id, run);
+      await this.persist("turns", id, turn);
+      await this.conversations.update(conversationId, (current) => {
+        current.lastRunId = run.id;
+        current.summaries.push({
+          turnId: id,
+          text: `${prepared.answer.title}：${prepared.answer.sections
+            .map((section) => section.text)
+            .join(" ")
+            .slice(0, 1200)}`,
+        });
+        return current;
+      });
+      return turn;
     }
     const controller = new AbortController();
     this.controllers.set(id, controller);
@@ -666,8 +748,7 @@ export class AssistantService {
         throw new Error("排队期间带读进度已经变化，当前问题保留，未重发。");
       if (reading) paper = withFoundationSources(reading.paper);
       const useLookup =
-        this.tutor?.settings().webLookup &&
-        needsBackgroundDecision(message);
+        this.tutor?.settings().webLookup && needsBackgroundDecision(message);
       let supplementaryIds: string[] = [];
       if (useLookup) {
         try {
@@ -1259,7 +1340,8 @@ export class AssistantService {
         const names = new Map(state.taughtConcepts.map((c) => [c.name, c]));
         for (const term of run.result?.terms ?? [])
           names.set(term.name, { name: term.name, unitId: run.id });
-        for (const name of deliveredFigureBasics(run)) names.set(name, { name, unitId: run.id });
+        for (const name of deliveredFigureBasics(run))
+          names.set(name, { name, unitId: run.id });
         state.taughtConcepts = [...names.values()];
         const resolvedIds = new Set([
           ...(run.review?.issues.filter((i) => i.resolved).map((i) => i.id) ??
