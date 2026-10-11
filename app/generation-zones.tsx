@@ -995,8 +995,20 @@ export function PlanGeneration({
         <p role="alert">{job.error} 已有内容保留，可调整输入重新生成。</p>
       )}
       {!!plans.length && (
-        <label>
-          历史方案
+        <div className="tg-version-browser">
+          <strong>历史方案</strong>
+          <div className="tg-version-cards" aria-label="历史方案列表">
+            {plans.map((p) => (
+              <div className={`tg-version-card ${plan?.id === p.id ? "is-selected" : ""}`} key={p.id}>
+                <button type="button" disabled={loading || busy || importing || awaiting || !!active} onClick={() => void showPlan(p.id)}>
+                  <span>{p.topic.question}</span>
+                  <small>{p.archived ? "已归档" : `${p.versions.length} 个版本`}</small>
+                </button>
+              </div>
+            ))}
+          </div>
+          <label>
+            快速切换
           <select
             disabled={loading || busy || importing || awaiting || !!active}
             value={plan?.id ?? ""}
@@ -1009,7 +1021,8 @@ export function PlanGeneration({
               </option>
             ))}
           </select>
-        </label>
+          </label>
+        </div>
       )}
       {version && (
         <article className="tg-card">
