@@ -415,10 +415,14 @@ const workspaceSnapshot: express.RequestHandler = async (req, res) => {
   res.setHeader("Cache-Control", "no-store");
   res.json({
     index,
-    papers: known
+    papers: (known
       ? papers.filter((p) => known[p.id] !== paperRevisions[p.id])
-      : papers,
-    paperIds: papers.map((p) => p.id),
+      : papers).filter(
+        (p) => !index.papers.find((m) => m.paperId === p.id)?.archived,
+      ),
+    paperIds: papers
+      .filter((p) => !index.papers.find((m) => m.paperId === p.id)?.archived)
+      .map((p) => p.id),
     paperRevisions,
     recoveryNotice: recoveryNotice(),
     conversations: [...assistant.conversations.states.values()],
@@ -448,6 +452,7 @@ app.patch("/api/papers/:id/metadata", async (req, res) => {
     .object({
       projectId: entityId.nullable().optional(),
       displayName: nameInput.optional(),
+      archived: z.boolean().optional(),
     })
     .parse(req.body);
   res.json(await projects.paper(req.params.id, body));
@@ -1133,6 +1138,10 @@ app.patch("/api/conversations/:id/preferences", async (req, res) => {
 app.get("/api/deck-versions/:id", (req, res) =>
   res.json(deckVersions.get(req.params.id)),
 );
+app.delete("/api/deck-versions/:id", async (req, res) => {
+  const body = z.object({ conversationId: entityId }).parse(req.body);
+  res.json(await deckVersions.delete(req.params.id, body.conversationId));
+});
 app.post("/api/deck-versions/:id/edit", async (req, res) => {
   if (replayController) throw new Error("开发回放运行中，请先取消或等待。");
   const body = z

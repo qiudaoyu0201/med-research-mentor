@@ -74,7 +74,7 @@ export class Projects {
   }
   paper(
     paperId: string,
-    patch: Partial<Pick<PaperMetadata, "projectId" | "displayName">>,
+    patch: Partial<Pick<PaperMetadata, "projectId" | "displayName" | "archived">>,
   ) {
     return this.change((index) => {
       if (patch.projectId) this.project(patch.projectId, index);

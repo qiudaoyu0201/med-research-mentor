@@ -835,10 +835,18 @@ export function ResearchWorkspace() {
       else if (kind === "paper") {
         await researchApi(
           `/api/papers/${id}/metadata`,
-          { displayName: name, projectId: management.projectId ?? null },
+          {
+            displayName: name,
+            projectId: management.projectId ?? null,
+            ...(management.archived ? { archived: true } : {}),
+          },
           "PATCH",
         );
         setProjectId(management.projectId ?? null);
+        if (management.archived && paper?.id === id) {
+          blank(management.projectId ?? null);
+          setNotice("论文已归档；已有成果和带读记录保留，可在设置中恢复。");
+        }
       } else if (conversation) {
         const fresh = await researchApi<ConversationState>(
           `/api/conversations/${conversation.id}`,
@@ -1019,11 +1027,12 @@ export function ResearchWorkspace() {
             archived: p.archived,
           });
         }}
-        onEditPaper={(p) =>
+        onEditPaper={(p, archive = false) =>
           setManagement({
             kind: "paper",
             id: p.id,
             name: paperName(p, index),
+            archived: archive,
             projectId:
               index.papers.find((m) => m.paperId === p.id)?.projectId ?? null,
           })
@@ -1692,7 +1701,9 @@ export function ResearchWorkspace() {
                 {management.kind === "create"
                   ? "新建课题"
                   : management.kind === "paper"
-                    ? "论文名称与归组"
+                    ? management.archived
+                      ? "归档论文"
+                      : "论文名称与归组"
                     : management.kind === "discussion"
                       ? "重命名讨论"
                       : "管理课题"}
@@ -1756,7 +1767,9 @@ export function ResearchWorkspace() {
                 className="rp-primary"
                 disabled={working || !management.name.trim()}
               >
-                保存
+                {management.kind === "paper" && management.archived
+                  ? "确认归档"
+                  : "保存"}
               </button>
               {management.kind === "project" && (
                 <button

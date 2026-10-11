@@ -48,7 +48,7 @@ export function ResearchNavigation({
   onImport: () => void;
   onCreateProject: () => void;
   onEditProject: (id: string) => void;
-  onEditPaper: (paper: PaperBundle) => void;
+  onEditPaper: (paper: PaperBundle, archive?: boolean) => void;
   onResume: (id: string) => void;
   mobile: boolean;
   close: () => void;
@@ -205,6 +205,10 @@ export function ResearchNavigation({
                         {
                           label: "查看论文信息",
                           run: () => onEditPaper(paper),
+                        },
+                        {
+                          label: "归档论文",
+                          run: () => onEditPaper(paper, true),
                         },
                       ]}
                     >

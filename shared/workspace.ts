@@ -17,6 +17,7 @@ export interface PaperMetadata {
   paperId: string;
   projectId: string | null;
   displayName?: string;
+  archived?: boolean;
 }
 export interface SourceAnchor {
   textView?: "pdf";

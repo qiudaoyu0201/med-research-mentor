@@ -8,7 +8,7 @@ import type {
   LearningIntent,
 } from "../shared/types.ts";
 import { defaultDeck, sample } from "../examples/bundle.ts";
-import { save, list, read } from "./storage.ts";
+import { save, list, read, remove } from "./storage.ts";
 import { saveDisplayAsset, type DisplayAsset } from "./display-assets.ts";
 import { deckSchema, slideSchema, groundedReviewSchema } from "./schemas.ts";
 import { z } from "zod";
@@ -73,6 +73,14 @@ export class DeckVersions {
     )
       throw new Error("汇报版本不属于本会话。");
     return structuredClone(version);
+  }
+  async delete(id: string, conversationId: string) {
+    const version = this.get(id, conversationId);
+    if (this.activeIds.has(id) || ["queued", "revising", "checking"].includes(version.status))
+      throw new Error("正在处理的版本不能删除，请先取消任务。");
+    await remove("deck-versions", id);
+    this.versions.delete(id);
+    return { ok: true, id };
   }
   private async sources(version: DeckVersion) {
     const paper = withFoundationSources(await this.paperById(version.paperId));

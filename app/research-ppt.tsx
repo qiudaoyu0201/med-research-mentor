@@ -428,6 +428,24 @@ export function ResearchPpt({
         setCancelling((old) => old.filter((value) => value !== id));
     }
   }
+  async function deleteVersion(version: DeckVersion) {
+    if (!window.confirm("删除这份 PPT 版本？删除后不能从普通页面恢复。")) return;
+    await action(async () => {
+      await researchApi(
+        `/api/deck-versions/${version.id}`,
+        { conversationId: version.conversationId },
+        "DELETE",
+      );
+      const remaining = versions.filter((v) => v.id !== version.id);
+      setVersions(remaining);
+      if (selected === version.id) {
+        const next = remaining.filter((v) => v.status === "completed").at(-1);
+        setSelected(next?.id);
+        setPage(0);
+      }
+      setNotice("PPT 版本已删除。");
+    });
+  }
   return (
     <section className="rw-ppt" aria-label="PPT 工作区">
       <header className="rw-ppt-header">
@@ -533,7 +551,7 @@ export function ResearchPpt({
             </p>
           )}
           {!!versions.length && (
-            <label className="rw-version-picker">
+            <div className="rw-version-picker">
               保存版本
               <select
                 aria-label="保存版本"
@@ -562,7 +580,16 @@ export function ResearchPpt({
                   </option>
                 ))}
               </select>
-            </label>
+              {current && done(current) && (
+                <button
+                  type="button"
+                  disabled={busy}
+                  onClick={() => void deleteVersion(current)}
+                >
+                  删除此版本
+                </button>
+              )}
+            </div>
           )}
           <div className={`rw-ppt-body ${editing ? "rw-ppt-editing" : ""}`}>
             <aside
