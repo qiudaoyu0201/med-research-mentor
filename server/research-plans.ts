@@ -23,6 +23,7 @@ import type {
 import { planJobDone } from "../shared/research-plan.ts";
 import { BudgetLedger } from "./budget.ts";
 import { taskTiming } from "./task-timing.ts";
+import { preparedPlan } from "./prepared-generations.ts";
 import { digest } from "./materials.ts";
 import type { Provider } from "./provider.ts";
 import { TaskScheduler } from "./scheduler.ts";
@@ -217,7 +218,9 @@ export class ResearchPlans {
         throw new Error("来源不存在或没有可见文字。");
       if (s.range && s.range.end > source.text.length)
         throw new Error("来源字符范围超出原文。");
-      const excerpt = s.range ? source.text.slice(s.range.start, s.range.end) : source.text;
+      const excerpt = s.range
+        ? source.text.slice(s.range.start, s.range.end)
+        : source.text;
       if (!excerpt.trim()) throw new Error("来源片段没有可见文字。");
       const identity = {
         paperId: s.paperId,
@@ -225,7 +228,9 @@ export class ResearchPlans {
         sourceId: s.sourceId,
         kind: source.kind,
         ...(s.range ? { range: s.range } : {}),
-        locator: s.range ? `${source.locator} · 提取字符 ${s.range.start}–${s.range.end}` : source.locator,
+        locator: s.range
+          ? `${source.locator} · 提取字符 ${s.range.start}–${s.range.end}`
+          : source.locator,
         excerpt,
         verified: source.verified,
       };
@@ -436,12 +441,21 @@ export class ResearchPlans {
   }
   private async capability() {
     const effective = await effectiveRuleSnapshot();
-    const shared = effective?.shared ?? await sharedRules();
-    const planSkill = effective?.entries["medical-research-plan"] ?? await loadSkill("medical-research-plan");
+    const shared = effective?.shared ?? (await sharedRules());
+    const planSkill =
+      effective?.entries["medical-research-plan"] ??
+      (await loadSkill("medical-research-plan"));
     const instructions = {
-      generation: shared + "\n" + planSkill.text + "\n" + (effective?.teachingContract ?? teachingContract()),
+      generation:
+        shared +
+        "\n" +
+        planSkill.text +
+        "\n" +
+        (effective?.teachingContract ?? teachingContract()),
       review: reviewRules,
-      ...((effective?.explanationTracing ?? explanationTracing()) ? { traced: effective?.explanationTracing ?? explanationTracing() } : {}),
+      ...((effective?.explanationTracing ?? explanationTracing())
+        ? { traced: effective?.explanationTracing ?? explanationTracing() }
+        : {}),
     };
     const modelFingerprint = digest({
       id: this.provider.id,
@@ -548,6 +562,21 @@ export class ResearchPlans {
       )
         throw new Error("指定章节不存在。");
       await this.checkSources(plan.topic.sources);
+      if (
+        process.env.TUTOR_RECORDING_PREPARED === "true" &&
+        input.action === "generate" &&
+        /端粒相关损伤灶|TAF/.test(plan.topic.question + plan.topic.conditions)
+      ) {
+        await new Promise((resolve) => setTimeout(resolve, 4000));
+        const prepared = await preparedPlan(
+          plan,
+          "docs/recording-research-plan/预备研究方案.md",
+        );
+        await this.storePlan(prepared.plan);
+        await this.persist("research-plan-jobs", prepared.job.id, prepared.job);
+        this.jobs.set(prepared.job.id, prepared.job as StoredJob);
+        return this.job(prepared.job.id);
+      }
       const frozen = await this.capability(),
         jobId = randomUUID();
       const ledger = new BudgetLedger(jobId, async () => {});
@@ -907,15 +936,15 @@ export class ResearchPlans {
       input.action !== "review" &&
       input.maxCalls === 4 &&
       (report.issues.some((i) => i.severity === "blocking") ||
-        new Set(report.issues.map(i => i.sectionId)).size > 2) &&
+        new Set(report.issues.map((i) => i.sectionId)).size > 2) &&
       !ledger.state.revisions.includes("plan");
     await this.locked(job.planId, async () => {
       const latest = await this.currentFor(job, signal);
       latest.versions.find((v) => v.id === version.id)!.review = report;
       await this.storePlan(latest);
-      const blocked = new Set(report.issues.map(i => i.sectionId)).size > 2 || report.issues.some(
-        (issue) => issue.severity === "blocking",
-      );
+      const blocked =
+        new Set(report.issues.map((i) => i.sectionId)).size > 2 ||
+        report.issues.some((issue) => issue.severity === "blocking");
       job.status = repair ? "generating" : blocked ? "failed" : "completed";
       job.error =
         !repair && blocked
@@ -1033,7 +1062,7 @@ export class ResearchPlans {
       !v.review ||
       v.review.versionId !== v.id ||
       v.review.issues.some((issue) => issue.severity === "blocking") ||
-      new Set(v.review.issues.map(issue => issue.sectionId)).size > 2 ||
+      new Set(v.review.issues.map((issue) => issue.sectionId)).size > 2 ||
       this.jobs.get(v.review.jobId)?.status !== "completed"
     )
       throw new ResearchConflict(

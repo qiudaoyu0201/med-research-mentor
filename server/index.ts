@@ -59,6 +59,7 @@ import {
   preparedRecordingSchema,
   type PreparedRecording,
 } from "./prepared-recording.ts";
+import { loadPreparedDeck } from "./prepared-generations.ts";
 
 const tutorSettings = new TutorSettings();
 await tutorSettings.restore();
@@ -142,12 +143,14 @@ const paperById = async (id: string): Promise<PaperBundle> => {
 const deckVersions = new DeckVersions(provider, paperById);
 await deckVersions.restoreDisk();
 let preparedAnswers: PreparedRecording | undefined;
+let preparedDeck: TaskRun | undefined;
 if (process.env.TUTOR_RECORDING_PREPARED === "true") {
   preparedAnswers = preparedRecordingSchema.parse(
     JSON.parse(
       await readFile(resolve("runs/video-prepared/answers.json"), "utf8"),
     ),
   );
+  preparedDeck = await loadPreparedDeck();
 }
 const assistant = new AssistantService(
   provider,
@@ -162,6 +165,7 @@ const assistant = new AssistantService(
   attachments,
   { settings: () => tutorSettings.get(), research: tutorResearch },
   preparedAnswers,
+  preparedDeck,
 );
 const readingGuides = new ReadingGuides(provider, assistant.scheduler);
 app.get("/api/tutor-settings", (_req, res) => res.json(tutorSettings.get()));

@@ -255,6 +255,7 @@ export class AssistantService {
       research: TutorResearch;
     },
     private preparedAnswers?: PreparedRecording,
+    private preparedDeck?: TaskRun,
   ) {
     if (decks) decks.scheduler = scheduler;
   }
@@ -394,6 +395,50 @@ export class AssistantService {
       throw error;
     }
     const prepared = recordingAnswer(this.preparedAnswers, paper, message);
+    if (
+      process.env.TUTOR_RECORDING_PREPARED === "true" &&
+      this.preparedDeck &&
+      paper &&
+      message.module === "ppt" &&
+      paper.id === this.preparedDeck.input.paperId
+    ) {
+      await new Promise((resolve) => setTimeout(resolve, 4000));
+      const run: TaskRun = {
+        ...structuredClone(this.preparedDeck),
+        id: randomUUID(),
+        createdAt: turn.createdAt,
+        endedAt: new Date().toISOString(),
+        input: {
+          ...structuredClone(this.preparedDeck.input),
+          conversationId,
+          turnId: id,
+          question: message.question,
+          mode: "live",
+        },
+        cacheHit: `prepared-ppt:${this.preparedDeck.id}`,
+      };
+      const version = await this.decks?.seed(conversationId, paper.id, run);
+      if (!version) throw new Error("汇报预备内容未能建立版本。");
+      turn.status = "completed";
+      turn.endedAt = run.endedAt;
+      turn.runId = run.id;
+      turn.reply = {
+        content: run.result ?? null,
+        artifacts: [],
+        pendingQuestions: [],
+        nextStep: "可继续查看幻灯片、讲述提示或导出。",
+        deckVersionId: version.id,
+      };
+      await this.persist("runs", run.id, run);
+      this.manager.runs.set(run.id, run);
+      await this.conversations.update(conversationId, (current) => {
+        current.latestDeckVersionId = version.id;
+        current.lastRunId = run.id;
+        return current;
+      });
+      await this.persist("turns", id, turn);
+      return turn;
+    }
     if (prepared) {
       if (message.focus) {
         const quoted = this.manager.runs.get(message.focus.runId);
