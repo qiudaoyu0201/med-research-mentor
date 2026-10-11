@@ -47,7 +47,6 @@ function planContent(markdown: string, refs: SourceRef[]): PlanContent {
       kind: index === 0 ? ("hypothesis" as const) : ("proposal" as const),
       sourceRefs: refs.slice(0, Math.min(3, refs.length)).map((ref) => ref.id),
       unknowns: ["正式条件、重复数和样本量需结合实验室预实验确认。"],
-      author: "assistant" as const,
     };
   });
   const parsed = planContentSchema.parse({
