@@ -1649,6 +1649,9 @@ export function ResearchWorkspace() {
           onFont={setFont}
           autoGuide={autoGuide}
           onAutoGuide={setAutoGuide}
+          onArchiveChange={async () => {
+            await refresh();
+          }}
         />
       )}
       {records && (

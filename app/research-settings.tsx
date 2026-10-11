@@ -21,6 +21,7 @@ export function ResearchSettings({
   onFont,
   autoGuide,
   onAutoGuide,
+  onArchiveChange,
 }: {
   conversation?: ConversationState;
   loading?: boolean;
@@ -34,6 +35,7 @@ export function ResearchSettings({
   onFont: (font: ResearchFont) => void;
   autoGuide: boolean;
   onAutoGuide: (value: boolean) => void;
+  onArchiveChange: () => Promise<void>;
 }) {
   const dialog = useRef<HTMLDialogElement>(null),
     [profiles, setProfiles] = useState<Profile[]>([]),
@@ -46,6 +48,7 @@ export function ResearchSettings({
     }>();
   const [error, setError] = useState(""),
     [working, setWorking] = useState(false);
+  const [archived, setArchived] = useState<{ id: string; title: string }[]>([]);
   const [defaults, setDefaults] = useState<{
     learningPreferences: LearningPreferences;
     webLookup: boolean;
@@ -71,6 +74,9 @@ export function ResearchSettings({
       .catch((err) => {
         if (!closed) setError(err.message);
       });
+    void researchApi<{ id: string; title: string }[]>("/api/papers/archived")
+      .then(setArchived)
+      .catch(() => setArchived([]));
     return () => {
       closed = true;
     };
@@ -268,6 +274,49 @@ export function ResearchSettings({
         </select>
       </label>
       <button onClick={reset}>恢复默认布局</button>
+      <details>
+        <summary>归档管理</summary>
+        {!archived.length && <small>暂无已归档论文。</small>}
+        {archived.map((paper) => (
+          <div className="rw-archive-row" key={paper.id}>
+            <span>{paper.title}</span>
+            <button
+              disabled={working}
+              onClick={async () => {
+                setWorking(true);
+                try {
+                  await researchApi(`/api/papers/${paper.id}/restore`, {});
+                  setArchived((old) => old.filter((item) => item.id !== paper.id));
+                  await onArchiveChange();
+                } catch (e) {
+                  setError((e as Error).message);
+                } finally {
+                  setWorking(false);
+                }
+              }}
+            >
+              恢复
+            </button>
+            <button
+              disabled={working}
+              onClick={async () => {
+                if (!window.confirm("彻底删除这篇论文及其论文资料？已有成果保留副本。")) return;
+                setWorking(true);
+                try {
+                  await researchApi(`/api/papers/${paper.id}`, {}, "DELETE");
+                  setArchived((old) => old.filter((item) => item.id !== paper.id));
+                } catch (e) {
+                  setError((e as Error).message);
+                } finally {
+                  setWorking(false);
+                }
+              }}
+            >
+              彻底删除
+            </button>
+          </div>
+        ))}
+      </details>
       <button
         onClick={() =>
           void researchApi<typeof model>("/api/model")

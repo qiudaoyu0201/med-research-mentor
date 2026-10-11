@@ -29,6 +29,13 @@ export class Projects {
   snapshot() {
     return structuredClone(this.index);
   }
+  removePaper(paperId: string) {
+    return this.change((index) => {
+      index.papers = index.papers.filter((paper) => paper.paperId !== paperId);
+      index.positions = index.positions.filter((position) => position.paperId !== paperId);
+      return { paperId };
+    });
+  }
   private change<T>(apply: (index: WorkspaceIndex) => T) {
     const operation = this.queue.then(async () => {
       const next = this.snapshot();

@@ -430,6 +430,21 @@ const workspaceSnapshot: express.RequestHandler = async (req, res) => {
 };
 app.get("/api/workspace", workspaceSnapshot);
 app.post("/api/workspace", workspaceSnapshot);
+app.get("/api/papers/archived", async (_req, res) => {
+  const index = projects.snapshot();
+  const archived = index.papers.filter((metadata) => metadata.archived);
+  const values = await Promise.all(
+    archived.map(async (metadata) => {
+      try {
+        const paper = await read<PaperBundle>("papers", metadata.paperId);
+        return { id: paper.id, title: metadata.displayName ?? paper.title };
+      } catch {
+        return { id: metadata.paperId, title: metadata.displayName ?? "已归档论文" };
+      }
+    }),
+  );
+  res.json(values);
+});
 app.post("/api/projects", async (req, res) => {
   const body = z
     .object({ name: nameInput, goal: z.string().max(2000).optional() })
@@ -456,6 +471,19 @@ app.patch("/api/papers/:id/metadata", async (req, res) => {
     })
     .parse(req.body);
   res.json(await projects.paper(req.params.id, body));
+});
+app.post("/api/papers/:id/restore", async (req, res) => {
+  await paperById(req.params.id);
+  res.json(await projects.paper(req.params.id, { archived: false }));
+});
+app.delete("/api/papers/:id", async (req, res) => {
+  const id = safeId(req.params.id);
+  const metadata = projects.snapshot().papers.find((paper) => paper.paperId === id);
+  if (!metadata?.archived) throw new Error("请先归档论文，再进行彻底删除。");
+  await remove("papers", id);
+  await rm(join(root, "uploads", id + ".pdf"), { force: true });
+  await projects.removePaper(id);
+  res.json({ ok: true, id });
 });
 app.post("/api/papers/:id/chat", async (req, res) => {
   await paperById(req.params.id);
