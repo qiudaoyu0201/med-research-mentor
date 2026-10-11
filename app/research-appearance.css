@@ -1033,6 +1033,48 @@
   text-overflow: ellipsis;
   white-space: nowrap;
 }
+.rw .tg-version-browser {
+  display: grid;
+  gap: 8px;
+  margin: 10px 0;
+}
+.rw .tg-version-cards {
+  display: flex;
+  gap: 8px;
+  overflow-x: auto;
+  padding-bottom: 5px;
+}
+.rw .tg-version-card {
+  display: flex;
+  flex: 0 0 150px;
+  border: 1px solid var(--rw-line);
+  border-radius: 9px;
+  overflow: hidden;
+}
+.rw .tg-version-card.is-selected {
+  border-color: var(--rw-accent);
+}
+.rw .tg-version-card button:first-child {
+  display: grid;
+  flex: 1;
+  gap: 3px;
+  padding: 8px;
+  border: 0;
+  background: transparent;
+  text-align: left;
+}
+.rw .tg-version-card small {
+  color: var(--rw-muted);
+  font-size: 11px;
+}
+.rw .tg-version-card button:last-child {
+  align-self: center;
+  padding: 5px;
+  border: 0;
+  background: transparent;
+  color: var(--rw-muted);
+  font-size: 11px;
+}
 .rw .rw-ppt-list,
 .rw .rw-ppt-editor {
   background: var(--rw-surface);

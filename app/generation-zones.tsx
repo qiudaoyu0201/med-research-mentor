@@ -431,6 +431,21 @@ export function PptGeneration({
     !current.review.issues.some(
       (i) => !i.resolved && i.severity === "blocking",
     );
+  async function deletePptVersion(version: DeckVersion) {
+    if (!window.confirm("删除这份 PPT 版本？")) return;
+    try {
+      await researchApi(
+        `/api/deck-versions/${version.id}`,
+        { conversationId: version.conversationId },
+        "DELETE",
+      );
+      const remaining = versions.filter((v) => v.id !== version.id);
+      setVersions(remaining);
+      if (selected === version.id) setSelected(remaining.at(-1)?.id ?? "");
+    } catch (e) {
+      setError((e as Error).message);
+    }
+  }
   return (
     <section className="tg-zone" aria-label="PPT生成专区">
       <header>
@@ -525,8 +540,33 @@ export function PptGeneration({
         </p>
       )}
       {!!versions.length && (
-        <label>
-          已生成汇报
+        <div className="tg-version-browser">
+          <strong>已生成汇报</strong>
+          <div className="tg-version-cards" aria-label="已生成汇报列表">
+            {versions.map((v) => (
+              <div className={`tg-version-card ${current?.id === v.id ? "is-selected" : ""}`} key={v.id}>
+                <button
+                  type="button"
+                  disabled={busy}
+                  onClick={() => {
+                    setSelected(v.id);
+                    setPage(0);
+                    setDownload("");
+                  }}
+                >
+                  <span>{new Date(v.createdAt).toLocaleString("zh-CN")}</span>
+                  <small>{v.status === "completed" ? "已完成" : "未完成"}</small>
+                </button>
+                {terminal(v.status) && (
+                  <button type="button" onClick={() => void deletePptVersion(v)}>
+                    删除
+                  </button>
+                )}
+              </div>
+            ))}
+          </div>
+          <label>
+            快速切换
           <select
             disabled={busy}
             value={current?.id ?? ""}
@@ -543,7 +583,8 @@ export function PptGeneration({
               </option>
             ))}
           </select>
-        </label>
+          </label>
+        </div>
       )}
       {current && slide && paper && (
         <div className="tg-card">
