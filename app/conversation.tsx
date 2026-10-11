@@ -70,7 +70,16 @@ export function useConversation(
         if (closed) return;
         setChoices(values);
         const saved = localStorage.getItem("tutor-conversation");
-        if (saved && values.some((v) => v.id === saved)) await select(saved);
+        const savedState = saved ? values.find((v) => v.id === saved) : undefined;
+        // A recording cleanup can leave the browser pointed at a new, empty
+        // conversation while the completed paper-reading conversation is still
+        // present. Reopen the most recent non-empty conversation in that case.
+        const fallback = values
+          .filter((v) => v.recentTurnIds.length > 0)
+          .sort((a, b) => (b.updatedAt ?? "").localeCompare(a.updatedAt ?? ""))[0];
+        if (savedState && (savedState.recentTurnIds.length > 0 || !fallback))
+          await select(savedState.id);
+        else if (fallback) await select(fallback.id);
       })
       .catch((error) => callbacks.current.onError(error.message));
     return () => {
@@ -230,7 +239,7 @@ export function ConversationPanel({
           <option value="">新对话</option>
           {chat.choices.map((c) => (
             <option key={c.id} value={c.id}>
-              {c.goal.slice(0, 35) || "科研学习对话"}
+              {c.title?.slice(0, 55) || c.goal.slice(0, 35) || "科研学习对话"}
             </option>
           ))}
         </select>
