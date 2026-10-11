@@ -1168,7 +1168,9 @@ app.get("/api/deck-versions/:id", (req, res) =>
 );
 app.delete("/api/deck-versions/:id", async (req, res) => {
   const body = z.object({ conversationId: entityId }).parse(req.body);
-  res.json(await deckVersions.delete(req.params.id, body.conversationId));
+  const result = await deckVersions.delete(req.params.id, body.conversationId);
+  await rm(resolve("exports", safeId(req.params.id) + ".pptx"), { force: true });
+  res.json(result);
 });
 app.post("/api/deck-versions/:id/edit", async (req, res) => {
   if (replayController) throw new Error("开发回放运行中，请先取消或等待。");

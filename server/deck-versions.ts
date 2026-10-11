@@ -78,8 +78,19 @@ export class DeckVersions {
     const version = this.get(id, conversationId);
     if (this.activeIds.has(id) || ["queued", "revising", "checking"].includes(version.status))
       throw new Error("正在处理的版本不能删除，请先取消任务。");
+    const assetIds = Object.values(version.displayAssets ?? {});
     await remove("deck-versions", id);
     this.versions.delete(id);
+    const remainingAssets = new Set(
+      [...this.versions.values()].flatMap((item) =>
+        Object.values(item.displayAssets ?? {}),
+      ),
+    );
+    await Promise.all(
+      assetIds
+        .filter((assetId) => !remainingAssets.has(assetId))
+        .map((assetId) => remove("display-assets", assetId)),
+    );
     return { ok: true, id };
   }
   private async sources(version: DeckVersion) {
