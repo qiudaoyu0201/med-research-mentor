@@ -1733,7 +1733,20 @@ function App() {
     </div>
   );
 }
-createRoot(document.getElementById("root")!).render(
+async function mountWorkspace() {
+  const url = new URL(window.location.href);
+  if (url.searchParams.get("resetResearchDraft") === "1") {
+    const plans = await api<unknown[]>("/api/research-plans");
+    // Reset only browser remnants after research records have been cleared.
+    // Never discard a pending submission while a server-side plan still exists.
+    if (plans.length === 0) {
+      for (const key of ["tutor-plan-intake", "tutor-plan-pending", "tutor-plan-selected"])
+        localStorage.removeItem(key);
+    }
+    url.searchParams.delete("resetResearchDraft");
+    window.history.replaceState(null, "", url);
+  }
+  createRoot(document.getElementById("root")!).render(
   window.location.pathname.replace(/\/$/, "") === "/assistant" ? (
     <App />
   ) : window.location.pathname.replace(/\/$/, "") === "/prototype" ? (
@@ -1742,3 +1755,7 @@ createRoot(document.getElementById("root")!).render(
     <ResearchWorkspace />
   ),
 );
+}
+void mountWorkspace().catch((error) => {
+  document.getElementById("root")!.textContent = `打开失败，请刷新重试：${(error as Error).message}`;
+});
