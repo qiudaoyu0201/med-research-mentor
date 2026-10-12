@@ -75,7 +75,11 @@ const app = express(),
   provider = createProvider(),
   manager = new TaskManager(provider, save, "online");
 let replayController: AbortController | undefined;
-const loadedSample = withFoundationSources(await localSample());
+// The example is a developer fixture, not part of a new user's paper library.
+const exampleEnabled = process.env.TUTOR_EXAMPLE_PAPER === "true";
+let examplePaper: Promise<PaperBundle> | undefined;
+const getExamplePaper = () =>
+  (examplePaper ??= localSample().then(withFoundationSources));
 await mkdir(join(root, "uploads"), { recursive: true });
 for (const run of await list<TaskRun>("runs")) {
   if (
@@ -131,7 +135,7 @@ const basePaperById = async (id: string) =>
         sources: [],
       }
     : id === sample.id
-      ? structuredClone(loadedSample)
+      ? structuredClone(await getExamplePaper())
       : read<PaperBundle>("papers", id);
 const paperById = async (id: string): Promise<PaperBundle> => {
   const paper = await basePaperById(id);
@@ -597,7 +601,10 @@ app.get(
 );
 const workspaceSnapshot: express.RequestHandler = async (req, res) => {
   const papers = await Promise.all(
-    [loadedSample, ...(await list<PaperBundle>("papers"))].map(async (p) => ({
+    [
+      ...(exampleEnabled ? [await getExamplePaper()] : []),
+      ...(await list<PaperBundle>("papers")),
+    ].map(async (p) => ({
       ...p,
       sources: [
         ...p.sources.filter((s) => !s.attachmentId),
@@ -1087,9 +1094,9 @@ app.post("/api/turns/:id/cancel", async (req, res) => {
 });
 app.get("/api/bootstrap", async (_req, res) =>
   res.json({
-    sample: loadedSample,
+    sample: exampleEnabled ? await getExamplePaper() : null,
     profiles,
-    defaultDeck,
+    defaultDeck: exampleEnabled ? defaultDeck : { slides: [] },
     papers: await list<PaperBundle>("papers"),
     runs: [...manager.runs.values()].sort((a, b) =>
       b.createdAt.localeCompare(a.createdAt),
@@ -1159,7 +1166,7 @@ app.post("/api/papers", upload.single("pdf"), async (req, res) => {
 });
 app.get("/api/papers/:id/pdf", async (req, res) => {
   safeId(req.params.id);
-  if (req.params.id === sample.id && loadedSample.pdfUrl)
+  if (req.params.id === sample.id && (await getExamplePaper()).pdfUrl)
     return res.type("application/pdf").sendFile(samplePdf);
   res
     .type("application/pdf")
