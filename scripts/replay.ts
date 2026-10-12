@@ -1,6 +1,6 @@
 import { readFile } from "node:fs/promises";
 import { replay } from "../server/replay.ts";
-import { CodexProvider } from "../server/provider.ts";
+import { createProvider } from "../server/model-config.ts";
 const id = "medical-method-tutor";
 const text = await readFile(`skills/${id}/SKILL.md`, "utf8");
 const candidate =
@@ -15,6 +15,6 @@ const batch = await replay(
       ? { caseIds: ["pcr", "ct-context"] }
       : {}),
   },
-  new CodexProvider(),
+  createProvider(),
 );
 console.log(JSON.stringify(batch, null, 2));
