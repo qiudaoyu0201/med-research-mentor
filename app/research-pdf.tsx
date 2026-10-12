@@ -109,9 +109,11 @@ export function ResearchPdf({
       .then(async (pdfPage) => {
         if (closed) return;
         const base = pdfPage.getViewport({ scale: 1 });
+        // Render the selected region once at a bounded resolution. Depending on
+        // panel width creates a loop when the preview adds/removes a scrollbar.
         const scale = Math.min(
           8,
-          Math.min(width * 2, 1600) / (base.width * crop.width),
+          1600 / (base.width * crop.width),
           Math.sqrt(
             4_000_000 / (base.width * crop.width * base.height * crop.height),
           ),
@@ -137,7 +139,7 @@ export function ResearchPdf({
       closed = true;
       rendering?.cancel();
     };
-  }, [pdf, page, crop, width]);
+  }, [pdf, page, crop]);
   function cropPoint(event: import("react").PointerEvent<HTMLDivElement>) {
     const box = event.currentTarget.getBoundingClientRect();
     return {

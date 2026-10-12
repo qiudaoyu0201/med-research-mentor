@@ -737,6 +737,7 @@
 .rw .rw-reader .rp-viewer-body {
   padding: 16px;
   background: var(--rw-surface);
+  scrollbar-gutter: stable;
 }
 .rw .rp-source-card {
   background: transparent;
