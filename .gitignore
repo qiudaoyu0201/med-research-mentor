@@ -11,3 +11,10 @@ test-results/
 !.env.example
 
 .vite/
+
+# Local documentation, recordings and contest deliverables
+output/
+docs/PROJECT_HANDOFF.md
+docs/智能体介绍.md
+docs/医研导师设计说明.docx
+docs/recording-research-plan/

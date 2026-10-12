@@ -21,3 +21,7 @@ node --env-file=.env --import tsx server/index.ts
 默认地址 http://127.0.0.1:4317/ ，以终端实际输出为准。`npm.cmd run check` 执行类型、构建和测试。`npm.cmd run model:check` 检查进程配置；加载 .env 时可用 `node --env-file=.env --import tsx scripts/model-check.ts`。只有显式加 `--generate` 才进行该诊断的模型生成请求。
 
 数据目录可通过 `TUTOR_DATA_DIR` 指定。备份本地数据与原论文，导出文件另存。不要将此单用户服务直接作为多用户公网服务部署。
+
+## Windows 双击启动
+
+运行 `启动导师.cmd`，脚本会检查 Node 版本、在依赖缺失时安装依赖，并重新构建当前源码。若项目目录存在 `.env`，启动时自动加载；否则使用默认 Codex CLI 路径。更新源码后先停止旧服务再启动，避免仍访问旧进程。首次启动没有个人论文、聊天或生成成果，仅提供内置的局部论文摘要示例。

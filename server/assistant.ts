@@ -79,6 +79,17 @@ const actions: Record<
   figure: "figure.explain",
   ppt: "ppt.compose",
 };
+function requestsReport(question: string) {
+  return question
+    .split(/[，。；！？,;!?\n]/)
+    .some(
+      (clause) =>
+        /PPT|汇报|幻灯|演示文稿/i.test(clause) &&
+        !/(?:不要|不用|无需|不需要|别|不必|暂不|不想|取消).*(?:PPT|汇报|幻灯|演示文稿)|(?:PPT|汇报|幻灯|演示文稿).*(?:不用|不要|先不做)|\b(?:don't|do not|no|without)\b.*(?:ppt|slides|presentation)/i.test(
+          clause,
+        ),
+    );
+}
 export function rulePlan(
   message: AssistantMessage,
   state: ConversationState,
@@ -87,8 +98,7 @@ export function rulePlan(
   const question = state.pending
     ? `${state.pending.question}\n用户补充：${message.question}`
     : message.question;
-  const report =
-    message.module === "ppt" || /PPT|汇报|幻灯|演示文稿/i.test(question);
+  const report = message.module === "ppt" || requestsReport(question);
   const figure =
     figureNumber(question) !== undefined || /读图|图表/.test(question);
   const knownMethod = foundationCatalog.match(question).length > 0;
@@ -364,7 +374,7 @@ export class AssistantService {
       this.persist("turns", id, turn),
     );
     ledger.state.timing = taskTiming(
-      message.module === "ppt" || /PPT|汇报|幻灯/i.test(message.question)
+      message.module === "ppt" || requestsReport(message.question)
         ? "full"
         : "explanation",
       message.slideCount ?? 6,

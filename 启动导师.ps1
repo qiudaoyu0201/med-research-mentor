@@ -24,9 +24,11 @@ if (-not (Test-Path -LiteralPath 'node_modules')) {
     & npm.cmd ci
     if ($LASTEXITCODE -ne 0) { throw '依赖安装失败，请检查网络后重试。' }
 }
-if (-not (Test-Path -LiteralPath 'dist\index.html')) {
-    & npm.cmd run build
-    if ($LASTEXITCODE -ne 0) { throw '构建失败，请查看上面的具体错误。' }
-}
+& npm.cmd run build
+if ($LASTEXITCODE -ne 0) { throw '构建失败，请查看上面的具体错误。' }
 Write-Host '启动后访问 http://127.0.0.1:4317；按 Ctrl+C 退出。'
-& npm.cmd start
+if (Test-Path -LiteralPath '.env') {
+    & $taskNode --env-file=.env --import tsx server/index.ts --production
+} else {
+    & $taskNode --import tsx server/index.ts --production
+}

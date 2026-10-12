@@ -29,6 +29,35 @@ import { exportDeck } from "../server/export.ts";
 import { LearningRecords } from "../server/learning-records.ts";
 
 const novice = { understood: ["原理"], breakpoints: [] };
+test("negative PPT requests stay in teaching while explicit report requests remain available", async () => {
+  const conversations = new ConversationStore(async () => {});
+  const state = await conversations.create({ paperId: sample.id });
+  for (const question of [
+    "解释实验对照组，不要生成PPT。",
+    "不用做汇报，只讲实验。",
+    "PPT先不做，先讲实验。",
+  ])
+    assert.equal(
+      rulePlan(
+        { clientMessageId: "negative", mode: "live", question },
+        state,
+        sample,
+      )?.modules.includes("ppt"),
+      false,
+    );
+  assert.equal(
+    rulePlan(
+      {
+        clientMessageId: "positive",
+        mode: "live",
+        question: "不要太长，请生成6页PPT讲实验。",
+      },
+      state,
+      sample,
+    )?.modules.includes("ppt"),
+    true,
+  );
+});
 const review = { issues: [], checkedSources: ["qpcr-basics"], limitations: [] };
 function fixture(outputs: unknown[]): Provider {
   return {
