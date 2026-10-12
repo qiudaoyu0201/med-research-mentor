@@ -98,7 +98,7 @@ test("online peripheral advice does not force another model call, internal revie
         novice,
         "online",
       ),
-      true,
+      false,
     );
   assert.equal(
     needsRevision(
@@ -120,7 +120,7 @@ test("online peripheral advice does not force another model call, internal revie
       novice,
       "online",
     ),
-    true,
+    false,
   );
   assert.equal(
     needsRevision(

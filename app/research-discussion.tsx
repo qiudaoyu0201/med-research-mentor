@@ -200,11 +200,14 @@ export function ResearchDiscussion({
   const messages = useRef<HTMLDivElement>(null);
   const [presentationTick, setPresentationTick] = useState(0);
   useEffect(() => {
-    const pending = turns.map((turn) => Date.parse(turn.preparedDisplayAt ?? ""))
+    const pending = turns
+      .map((turn) => Date.parse(turn.preparedDisplayAt ?? ""))
       .filter((time) => time > Date.now());
     if (!pending.length) return;
-    const timer = setTimeout(() => setPresentationTick((tick) => tick + 1),
-      Math.max(0, Math.min(...pending) - Date.now()) + 20);
+    const timer = setTimeout(
+      () => setPresentationTick((tick) => tick + 1),
+      Math.max(0, Math.min(...pending) - Date.now()) + 20,
+    );
     return () => clearTimeout(timer);
   }, [turns, presentationTick]);
   const [cancelling, setCancelling] = useState<string[]>([]);
@@ -416,7 +419,8 @@ export function ResearchDiscussion({
         </section>
       )}
       {turns.map((turn) => {
-        const preparing = turn.status === "completed" &&
+        const preparing =
+          turn.status === "completed" &&
           Date.parse(turn.preparedDisplayAt ?? "") > Date.now();
         const unit = preparing ? undefined : turn.reply?.content;
         const complete = turn.status === "completed";
@@ -681,24 +685,62 @@ export function ResearchDiscussion({
                 )}
                 {turn.error && (
                   <>
-                    <p className="rw-error" role="alert">{turn.error}</p>
-                    {turn.run?.review?.issues?.length ? (
+                    <p className="rw-error" role="alert">
+                      {turn.error}
+                    </p>
+                    {turn.run?.review?.issues?.some(
+                      (issue) =>
+                        !issue.resolved && issue.severity === "blocking",
+                    ) ? (
                       <details className="rw-review-details">
                         <summary>
-                          核验详情 · {turn.run.review.issues.filter((issue) => !issue.resolved).length} 个待处理问题
+                          核验详情 ·{" "}
+                          {
+                            turn.run.review.issues.filter(
+                              (issue) =>
+                                !issue.resolved &&
+                                issue.severity === "blocking",
+                            ).length
+                          }{" "}
+                          个待处理问题
                         </summary>
                         {turn.run.review.issues
-                          .filter((issue) => !issue.resolved)
+                          .filter(
+                            (issue) =>
+                              !issue.resolved && issue.severity === "blocking",
+                          )
                           .slice(0, 8)
                           .map((issue) => (
                             <div className="rw-review-issue" key={issue.id}>
                               <strong>
-                                {issue.severity === "blocking" ? "必须修正" : "建议补充"} · {{fact: "事实", scope: "结论范围", teaching: "讲解衔接", material: "资料缺口"}[issue.type]}
+                                {issue.severity === "blocking"
+                                  ? "必须修正"
+                                  : "建议补充"}{" "}
+                                ·{" "}
+                                {
+                                  {
+                                    fact: "事实",
+                                    scope: "结论范围",
+                                    teaching: "讲解衔接",
+                                    material: "资料缺口",
+                                  }[issue.type]
+                                }
                               </strong>
                               <p>{issue.location}</p>
                               <p>{issue.suggestion}</p>
                               {issue.evidence.length > 0 && (
-                                <small>依据：{issue.evidence.map(id => turn.run?.materials?.at(-1)?.sources.find(s => s.id === id)?.locator ?? "相关引用资料").join("、")}</small>
+                                <small>
+                                  依据：
+                                  {issue.evidence
+                                    .map(
+                                      (id) =>
+                                        turn.run?.materials
+                                          ?.at(-1)
+                                          ?.sources.find((s) => s.id === id)
+                                          ?.locator ?? "相关引用资料",
+                                    )
+                                    .join("、")}
+                                </small>
                               )}
                             </div>
                           ))}

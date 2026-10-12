@@ -5,6 +5,28 @@ import {
   selectPlanSources,
 } from "../shared/generation-intake.ts";
 import type { PaperBundle } from "../shared/types.ts";
+import { isPptPageCount, pptPageCounts } from "../shared/ppt-page-count.ts";
+import { messageSchema } from "../server/schemas.ts";
+
+test("PPT intake restores every page count accepted by the message API, including four-page decks", () => {
+  assert.equal(isPptPageCount(""), true);
+  for (const count of pptPageCounts) {
+    assert.equal(isPptPageCount(count), true);
+    assert.equal(
+      messageSchema.safeParse({
+        clientMessageId: "count-check",
+        mode: "live",
+        question: "生成汇报",
+        module: "ppt",
+        slideCount: Number(count),
+      }).success,
+      true,
+    );
+  }
+  for (const count of ["0", "17", "4.5", "04", "NaN", 4, null])
+    assert.equal(isPptPageCount(count), false);
+  assert.equal(pptPageCounts.length, 16);
+});
 
 function paper(id: string, lengths: number[]): PaperBundle {
   return {
@@ -61,7 +83,9 @@ test("unavailable, empty and too many references fail before draft submission; o
     ["ok", "huge"],
     "huge method",
   );
-  assert.ok(oversized.some((source) => source.paperId === "huge" && source.range));
+  assert.ok(
+    oversized.some((source) => source.paperId === "huge" && source.range),
+  );
   const papers = Array.from({ length: 13 }, (_, i) =>
     paper(`paper-${i}`, [100]),
   );

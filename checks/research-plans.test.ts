@@ -3,6 +3,7 @@ import assert from "node:assert/strict";
 import { ResearchPlans } from "../server/research-plans.ts";
 import { ProviderFailure, type Provider } from "../server/provider.ts";
 import { TaskScheduler } from "../server/scheduler.ts";
+import { unzipSync, strFromU8 } from "fflate";
 import type { PlanContent, ResearchPlan } from "../shared/research-plan.ts";
 import type { PaperBundle } from "../shared/types.ts";
 import type { PlanJobInput } from "../server/research-plan-schemas.ts";
@@ -40,6 +41,7 @@ const review = {
 function harness(
   outputs: unknown[] = [content, review],
   custom?: Provider["generate"],
+  deliveryPolicy: "internal" | "online" = "internal",
 ) {
   const records = new Map<string, any>(),
     calls: { instructions: string; input: any }[] = [];
@@ -62,9 +64,9 @@ function harness(
   const provider: Provider = {
     id: "fixture",
     model: "fixture",
-    async generate(i, x, schema, signal) {
+    async generate(i, x, schema, signal, image, observe, control) {
       calls.push({ instructions: i, input: structuredClone(x) });
-      if (custom) return custom(i, x, schema, signal);
+      if (custom) return custom(i, x, schema, signal, image, observe, control);
       signal.throwIfAborted();
       const next = outputs.shift();
       if (next instanceof Error) throw next;
@@ -90,6 +92,8 @@ function harness(
     new TaskScheduler(),
     persist,
     erase,
+    undefined,
+    deliveryPolicy,
   );
   return { store, records, calls, papers, provider, persist, erase };
 }
@@ -109,6 +113,73 @@ const input = (p: ResearchPlan, extra: Partial<PlanJobInput> = {}) => ({
 const plain = (p: PlanContent) => ({
   ...p,
   sections: p.sections.map(({ author: _a, ...s }) => s),
+});
+
+test("online minor findings stay internal across Markdown/DOCX export; internal multi-section gate stays strict", async () => {
+  const draft = {
+    ...content,
+    sections: [...content.sections, { ...content.sections[0], id: "third" }],
+  };
+  const warnings = {
+    ...review,
+    issues: draft.sections.map((s) => ({
+      id: s.id,
+      sectionId: s.id,
+      severity: "warning",
+      message: "内部编辑建议",
+      evidence: [],
+    })),
+    limitations: ["内部审核范围说明"],
+  };
+  for (const policy of ["online", "internal"] as const) {
+    const h = harness([draft, warnings], undefined, policy);
+    const p = await h.store.create(topic);
+    const j = await h.store.start(p.id, input(p, { maxCalls: 2 }));
+    const result = await h.store.wait(j.id);
+    assert.equal(result.status, policy === "online" ? "completed" : "failed");
+    assert.equal(h.calls.length, 2);
+    const v = h.store.get(p.id).versions.at(-1)!;
+    assert.equal(v.review?.issues.length, 3);
+    if (policy === "online") {
+      const md = h.store.exportMarkdown(p.id, v.id);
+      const docx = strFromU8(
+        unzipSync(h.store.exportDocx(p.id, v.id))["word/document.xml"],
+      );
+      for (const text of [md, docx]) {
+        assert.doesNotMatch(text, /内部编辑建议|内部审核范围说明/);
+        assert.match(text, /没有样本依据/);
+        assert.match(text, /对象待确认/);
+      }
+    } else assert.throws(() => h.store.exportMarkdown(p.id, v.id), /不能导出/);
+  }
+});
+
+test("online blocking findings still prevent both export formats", async () => {
+  const h = harness(
+    [
+      content,
+      {
+        ...review,
+        issues: [
+          {
+            id: "core",
+            sectionId: "controls",
+            severity: "blocking",
+            message: "缺少决定性对照",
+            evidence: [],
+          },
+        ],
+      },
+    ],
+    undefined,
+    "online",
+  );
+  const p = await h.store.create(topic);
+  const j = await h.store.start(p.id, input(p, { maxCalls: 2 }));
+  assert.equal((await h.store.wait(j.id)).status, "failed");
+  const v = h.store.get(p.id).currentVersion!;
+  assert.throws(() => h.store.exportMarkdown(p.id, v), /不能导出/);
+  assert.throws(() => h.store.exportDocx(p.id, v), /不能导出/);
 });
 
 test("paper removal preserves plan evidence across restart, requirement edits and generation", async () => {
@@ -683,4 +754,69 @@ test("显式两次上限不被自动修订扩大，客户端不能提高上限",
   assert.equal(done.budget.attempts.length, 2);
   assert.equal(done.budget.limit, 2);
   assert.equal(h.store.get(p.id).versions[0].review?.status, "issues");
+});
+
+test("online plan safely retries confirmed empty transport failure without dropping review or exceeding budget", async () => {
+  for (const policy of ["online", "internal"] as const) {
+    let n = 0;
+    const h = harness(
+      [],
+      async (_i, _x, schema, _s, _image, observe) => {
+        n++;
+        if (n === 1) {
+          observe?.({
+            type: "terminal",
+            status: "failed",
+            at: new Date().toISOString(),
+          });
+          throw new ProviderFailure(
+            "stream disconnected: network error",
+            "transport",
+          );
+        }
+        return { output: schema.parse(n === 2 ? content : review) };
+      },
+      policy,
+    );
+    const p = await h.store.create(topic);
+    const job = await h.store.start(p.id, input(p));
+    const done = await h.store.wait(job.id);
+    assert.equal(
+      done.status,
+      policy === "online" ? "completed" : "failed",
+      done.error,
+    );
+    assert.equal(done.budget.attempts.length, policy === "online" ? 3 : 1);
+    if (policy === "online") {
+      assert.equal(done.budget.transportRecoveryOf, done.budget.attempts[0].id);
+      assert.equal(h.store.get(p.id).versions[0].review?.status, "checked");
+    }
+  }
+});
+
+test("online plan never retries ambiguous failures or spends a two-call budget on a duplicate generation", async () => {
+  for (const maxCalls of [2, 4] as const) {
+    const h = harness(
+      [],
+      async (_i, _x, _schema, _s, _image, observe) => {
+        if (maxCalls === 2)
+          observe?.({
+            type: "terminal",
+            status: "failed",
+            at: new Date().toISOString(),
+          });
+        throw new ProviderFailure(
+          "stream disconnected: network error",
+          "transport",
+        );
+      },
+      "online",
+    );
+    const p = await h.store.create(topic);
+    const job = await h.store.start(p.id, input(p, { maxCalls }));
+    const done = await h.store.wait(job.id);
+    assert.equal(done.status, "failed");
+    assert.equal(done.budget.attempts.length, 1);
+    assert.equal(done.budget.transportRecoveryOf, undefined);
+  }
 });

@@ -1,4 +1,5 @@
 import express from "express";
+import { isPptPageCount } from "../shared/ppt-page-count.ts";
 import multer from "multer";
 import { mkdir, readFile, writeFile, rename, rm } from "node:fs/promises";
 import { resolve, join } from "node:path";
@@ -143,7 +144,14 @@ const paperById = async (id: string): Promise<PaperBundle> => {
     ],
   };
 };
-const deckVersions = new DeckVersions(provider, paperById);
+const deckVersions = new DeckVersions(
+  provider,
+  paperById,
+  undefined,
+  undefined,
+  undefined,
+  "online",
+);
 await deckVersions.restoreDisk();
 let preparedAnswers: PreparedRecording | undefined;
 let preparedDeck: TaskRun | undefined;
@@ -217,6 +225,10 @@ const researchPlans = new ResearchPlans(
   provider,
   paperById,
   assistant.scheduler,
+  undefined,
+  undefined,
+  undefined,
+  "online",
 );
 await researchPlans.restore();
 app.get("/api/research-plans", (_req, res) => res.json(researchPlans.all()));
@@ -317,7 +329,7 @@ app.patch("/api/artifacts/:kind/:id", async (req, res) => {
         .object({
           paperId: entityId.or(z.literal("")).optional(),
           request: z.string().max(1400).optional(),
-          count: z.enum(["", "6", "8", "10", "12", "16"]).optional(),
+          count: z.string().refine(isPptPageCount).optional(),
           question: z.string().max(3000).optional(),
           conditions: z.string().max(5000).optional(),
           instruction: z.string().max(3000).optional(),

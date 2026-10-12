@@ -17,6 +17,7 @@ import { ResearchSlide } from "./research-slide.tsx";
 import { ArtifactNavigation } from "./artifact-navigation.tsx";
 import type { WorkspaceIndex, ArtifactSummary } from "../shared/workspace.ts";
 import { useArtifactIntake } from "./artifact-intake.ts";
+import { isPptPageCount, pptPageCounts } from "../shared/ppt-page-count.ts";
 import { slideImageKey } from "../shared/image-region.ts";
 
 const terminal = (status: string) =>
@@ -233,9 +234,7 @@ export function PptGeneration({
     ),
     [request, setRequest] = useState(() => readDraft("tutor-ppt-request", "")),
     [count, setCount] = useState(() =>
-      readDraft("tutor-ppt-count", "", (value) =>
-        ["", "6", "8", "10", "12", "16"].includes(value as string),
-      ),
+      readDraft("tutor-ppt-count", "", isPptPageCount),
     ),
     [busy, setBusy] = useState(false),
     [error, setError] = useState(""),
@@ -360,7 +359,11 @@ export function PptGeneration({
         if (c && !readDraft(`tutor-ppt-request:${c.id}`, "")) {
           const last = chronological(turns).at(-1)?.message;
           if (last) {
-            setRequest(last.question.split("用户要求：")[1] ?? "");
+            setRequest(
+              last.question.startsWith("为已读过论文的人制作")
+                ? (last.question.split("用户要求：")[1] ?? "")
+                : last.question,
+            );
             setCount(last.slideCount ? String(last.slideCount) : "");
           }
         }
@@ -598,7 +601,13 @@ export function PptGeneration({
           setRequest(
             readDraft(`tutor-ppt-request:${a.id}`, a.intake?.request ?? ""),
           );
-          setCount(readDraft(`tutor-ppt-count:${a.id}`, a.intake?.count ?? ""));
+          setCount(
+            readDraft(
+              `tutor-ppt-count:${a.id}`,
+              a.intake?.count ?? "",
+              isPptPageCount,
+            ),
+          );
           setDraftOnly(!!a.draftOnly);
           setArtifactId(a.id);
           setPaperId(a.paperId ?? a.intake?.paperId ?? "");
@@ -658,7 +667,7 @@ export function PptGeneration({
               onChange={(e) => setCount(e.target.value)}
             >
               <option value="">根据论文安排</option>
-              {[6, 8, 10, 12, 16].map((n) => (
+              {pptPageCounts.map((n) => (
                 <option key={n} value={n}>
                   {n} 页
                 </option>
@@ -851,11 +860,13 @@ export function PptGeneration({
             <summary>这一页的讲述提示</summary>
             <ResearchMarkdown text={slide.notes} />
           </details>
-          {!!current.review.issues.length && (
+          {current.review.issues.some(
+            (i) => !i.resolved && i.severity === "blocking",
+          ) && (
             <details>
               <summary>内容核对说明</summary>
               {current.review.issues
-                .filter((i) => !i.resolved)
+                .filter((i) => !i.resolved && i.severity === "blocking")
                 .map((i) => (
                   <p key={i.id}>{i.suggestion}</p>
                 ))}
@@ -1411,27 +1422,29 @@ export function PlanGeneration({
             </div>
           )}
           {!ready && <p>当前草案尚未完成核对，保留供查看。</p>}
-          {version.review && (
+          {version.review?.issues.some((i) => i.severity === "blocking") && (
             <section aria-label="需与导师讨论">
               <h3>需与导师讨论</h3>
-              {version.review.issues.map((issue) => (
-                <p key={issue.id}>
-                  {version.content.sections.find(
-                    (s) => s.id === issue.sectionId,
-                  )?.title ?? "整体方案"}
-                  {issue.severity === "blocking" ? " · 尚需修正：" : "："}
-                  {issue.message}
-                </p>
-              ))}
-              {version.review.limitations.map((text, index) => (
-                <p key={index}>{text}</p>
-              ))}
+              {version.review.issues
+                .filter((i) => i.severity === "blocking")
+                .map((issue) => (
+                  <p key={issue.id}>
+                    {version.content.sections.find(
+                      (s) => s.id === issue.sectionId,
+                    )?.title ?? "整体方案"}
+                    {issue.severity === "blocking" ? " · 尚需修正：" : "："}
+                    {issue.message}
+                  </p>
+                ))}
             </section>
           )}
           {version.content.sections.map((s) => (
             <section key={s.id}>
               <h3>{s.title}</h3>
               <ResearchMarkdown text={s.text} />
+              {s.unknowns.length > 0 && (
+                <p>待确认条件：{s.unknowns.join("；")}</p>
+              )}
               <details>
                 <summary>设计理由</summary>
                 <ResearchMarkdown text={s.rationale} />

@@ -1,4 +1,8 @@
 import { deliveredFigureBasics } from "./figure-familiarity.ts";
+import {
+  visibleOpenQuestions,
+  reviewFollowupContext,
+} from "./delivery-policy.ts";
 import { randomUUID } from "node:crypto";
 import { containsRenderedQuote } from "../shared/markdown.ts";
 import {
@@ -789,6 +793,11 @@ export class AssistantService {
       }
       state.paperId = binding;
       state.sourceVersion = paper.version;
+      state.openQuestions = visibleOpenQuestions(
+        state.openQuestions,
+        this.manager.runs.values(),
+        state.id,
+      );
       const action = readingAction(message, state.readingSession);
       const reading = action
         ? prepareReading(
@@ -919,7 +928,7 @@ export class AssistantService {
           content: null,
           artifacts: [{ ...artifact, kind: "pptx" }],
           pendingQuestions: version.review.issues
-            .filter((i) => !i.resolved)
+            .filter((i) => !i.resolved && i.severity === "blocking")
             .map((i) => ({
               id: i.id,
               question: i.suggestion,
@@ -1262,7 +1271,9 @@ export class AssistantService {
             existing.input.paperId !== paper.id ||
             existing.sourceVersion !== paper.version ||
             existing.input.conversationId !== state.id ||
-            existing.review?.issues.some((i) => !i.resolved)
+            existing.review?.issues.some(
+              (i) => !i.resolved && i.severity === "blocking",
+            )
           )
             throw new Error("指定大纲尚未核对，或与当前会话及来源版本不一致。");
           run = existing;
@@ -1270,6 +1281,19 @@ export class AssistantService {
           const previous = state.lastRunId
             ? this.manager.runs.get(state.lastRunId)?.result
             : undefined;
+          const currentArtifact =
+            last?.deck && state.latestDeckVersionId
+              ? this.decks?.versions.get(state.latestDeckVersionId)
+              : last;
+          const auditContext =
+            currentArtifact &&
+            currentArtifact.sourceVersion === paper.version &&
+            ("outline" in currentArtifact
+              ? currentArtifact.paperId === paper.id &&
+                currentArtifact.conversationId === state.id
+              : currentArtifact.input.paperId === paper.id)
+              ? reviewFollowupContext(message.question, currentArtifact)
+              : "";
           run = await this.manager.start(
             {
               paperId: paper.id,
@@ -1336,10 +1360,9 @@ export class AssistantService {
                 : {}),
               slideCount: plan.slideCount ?? undefined,
               speechScript: message.speechScript === true,
-              contextSummary: this.context(state).summary.slice(
-                0,
-                previous ? 400 : 1200,
-              ),
+              contextSummary:
+                this.context(state).summary.slice(0, previous ? 400 : 1200) +
+                auditContext,
               openQuestions: state.openQuestions.slice(-5),
               conversationId: state.id,
               turnId: turn.id,
@@ -1424,7 +1447,7 @@ export class AssistantService {
               sourceIds: r.matchedIds,
             })) ?? []),
           ...(run.review?.issues
-            .filter((i) => !i.resolved)
+            .filter((i) => !i.resolved && i.severity === "blocking")
             .map((i) => ({
               id: i.id,
               question: i.suggestion,

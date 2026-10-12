@@ -16,11 +16,14 @@ export class ResultCache {
     }
   }
   eligible(run: TaskRun) {
+    const online = run.skillVersions?.["delivery-policy"] === "online-v3";
     return (
       run.status === "completed" &&
       !!run.result &&
       !!run.review &&
-      !run.review.issues.some((i) => !i.resolved) &&
+      !run.review.issues.some(
+        (i) => !i.resolved && (!online || i.severity === "blocking"),
+      ) &&
       !run.materialRequests?.some((r) => r.status !== "resolved") &&
       !run.novice?.breakpoints.some((b) => b.status !== "resolved")
     );

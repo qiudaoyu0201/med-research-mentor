@@ -42,6 +42,7 @@ test("saved deck survives source removal and restart; tampered evidence still bl
 function harness(
   outputs: unknown[],
   paper: PaperBundle = structuredClone(sample),
+  policy: "internal" | "online" = "internal",
 ) {
   const records = new Map<string, any>();
   const persist: typeof save = async (g, id, value) => {
@@ -63,9 +64,38 @@ function harness(
       exports.push({ outline, materials });
       return "fixture.pptx";
     },
+    undefined,
+    policy,
   );
   return { store, records, exports, paper, provider };
 }
+
+test("online speech uses natural delivery instructions without changing internal edit prompts", async () => {
+  for (const policy of ["internal", "online"] as const) {
+    const h = harness(
+      [{ speechScript: speechText }, review],
+      structuredClone(sample),
+      policy,
+    );
+    const base = await h.store.seed("speech-policy", sample.id);
+    const job = await h.store.start(base.id, "speech-policy", {
+      operation: "speech",
+      question: "补写讲稿",
+    });
+    const done = await h.store.wait(job.id);
+    assert.equal(done.status, "completed", done.error);
+    assert.equal(
+      done.roles[0].instructions.includes("次要表达问题自行改善"),
+      policy === "online",
+    );
+    assert.equal(
+      done.roles[1].instructions.includes("问题按对当前任务的影响分级"),
+      policy === "online",
+    );
+    assert.deepEqual(done.outline.slides, base.outline.slides);
+    assert.equal(done.budget?.attempts.length, 2);
+  }
+});
 
 test("full speech supplements and manual edits preserve the exact deck and previous scripts", async () => {
   const h = harness([{ speechScript: speechText }, review, review, review]);

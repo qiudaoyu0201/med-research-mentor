@@ -110,13 +110,8 @@ export function planDocx(
     ...[...new Set([...v.content.assumptions, ...v.content.questions])].map(
       (s) => paragraph(s),
     ),
-    paragraph("范围与核对问题", "Heading1"),
-    ...[
-      ...new Set([...v.content.limitations, ...(v.review?.limitations ?? [])]),
-    ].map((s) => paragraph(s)),
-    ...(v.review?.issues.map((i) =>
-      paragraph(`${i.message} ${cite(i.evidence)}`),
-    ) ?? []),
+    paragraph("研究局限", "Heading1"),
+    ...[...new Set(v.content.limitations)].map((s) => paragraph(s)),
     paragraph("参考文献", "Heading1"),
     source || paragraph("本版本没有提供文献依据，设计建议与假设仍待核实。"),
     paragraph(
