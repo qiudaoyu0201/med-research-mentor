@@ -29,9 +29,10 @@ export function wrapSlideText(text: string, width: number, fontSize: number) {
   for (const paragraph of text.split("\n")) {
     let line = "",
       length = 0;
+    // Digit-leading scientific identifiers (53BP1, 4EBP1) are one token.
     const tokens =
       paragraph.match(
-        /\d[\d,.]*(?:[–—−-]\d[\d,.]*)?(?:%|％)?|[A-Za-z\u0370-\u03ff][A-Za-z0-9\u0370-\u03ff_./+-]*|[^\x00-\x7f]|\s+|./gu,
+        /[0-9]+[A-Za-z\u0370-\u03ff][A-Za-z0-9\u0370-\u03ff_./+-]*|\d[\d,.]*(?:[–—−-]\d[\d,.]*)?(?:%|％)?|[A-Za-z\u0370-\u03ff][A-Za-z0-9\u0370-\u03ff_./+-]*|[^\x00-\x7f]|\s+|./gu,
       ) ?? [];
     const words: string[] = [];
     // Keep closing punctuation with the preceding token before wrapping;

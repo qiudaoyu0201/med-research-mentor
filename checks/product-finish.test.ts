@@ -690,3 +690,17 @@ test("mixed Latin and Chinese lines fit the actual export font width", () => {
     }
   }
 });
+
+
+test("slide wrapping keeps digit-leading scientific identifiers intact without changing scientific text", () => {
+  const context = createCanvas(1, 1).getContext("2d");
+  context.font = "19pt Microsoft YaHei";
+  for (const token of ["53BP1", "4EBP1", "5hmC", "3D"]) {
+    const text = "抗ATM反向捕获：检出" + token + "，未检出SUZ12";
+    const lines = wrapSlideText(text, 3.5, 19);
+    assert.equal(lines.join(""), text);
+    assert.ok(lines.some((line) => line.includes(token)), "Identifier must stay in one line: " + token);
+    for (const line of lines)
+      assert.ok(context.measureText(line).width <= 3.5 * 96, "Actual font width overflow: " + line);
+  }
+});
