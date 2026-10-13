@@ -1,7 +1,8 @@
 import { createCanvas, loadImage } from "@napi-rs/canvas";
-import type { Source } from "../shared/types.ts";
-export async function pptImagePacket(sources: Source[]) {
-  const images = sources.filter((s) => s.image).slice(0, 8);
+import { validRegion, cropPixels } from "../shared/image-region.ts";
+import type { Source, DeckOutline } from "../shared/types.ts";
+export async function pptImagePacket(sources: Source[], limit = 8) {
+  const images = sources.filter((s) => s.image).slice(0, limit);
   if (!images.length) return undefined;
   if (images.length === 1) return images[0].image;
   const cols = 2,
@@ -25,4 +26,44 @@ export async function pptImagePacket(sources: Source[]) {
     ctx.drawImage(img, x + 12, y + 42, img.width * scale, img.height * scale);
   }
   return canvas.toDataURL("image/jpeg", 0.88);
+}
+
+// Review the picture actually selected for each page, including its crop.
+export async function pptDeckImagePacket(
+  deck: DeckOutline | null | undefined,
+  sources: Source[],
+) {
+  const pictures: Source[] = [];
+  for (const [index, slide] of (deck?.slides ?? []).entries()) {
+    if (!slide.imageSource) continue;
+    const source = sources.find((s) => s.id === slide.imageSource);
+    if (!source) throw new Error("汇报核验缺少已选择的原图来源。");
+    if (!source.image) {
+      if (slide.imageCrop) throw new Error("汇报核验缺少裁剪所需的原图。");
+      continue;
+    }
+    let image = source.image;
+    if (slide.imageCrop) {
+      if (!validRegion(slide.imageCrop)) throw new Error("汇报核验选区无效。");
+      const original = await loadImage(image),
+        box = cropPixels(slide.imageCrop, original.width, original.height);
+      const crop = createCanvas(box.width, box.height);
+      crop
+        .getContext("2d")
+        .drawImage(
+          original,
+          box.left,
+          box.top,
+          box.width,
+          box.height,
+          0,
+          0,
+          box.width,
+          box.height,
+        );
+      image = crop.toDataURL("image/png");
+    }
+    pictures.push({ ...source, id: `第${index + 1}页 | ${source.id}`, image });
+  }
+  return pptImagePacket(pictures, 16);
 }

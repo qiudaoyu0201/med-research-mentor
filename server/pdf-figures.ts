@@ -1,6 +1,7 @@
 import { OPS, Util, type PDFPageProxy } from "pdfjs-dist/legacy/build/pdf.mjs";
 import { createCanvas } from "@napi-rs/canvas";
 import type { Source } from "../shared/types.ts";
+import { figurePanels, clearPanelBoundaries } from "./figure-panels.ts";
 import type { ImageRegion } from "../shared/image-region.ts";
 
 type Box = { left: number; top: number; right: number; bottom: number };
@@ -21,6 +22,7 @@ export async function pageFigures(
       const h = Math.hypot(m[2], m[3]);
       return {
         text: i.str,
+        font: i.fontName ?? "",
         left: m[4],
         top: m[5] - h,
         right: m[4] + i.width,
@@ -197,7 +199,26 @@ export async function pageFigures(
         w,
         h,
       );
+    const panels = figurePanels(
+      {
+        left: region.left * W,
+        top: region.top * H,
+        right: (region.left + region.width) * W,
+        bottom: (region.top + region.height) * H,
+      },
+      caption,
+      texts,
+    );
+    const imagePanels = clearPanelBoundaries(
+      crop.getContext("2d"),
+      w,
+      h,
+      panels,
+    )
+      ? panels
+      : undefined;
     return {
+      ...(imagePanels?.length ? { imagePanels } : {}),
       id: `${id}-p${page.pageNumber}-fig${number}-${index + 1}`,
       title: `Figure ${number}`,
       kind: "paper",

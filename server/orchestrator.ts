@@ -11,7 +11,8 @@ import type {
   Source,
 } from "../shared/types.ts";
 import { profiles, exampleUnits, defaultDeck } from "../examples/bundle.ts";
-import { pptImagePacket } from "./ppt-image-packet.ts";
+import { applyDeckPanels } from "./figure-panels.ts";
+import { pptImagePacket, pptDeckImagePacket } from "./ppt-image-packet.ts";
 import {
   teachingSchema,
   noviceSchema,
@@ -517,6 +518,7 @@ export class TaskManager {
       run.events.push({ status, time: new Date().toISOString() });
       await this.persist("runs", run.id, run);
     };
+    let reviewImage: string | undefined;
     const call = async <T>(
       role: string,
       instructions: string,
@@ -531,6 +533,9 @@ export class TaskManager {
         durationMs: 0,
       } as TaskRun["roles"][number];
       const started = Date.now();
+      const image = /^(?:novice|grounding)/.test(role)
+        ? (reviewImage ?? run.input.visibleImage)
+        : run.input.visibleImage;
       try {
         const result = await ledger.call(
           this.provider,
@@ -542,8 +547,8 @@ export class TaskManager {
           {
             recoverTransport: this.deliveryPolicy === "online",
             groupId: run.input.groupId ?? run.id,
-            image: run.input.visibleImage,
-            sourceHash: digest({ sources, image: run.input.visibleImage }),
+            image,
+            sourceHash: digest({ sources, image }),
             skillHash: digest(skills.versions),
             onReserved: async (attempt) => {
               if (record.attemptId) {
@@ -758,6 +763,10 @@ export class TaskManager {
           run.input.modules ?? [run.input.module]
         ).includes("ppt");
         if (!requestedDeck) generated = { ...generated, deck: null };
+        applyDeckPanels(generated.deck, sources);
+        reviewImage = requestedDeck
+          ? await pptDeckImagePacket(generated.deck, sources)
+          : undefined;
         run.draft = generated.unit;
         run.explanationTrace = explanationTrace(
           generated,
@@ -1003,6 +1012,10 @@ export class TaskManager {
               : scopedSchema(),
           );
           if (!requestedDeck) generated = { ...generated, deck: null };
+          applyDeckPanels(generated.deck, sources);
+          reviewImage = requestedDeck
+            ? await pptDeckImagePacket(generated.deck, sources)
+            : undefined;
           if (skills.explanationTracing)
             run.explanationTrace = {
               evidence: explanationTrace(

@@ -1,5 +1,6 @@
 import { z } from "zod";
 import type { Source } from "../shared/types.ts";
+import { panelSelectionIds } from "./figure-panels.ts";
 import { validRegion } from "../shared/image-region.ts";
 export const imageRegionSchema = z
   .object({
@@ -119,6 +120,12 @@ export function groundedTeachingSchema(
   const sections = unitSchema.shape.sections.element.extend({ citations: ids });
   const slides = slideSchema.omit({ imageCrop: true }).extend({
     citations: ids,
+    imagePanel: z
+      .enum(["", ...panelSelectionIds(sources)])
+      .optional()
+      .describe(
+        "可选当前imageSource已有的面板ID；空字符串表示全图。不能猜坐标。",
+      ),
     imageSource: z
       .enum([
         "",

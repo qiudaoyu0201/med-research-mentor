@@ -428,11 +428,11 @@ try {
           text: s.text,
           locator: s.locator,
         }));
-        const { pptImagePacket } =
+        const { pptDeckImagePacket } =
           await import("../server/ppt-image-packet.ts");
         image =
           frozen.manifest.module === "ppt"
-            ? await pptImagePacket(material)
+            ? await pptDeckImagePacket(run.deck, material)
             : undefined;
         artifact = { unit: run.result, deck: run.deck ?? null };
       }
@@ -449,7 +449,10 @@ try {
           criteria: frozen.manifest.criteria,
           artifact,
           sources,
-          evaluatorVersion: "explanation-v1",
+          evaluatorVersion:
+            frozen.manifest.module === "ppt"
+              ? "explanation-and-deck-images-v2"
+              : "explanation-v1",
         },
         controller.signal,
         image,

@@ -4,6 +4,10 @@ export interface ImageRegion {
   width: number;
   height: number;
 }
+export interface FigurePanel {
+  label: string;
+  region: ImageRegion;
+}
 export function validRegion(r: ImageRegion | undefined): r is ImageRegion {
   return (
     !!r &&

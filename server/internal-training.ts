@@ -257,14 +257,18 @@ export async function reviewArtifact(
     criteria: string[];
     artifact: unknown;
     sources: { id: string; text: string; locator: string }[];
-    evaluatorVersion?: "explanation-v1";
+    evaluatorVersion?: "explanation-v1" | "explanation-and-deck-images-v2";
   },
   signal: AbortSignal,
   image?: string,
 ) {
   const result = await provider.generate(
-    input.evaluatorVersion === "explanation-v1"
-      ? explanationReviewInstructions
+    input.evaluatorVersion === "explanation-v1" ||
+      input.evaluatorVersion === "explanation-and-deck-images-v2"
+      ? explanationReviewInstructions +
+          (input.evaluatorVersion === "explanation-and-deck-images-v2"
+            ? "\n图片为各页实际展示区域，页标签仅定位展示位置，不是新的引用ID。逐页对照图件区域与标题、要点和讲述提示；未出现在当前裁剪中的内容不能声称已在该页图中展示。原文可支持额外事实，但不能代替对应页面的图件检查。本次仍未看到导出排版，不据此宣称实际PPT排版通过。"
+            : "")
       : reviewInstructions,
     input,
     reviewSchema,
