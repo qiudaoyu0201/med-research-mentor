@@ -433,6 +433,7 @@ export class TaskManager {
               ? "full"
               : "explanation",
           input.slideCount ?? 6,
+          this.deliveryPolicy,
         );
         ledger.state.deadline = new Date(
           Date.now() + ledger.state.timing.taskMs,

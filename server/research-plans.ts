@@ -619,6 +619,7 @@ export class ResearchPlans {
       ledger.state.timing = taskTiming(
         input.requestedScope === "full-plan" ? "full" : "fragment",
         8,
+        this.deliveryPolicy,
       );
       ledger.state.deadline = new Date(
         Date.now() + ledger.state.timing.taskMs,

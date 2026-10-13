@@ -6,7 +6,24 @@ export class TaskDeadline extends Error {
   }
 }
 
-export function taskTiming(scope: TaskTiming["scope"], size = 1): TaskTiming {
+export function taskTiming(
+  scope: TaskTiming["scope"],
+  size = 1,
+  deliveryPolicy: "internal" | "online" = "internal",
+): TaskTiming {
+  if (deliveryPolicy === "online")
+    return {
+      version: "task-timing-v1",
+      scope,
+      taskMs:
+        scope === "full"
+          ? Math.min(5_400_000, 2_700_000 + Math.max(1, size) * 180_000)
+          : 2_700_000,
+      requestMs: scope === "full" ? 1_200_000 : 900_000,
+      firstOutputMs: scope === "full" ? 600_000 : 300_000,
+      idleMs: scope === "full" ? 600_000 : 300_000,
+      ...(scope === "explanation" ? { diagnosisMs: 90_000 } : {}),
+    };
   if (scope === "explanation")
     return {
       version: "task-timing-v1",

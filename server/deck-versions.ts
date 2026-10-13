@@ -282,7 +282,11 @@ export class DeckVersions {
       external?.ledger ??
       new BudgetLedger(version.id, () => this.store(version));
     if (!external?.ledger)
-      ledger.state.timing = taskTiming("full", version.outline.slides.length);
+      ledger.state.timing = taskTiming(
+        "full",
+        version.outline.slides.length,
+        this.deliveryPolicy,
+      );
     if (!external) ledger.state.limit = 4;
     version.budget = ledger.state;
     if (!speech) delete version.outline.speechScript;

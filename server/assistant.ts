@@ -382,6 +382,7 @@ export class AssistantService {
         ? "full"
         : "explanation",
       message.slideCount ?? 6,
+      "online",
     );
     const turn: AssistantTurn = {
       id,
@@ -600,7 +601,9 @@ export class AssistantService {
     this.controllers.set(turn.id, controller);
     const completion = this.scheduler
       .run(taskKey(state.paperId, state.id), controller.signal, async () => {
-        ledger.state.deadline = new Date(Date.now() + 480_000).toISOString();
+        ledger.state.deadline = new Date(
+          Date.now() + (ledger.state.timing?.taskMs ?? 480_000),
+        ).toISOString();
         const checked = await this.attachments!.check(
           attachmentId,
           state.id,
