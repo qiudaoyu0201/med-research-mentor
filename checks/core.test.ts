@@ -447,3 +447,39 @@ test("PDF importer extracts actual pages and rejects malformed files", async () 
     /有效 PDF/,
   );
 });
+
+test("generation cannot label paper-only evidence as an unavailable foundation", () => {
+  const paperSources = sample.sources.filter((s) => s.kind === "paper");
+  const output = {
+    unit: {
+      ...unit,
+      sections: [
+        {
+          title: "原理",
+          text: "测量的解释。",
+          kind: "foundation",
+          citations: ["xu-design"],
+        },
+      ],
+    },
+    deck: null,
+  };
+  assert.throws(() => groundedTeachingSchema(paperSources).parse(output));
+  const foundation = {
+    ...sample.sources[0],
+    id: "foundation",
+    kind: "foundation" as const,
+  };
+  output.unit.sections[0].citations = ["foundation"];
+  assert.equal(
+    groundedTeachingSchema([...paperSources, foundation]).parse(output).unit
+      .sections[0].kind,
+    "foundation",
+  );
+  output.unit.sections[0].kind = "background";
+  output.unit.sections[0].citations = [];
+  assert.equal(
+    groundedTeachingSchema(paperSources).parse(output).unit.sections[0].kind,
+    "background",
+  );
+});

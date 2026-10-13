@@ -111,13 +111,28 @@ export const teachingSchema = z.object({
   unit: unitSchema,
   deck: deckSchema.nullable(),
 });
-export const groundingContractVersion = "grounded-output-v3-background";
+export const groundingContractVersion = "grounded-output-v4-source-kinds";
 export function groundedTeachingSchema(
   sources: Source[],
   speechScript = false,
 ) {
   const ids = z.array(z.enum(sources.map((s) => s.id))).max(20);
-  const sections = unitSchema.shape.sections.element.extend({ citations: ids });
+  const kinds = [
+    "interpretation",
+    "background",
+    ...(sources.some((s) => s.kind === "paper") ? ["paper" as const] : []),
+    ...(sources.some((s) => s.kind === "foundation")
+      ? ["foundation" as const]
+      : []),
+  ] as const;
+  const sections = unitSchema.shape.sections.element.extend({
+    citations: ids,
+    kind: z
+      .enum(kinds)
+      .describe(
+        "证据性质：paper为本文事实，interpretation为基于来源的解释，background为无正式基础来源的通用原理；foundation仅在提供对应基础来源时可用。",
+      ),
+  });
   const slides = slideSchema.omit({ imageCrop: true }).extend({
     citations: ids,
     imagePanel: z
