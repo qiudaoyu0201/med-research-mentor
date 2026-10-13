@@ -68,6 +68,8 @@ test("invalid, truncated, or fabricated source output is rejected without repair
     '{"title":',
     '{"title":""}',
     '{"title":"ok","sources":["invented"]}',
+    '{"title":"first\nsecond","sources":["real"]}',
+    '{"title":"first\tsecond","sources":["real"]}',
   ]) {
     let calls = 0;
     const adapted = new DiagnosticJsonProvider({
@@ -95,4 +97,31 @@ test("invalid, truncated, or fabricated source output is rejected without repair
     );
     assert.equal(calls, 1);
   }
+});
+
+test("double JSON encoding preserves multiline scientific text, quotes, tabs and backslashes", async () => {
+  const text = '首段。\n次段含"引号"、\t制表符与\\路径。';
+  let calls = 0;
+  const original = { title: text, sources: ["real"] };
+  const adapted = new DiagnosticJsonProvider({
+    id: "fixture",
+    model: "gpt-6.1-sol",
+    async generate(_rules, _input, schema) {
+      calls++;
+      // Simulate the native provider parsing its outer response once.
+      const native = JSON.parse(
+        JSON.stringify({ payload: JSON.stringify(original) }),
+      );
+      return { output: schema.parse(native) };
+    },
+  });
+  const result = await adapted.generate(
+    "rules",
+    {},
+    z.object({ title: z.string(), sources: z.array(z.enum(["real"])) }),
+    new AbortController().signal,
+  );
+  assert.deepEqual(result.output, original);
+  assert.equal(calls, 1);
+  assert.equal(adapted.id, "fixture:json-string-v2");
 });
