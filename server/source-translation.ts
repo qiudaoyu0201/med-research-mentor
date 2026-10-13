@@ -5,6 +5,7 @@ import type { PaperBundle, BudgetState } from "../shared/types.ts";
 import { list, save } from "./storage.ts";
 import { digest } from "./materials.ts";
 import { BudgetLedger } from "./budget.ts";
+import { taskTiming } from "./task-timing.ts";
 import { TaskScheduler, taskKey } from "./scheduler.ts";
 
 export interface SourceTranslation {
@@ -166,6 +167,7 @@ export class SourceTranslations {
       this.persist("source-translations", id, job),
     );
     ledger.state.limit = ledger.state.groupLimit = 1;
+    ledger.state.timing = taskTiming("fragment", 1, "online");
     const job: SourceTranslation = {
       id,
       key,
@@ -196,7 +198,9 @@ export class SourceTranslations {
     const completion = this.scheduler
       .run(taskKey(paper.id, id), controller.signal, async () => {
         job.status = "running";
-        ledger.state.deadline = new Date(Date.now() + 180_000).toISOString();
+        ledger.state.deadline = new Date(
+          Date.now() + ledger.state.timing!.taskMs,
+        ).toISOString();
         const result = await ledger.call(
           this.provider,
           "source-translation",

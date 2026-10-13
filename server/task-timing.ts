@@ -2,7 +2,13 @@ import type { TaskTiming } from "../shared/types.ts";
 import type { ProviderEvent } from "./provider.ts";
 export class TaskDeadline extends Error {
   constructor(readonly layer: string) {
-    super(`任务达到${layer}期限；保留输出，不自动重发。`);
+    const labels: Record<string, string> = {
+      "task-total": "整轮任务达到等待上限",
+      "request-total": "本次模型请求达到等待上限",
+      "first-output": "等待模型首段正文超时",
+      "output-idle": "模型长时间没有新增正文",
+    };
+    super(`${labels[layer] ?? layer}；已保留现有输出，未自动重发。`);
   }
 }
 
@@ -10,9 +16,29 @@ export function taskTiming(
   scope: TaskTiming["scope"],
   size = 1,
   deliveryPolicy: "internal" | "online" = "internal",
+  environment: NodeJS.ProcessEnv = process.env,
 ): TaskTiming {
+  const configure = (timing: TaskTiming) => {
+    const prefix = `TUTOR_${deliveryPolicy.toUpperCase()}`;
+    const fields = {
+      taskMs: "TASK_MS",
+      requestMs: "REQUEST_MS",
+      firstOutputMs: "FIRST_OUTPUT_MS",
+      idleMs: "IDLE_MS",
+    } as const;
+    for (const field of Object.keys(fields) as (keyof typeof fields)[]) {
+      const name = `${prefix}_${fields[field]}`;
+      const raw = environment[name];
+      if (raw === undefined) continue;
+      const value = Number(raw);
+      if (!Number.isSafeInteger(value) || value <= 0 || value > 2_147_483_647)
+        throw new Error(`${name} 必须是有效的正整数毫秒数。`);
+      timing[field] = value;
+    }
+    return timing;
+  };
   if (deliveryPolicy === "online")
-    return {
+    return configure({
       version: "task-timing-v1",
       scope,
       taskMs:
@@ -23,9 +49,9 @@ export function taskTiming(
       firstOutputMs: scope === "full" ? 600_000 : 300_000,
       idleMs: scope === "full" ? 600_000 : 300_000,
       ...(scope === "explanation" ? { diagnosisMs: 90_000 } : {}),
-    };
+    });
   if (scope === "explanation")
-    return {
+    return configure({
       version: "task-timing-v1",
       scope,
       taskMs: 480_000,
@@ -33,24 +59,24 @@ export function taskTiming(
       firstOutputMs: 120_000,
       idleMs: 60_000,
       diagnosisMs: 90_000,
-    };
+    });
   if (scope === "fragment")
-    return {
+    return configure({
       version: "task-timing-v1",
       scope,
       taskMs: 600_000,
       requestMs: 300_000,
       firstOutputMs: 240_000,
       idleMs: 90_000,
-    };
-  return {
+    });
+  return configure({
     version: "task-timing-v1",
     scope,
     taskMs: Math.min(2_400_000, 600_000 + Math.max(1, size) * 90_000),
     requestMs: 720_000,
     firstOutputMs: 300_000,
     idleMs: 120_000,
-  };
+  });
 }
 
 // The ledger owns deadlines. RPC acknowledgments and token events cannot keep

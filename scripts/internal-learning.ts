@@ -3,6 +3,7 @@ import { open, unlink, readFile } from "node:fs/promises";
 import { createHash } from "node:crypto";
 import { RecordStorage } from "../server/storage.ts";
 import { BudgetLedger } from "../server/budget.ts";
+import { taskTiming } from "../server/task-timing.ts";
 import { createProvider } from "../server/model-config.ts";
 import { digest, materialPacket } from "../server/materials.ts";
 import {
@@ -352,7 +353,10 @@ try {
             break comparisons;
           if (
             Date.parse(batch.budget.deadline) - Date.now() <
-            2 * 180_000 + 120_000
+            2 *
+              (batch.budget.timing?.requestMs ??
+                taskTiming("explanation").requestMs) +
+              120_000
           )
             break comparisons;
           const item: LearningReport["results"][number] = {

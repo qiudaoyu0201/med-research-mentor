@@ -286,6 +286,9 @@ export interface Attempt {
   observation?: {
     firstResponseAt?: string;
     firstOutputAt?: string;
+    firstMeaningfulOutputAt?: string;
+    lastMeaningfulOutputAt?: string;
+    maxOutputGapMs?: number;
     validatedOutputAt?: string;
     lastActivityAt?: string;
     outputUpdates: number;
@@ -297,6 +300,7 @@ export interface Attempt {
     events: { type: string; at: string; status?: string; layer?: string }[];
   };
   providerId?: string;
+  timing?: TaskTiming;
   id: string;
   turnId: string;
   groupId: string | null;

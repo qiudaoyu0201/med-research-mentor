@@ -32,6 +32,7 @@ export class CompatibleProvider implements Provider {
       maxOutputTokens: config.maxOutputTokens,
     };
     this.capabilities = {
+      streaming: false,
       images: config.images,
       structuredOutput:
         config.outputMode === "json_schema"
