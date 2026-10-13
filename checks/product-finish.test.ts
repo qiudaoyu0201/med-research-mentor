@@ -674,3 +674,19 @@ test("scientific slide emphasis preserves labels, values and every source bullet
     }
   }
 });
+
+test("mixed Latin and Chinese lines fit the actual export font width", () => {
+  const context = createCanvas(1, 1).getContext("2d");
+  context.font = "18pt Microsoft YaHei";
+  for (const text of [
+    "ABC阴性后DEF、ABC阳性后DEF",
+    "五个选项：无检测、ABC、DEF、",
+  ]) {
+    for (const line of wrapSlideText(text, 3.5, 18)) {
+      assert.ok(
+        context.measureText(line).width <= 3.5 * 96,
+        "The estimated line must fit the real export font: " + line,
+      );
+    }
+  }
+});

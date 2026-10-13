@@ -22,7 +22,8 @@ export type SlideShape = {
 };
 export const slideSize = { width: 13.333333, height: 7.5 };
 export function wrapSlideText(text: string, width: number, fontSize: number) {
-  // Office glyph placement needs room beyond nominal character widths.
+  // Reserve room for Office glyph placement. Mixed Latin/CJK labels such as
+  // repeated acronyms overflowed the former 0.52-em Latin estimate in PowerPoint.
   const limit = (width * 72 * 0.95) / fontSize,
     lines: string[] = [];
   for (const paragraph of text.split("\n")) {
@@ -49,7 +50,7 @@ export function wrapSlideText(text: string, width: number, fontSize: number) {
     }
     for (const word of words) {
       const units = [...word].reduce(
-        (n, c) => n + (/[\x00-\x7f]/.test(c) ? 0.52 : 1),
+        (n, c) => n + (/[\x00-\x7f]/.test(c) ? 0.62 : 1),
         0,
       );
       if (length + units > limit && line) {
@@ -59,7 +60,7 @@ export function wrapSlideText(text: string, width: number, fontSize: number) {
       }
       if (units > limit) {
         for (const c of word) {
-          const u = /[\x00-\x7f]/.test(c) ? 0.52 : 1;
+          const u = /[\x00-\x7f]/.test(c) ? 0.62 : 1;
           if (length + u > limit && line) {
             lines.push(line);
             line = "";
