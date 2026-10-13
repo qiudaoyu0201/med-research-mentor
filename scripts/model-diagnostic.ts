@@ -344,81 +344,111 @@ try {
     );
     try {
       counted.context = "product";
-      const manager = new TaskManager(
-        counted,
-        (group, taskId, value) => store.save(group, taskId, value),
-        "internal",
-      );
-      const run = await withRuleSnapshot(frozen.rules, async () => {
-        const run = await manager.start(
-          {
-            paperId: frozen.paper.id,
-            module: frozen.manifest.module,
-            mode: "live",
-            profileId: "beginner",
-            question: frozen.manifest.question,
-            sourceIds: frozen.manifest.sourceIds,
-            taughtConcepts: [],
-            ...(frozen.manifest.module === "ppt"
-              ? { slideCount: frozen.manifest.slideCount }
-              : {}),
-            checks: { readability: true, reason: "当前模型小批内部诊断" },
-          },
-          frozen.paper,
-          undefined,
-          undefined,
-          { signal: controller.signal },
+      let artifact: unknown;
+      let sources: { id: string; text: string; locator: string }[];
+      let image: string | undefined;
+      if (frozen.manifest.module === "research-plan") {
+        const { runDiagnosticPlan } =
+          await import("../server/diagnostic-plan.ts");
+        const result = await withRuleSnapshot(frozen.rules, () =>
+          runDiagnosticPlan({
+            provider: counted,
+            manifest: frozen.manifest,
+            paper: frozen.paper,
+            signal: controller.signal,
+            persist: (group, taskId, value) => store.save(group, taskId, value),
+            progress: async (value) => {
+              Object.assign(report, value);
+              await persist();
+            },
+          }),
         );
-        report.runId = run.id;
+        report.assessment = result.assessment;
+        report.roleMetrics = result.roleMetrics;
+        artifact = result.artifact;
+        sources = result.sources;
         await persist();
-        await manager.wait(run.id);
-        return run;
-      });
-      report.roleMetrics = run.budget?.attempts.map((a) => ({
-        id: a.id,
-        role: a.role,
-        status: a.status,
-        durationMs: a.durationMs,
-        outputChars: a.outputChars,
-        meaningfulChars: a.rawOutput?.trimEnd().length ?? null,
-        timing: a.timing,
-        observation: a.observation,
-      }));
-      report.assessment = {
-        runStatus: run.status,
-        mainlinePassed: mainlineDevelopmentAcceptance(run),
-        strictPassed: strictDevelopmentAcceptance(run),
-        unresolvedIssues: run.review?.issues.filter((i) => !i.resolved),
-        breakpoints: run.novice?.breakpoints.filter(
-          (p) => p.status !== "resolved",
-        ),
-      };
-      await persist();
-      if (run.status !== "completed" || !run.result)
-        throw new Error(run.error ?? run.status);
+      } else {
+        const module = frozen.manifest.module;
+        const manager = new TaskManager(
+          counted,
+          (group, taskId, value) => store.save(group, taskId, value),
+          "internal",
+        );
+        const run = await withRuleSnapshot(frozen.rules, async () => {
+          const run = await manager.start(
+            {
+              paperId: frozen.paper.id,
+              module,
+              mode: "live",
+              profileId: "beginner",
+              question: frozen.manifest.question,
+              sourceIds: frozen.manifest.sourceIds,
+              taughtConcepts: [],
+              ...(frozen.manifest.module === "ppt"
+                ? { slideCount: frozen.manifest.slideCount }
+                : {}),
+              checks: { readability: true, reason: "当前模型小批内部诊断" },
+            },
+            frozen.paper,
+            undefined,
+            undefined,
+            { signal: controller.signal },
+          );
+          report.runId = run.id;
+          await persist();
+          await manager.wait(run.id);
+          return run;
+        });
+        report.roleMetrics = run.budget?.attempts.map((a) => ({
+          id: a.id,
+          role: a.role,
+          status: a.status,
+          durationMs: a.durationMs,
+          outputChars: a.outputChars,
+          meaningfulChars: a.rawOutput?.trimEnd().length ?? null,
+          timing: a.timing,
+          observation: a.observation,
+        }));
+        report.assessment = {
+          runStatus: run.status,
+          mainlinePassed: mainlineDevelopmentAcceptance(run),
+          strictPassed: strictDevelopmentAcceptance(run),
+          unresolvedIssues: run.review?.issues.filter((i) => !i.resolved),
+          breakpoints: run.novice?.breakpoints.filter(
+            (p) => p.status !== "resolved",
+          ),
+        };
+        await persist();
+        if (run.status !== "completed" || !run.result)
+          throw new Error(run.error ?? run.status);
+        const material = materialSources(run, frozen.paper);
+        sources = material.map((s) => ({
+          id: s.id,
+          text: s.text,
+          locator: s.locator,
+        }));
+        const { pptImagePacket } =
+          await import("../server/ppt-image-packet.ts");
+        image =
+          frozen.manifest.module === "ppt"
+            ? await pptImagePacket(material)
+            : undefined;
+        artifact = { unit: run.result, deck: run.deck ?? null };
+      }
       if (
         report.batch.budget.attempts.some((a: any) => a.status !== "succeeded")
       )
         throw new Error("产物请求未全部成功，不再派发独立评价。");
       counted.context = "independent-evaluation";
-      const sources = materialSources(run, frozen.paper);
-      const { pptImagePacket } = await import("../server/ppt-image-packet.ts");
-      const image =
-        frozen.manifest.module === "ppt"
-          ? await pptImagePacket(sources)
-          : undefined;
       report.evaluation = await reviewArtifact(
         counted,
         {
           question: frozen.manifest.question,
           conditions: "只评价本轮来源范围，不声称整篇论文或真人学习效果。",
           criteria: frozen.manifest.criteria,
-          artifact: { unit: run.result, deck: run.deck ?? null },
-          sources: sources.map((s) => ({
-            id: s.id,
-            text: s.text,
-            locator: s.locator,
-          })),
+          artifact,
+          sources,
           evaluatorVersion: "explanation-v1",
         },
         controller.signal,

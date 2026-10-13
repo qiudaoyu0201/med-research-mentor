@@ -2,6 +2,7 @@ import { z } from "zod";
 import { digest } from "./materials.ts";
 import type { TrainingBatch } from "./internal-training.ts";
 import type { TaskTiming } from "../shared/types.ts";
+import { studyTypeIds } from "../shared/research-plan.ts";
 
 export const diagnosticManifest = z
   .object({
@@ -12,7 +13,23 @@ export const diagnosticManifest = z
     model: z.literal("gpt-6.1-sol"),
     parentReport: z.string().min(1),
     paperPath: z.string().min(1),
-    module: z.enum(["paper", "ppt"]),
+    module: z.enum(["paper", "ppt", "research-plan"]),
+    plan: z
+      .object({
+        conditions: z.string().trim().min(1).max(5000),
+        studyTypes: z
+          .array(z.enum(studyTypeIds))
+          .min(1)
+          .max(studyTypeIds.length),
+        revision: z
+          .object({
+            conditions: z.string().trim().min(1).max(5000),
+            instruction: z.string().trim().min(1).max(3000),
+          })
+          .strict(),
+      })
+      .strict()
+      .optional(),
     question: z.string().trim().min(1).max(3000),
     sourceIds: z.array(z.string().min(1)).min(1).max(20),
     criteria: z.array(z.string().min(1)).min(3).max(12),
@@ -22,7 +39,22 @@ export const diagnosticManifest = z
     previousDiagnostic: z.string().min(1).optional(),
     structuredDelivery: z.enum(["native", "json-string"]).default("native"),
   })
-  .strict();
+  .strict()
+  .superRefine((value, context) => {
+    if ((value.module === "research-plan") !== !!value.plan)
+      context.addIssue({
+        code: "custom",
+        path: ["plan"],
+        message:
+          "研究方案诊断必须提供条件及一次条件变更；其他模块不得携带方案配置。",
+      });
+    if (value.module === "research-plan" && value.sourceIds.length > 12)
+      context.addIssue({
+        code: "custom",
+        path: ["sourceIds"],
+        message: "研究方案最多绑定12个来源。",
+      });
+  });
 export type DiagnosticManifest = z.infer<typeof diagnosticManifest>;
 export const diagnosticLimit = 8;
 // Temporary pilot settings, not online defaults or a claim of optimal latency.
