@@ -1,7 +1,7 @@
 import { z } from "zod";
 import { digest } from "./materials.ts";
 import type { TrainingBatch } from "./internal-training.ts";
-import type { TaskTiming } from "../shared/types.ts";
+import type { TaskTiming, Source } from "../shared/types.ts";
 import { studyTypeIds } from "../shared/research-plan.ts";
 
 export const diagnosticManifest = z
@@ -204,4 +204,16 @@ export function finishedDiagnostic(previous: {
   )
     throw new Error("前诊断未确认停止，不能另起请求；保留原消耗。");
   return prior + calls.length;
+}
+
+// Preserve the reading task's actual image exposure and source binding.
+export function diagnosticReadingImage(
+  visibleImage: string | undefined,
+  sources: Pick<Source, "id" | "image">[],
+) {
+  if (!visibleImage) return undefined;
+  const source = sources.find((s) => s.image === visibleImage);
+  if (!source)
+    throw new Error("带读独立评价的原图无法绑定到本任务来源。");
+  return { image: visibleImage, imageSourceId: source.id };
 }

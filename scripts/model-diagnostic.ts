@@ -7,6 +7,7 @@ import {
   diagnosticManifest,
   diagnosticLimit,
   diagnosticTiming,
+  diagnosticReadingImage,
   stoppedParent,
   assertDiagnosticRun,
   diagnosticMetrics,
@@ -349,6 +350,7 @@ try {
       let artifact: unknown;
       let sources: { id: string; text: string; locator: string }[];
       let image: string | undefined;
+      let imageSourceId: string | undefined;
       if (frozen.manifest.module === "research-plan") {
         const { runDiagnosticPlan } =
           await import("../server/diagnostic-plan.ts");
@@ -432,10 +434,16 @@ try {
         }));
         const { pptDeckImagePacket } =
           await import("../server/ppt-image-packet.ts");
-        image =
-          frozen.manifest.module === "ppt"
-            ? await pptDeckImagePacket(run.deck, material)
-            : undefined;
+        if (frozen.manifest.module === "ppt") {
+          image = await pptDeckImagePacket(run.deck, material);
+        } else {
+          const evidence = diagnosticReadingImage(
+            run.input.visibleImage,
+            material,
+          );
+          image = evidence?.image;
+          imageSourceId = evidence?.imageSourceId;
+        }
         artifact = { unit: run.result, deck: run.deck ?? null };
       }
       if (
@@ -454,7 +462,10 @@ try {
           evaluatorVersion:
             frozen.manifest.module === "ppt"
               ? "explanation-and-deck-images-v3-visible-text"
-              : "explanation-v2-visible-text",
+              : imageSourceId
+                ? "explanation-and-original-image-v1-visible-text"
+                : "explanation-v2-visible-text",
+          ...(imageSourceId ? { imageSourceId } : {}),
         },
         controller.signal,
         image,

@@ -8,6 +8,7 @@ import {
   assertContinuation,
   reserveUnit,
   validateReview,
+  reviewArtifact,
   type TrainingBatch,
   candidateRules,
   factualCriterion,
@@ -325,4 +326,53 @@ test("visible-text evaluation rejects metadata locations while preserving actual
     assert.equal(result.valid, true);
     assert.equal(result.passed, false);
   }
+});
+
+test("reading review receives the original image and source binding; absent or mismatched evidence never dispatches", async () => {
+  const image = "data:image/png;base64,source-image";
+  let calls = 0;
+  let receivedImage: string | undefined;
+  let receivedInput: any;
+  const provider: Provider = {
+    model: "fixture",
+    async generate(_instructions, input, schema, _signal, visibleImage) {
+      calls++;
+      receivedImage = visibleImage;
+      receivedInput = input;
+      return { output: schema.parse({ checks: [{
+        criterion: "核对图中读数", passed: true,
+        location: "可见曲线", sourceIds: ["figure"],
+        explanation: "本测试只核对原图输入是否送达，不评定科学正确性。",
+      }] }) };
+    },
+  };
+  const input = {
+    question: "解释曲线", conditions: "仅所给原图",
+    criteria: ["核对图中读数"], artifact: { title: "可见曲线" },
+    sources: [{ id: "figure", text: "图注未逐一抄录数值", locator: "Figure 2" }],
+    evaluatorVersion: "explanation-and-original-image-v1-visible-text" as const,
+    imageSourceId: "figure",
+  };
+  const signal = new AbortController().signal;
+  const reviewed = await reviewArtifact(provider, input, signal, image);
+  assert.equal(reviewed.valid, true);
+  assert.equal(receivedImage, image);
+  assert.equal(receivedInput.imageSourceId, "figure");
+  assert.deepEqual(receivedInput.sources, input.sources);
+  for (const bad of [
+    { value: input, image: undefined },
+    { value: { ...input, imageSourceId: undefined }, image },
+    { value: { ...input, imageSourceId: "other" }, image },
+  ]) {
+    await assert.rejects(
+      reviewArtifact(provider, bad.value, signal, bad.image), /未派发/,
+    );
+  }
+  assert.equal(calls, 1);
+  await reviewArtifact(provider, {
+    ...input, evaluatorVersion: "explanation-v2-visible-text",
+    imageSourceId: undefined,
+  }, signal);
+  assert.equal(calls, 2);
+  assert.equal(receivedImage, undefined);
 });

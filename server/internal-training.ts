@@ -291,24 +291,37 @@ export async function reviewArtifact(
       | "explanation-v1"
       | "explanation-v2-visible-text"
       | "explanation-and-deck-images-v2"
-      | "explanation-and-deck-images-v3-visible-text";
+      | "explanation-and-deck-images-v3-visible-text"
+      | "explanation-and-original-image-v1-visible-text";
+    imageSourceId?: string;
   },
   signal: AbortSignal,
   image?: string,
 ) {
+  if (
+    input.evaluatorVersion === "explanation-and-original-image-v1-visible-text" &&
+    (!image ||
+      !input.imageSourceId ||
+      !input.sources.some((s) => s.id === input.imageSourceId))
+  )
+    throw new Error("带读原图评价缺少图片或有效的来源绑定，未派发评价请求。");
   const result = await provider.generate(
     input.evaluatorVersion === "explanation-v1" ||
       input.evaluatorVersion === "explanation-v2-visible-text" ||
       input.evaluatorVersion === "explanation-and-deck-images-v2" ||
-      input.evaluatorVersion === "explanation-and-deck-images-v3-visible-text"
+      input.evaluatorVersion === "explanation-and-deck-images-v3-visible-text" ||
+      input.evaluatorVersion === "explanation-and-original-image-v1-visible-text"
       ? explanationReviewInstructions +
           (input.evaluatorVersion?.endsWith("visible-text")
             ? "\n面向用户的正文与讲稿只指title、sections中的title/text、terms中的name/explanation、slides的title/bullets/notes、speechScript及方案内容。citations、imageSource、imageCrop、kind、引用副本和版式字段是结构化元数据；这些字段合法保留来源ID不构成正文出现内部编号。若正文或备注自身出现内部问题编号仍须失败。评价位置必须给实际正文标题或逐字原句，不能将JSON字段片段或元数据当作正文定位。"
             : "") +
           (input.evaluatorVersion === "explanation-and-deck-images-v2" ||
-          input.evaluatorVersion ===
-            "explanation-and-deck-images-v3-visible-text"
+          input.evaluatorVersion === "explanation-and-deck-images-v3-visible-text"
             ? "\n图片为各页实际展示区域，页标签仅定位展示位置，不是新的引用ID。逐页对照图件区域与标题、要点和讲述提示；未出现在当前裁剪中的内容不能声称已在该页图中展示。原文可支持额外事实，但不能代替对应页面的图件检查。本次仍未看到导出排版，不据此宣称实际PPT排版通过。"
+            : "") +
+          (input.evaluatorVersion ===
+            "explanation-and-original-image-v1-visible-text"
+            ? "\n图片是本轮带读实际提供的原图，imageSourceId绑定其来源。结合该来源文字和原图检查分组、线型、刻度、数值与结论；图中清晰可见的信息属于已提供证据，不能仅因图注文字没有重复数字便判作未提供。模糊、遮挡或图中不可见的关键内容仍须明确未确认，不据图补造精确值。其他来源有图注不等于本轮提供了其他图片；不把这张原图当成导出的PPT页面。"
             : "")
       : reviewInstructions,
     input,

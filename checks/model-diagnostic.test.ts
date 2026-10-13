@@ -4,6 +4,7 @@ import {
   diagnosticManifest,
   diagnosticLimit,
   diagnosticTiming,
+  diagnosticReadingImage,
   assertDiagnosticRun,
   stoppedParent,
   diagnosticMetrics,
@@ -113,4 +114,18 @@ test("later diagnostics inherit prior attempts and never treat uncertain request
   assert.throws(() => finishedDiagnostic({ ...previous, status: "running" }));
   delete b.budget.attempts[0].observation!.remoteTerminal;
   assert.throws(() => finishedDiagnostic(previous));
+});
+
+test("reading evaluation binds the image actually shown rather than the first figure", () => {
+  const sources = [
+    { id: "figure-a", image: "original-a" },
+    { id: "figure-b", image: "original-b" },
+    { id: "method-text" },
+  ];
+  assert.deepEqual(diagnosticReadingImage("original-b", sources), {
+    image: "original-b",
+    imageSourceId: "figure-b",
+  });
+  assert.equal(diagnosticReadingImage(undefined, sources), undefined);
+  assert.throws(() => diagnosticReadingImage("unbound-image", sources), /无法绑定/);
 });
