@@ -1,7 +1,7 @@
 import { z } from "zod";
 import { digest } from "./materials.ts";
 import type { TrainingBatch } from "./internal-training.ts";
-import type { TaskTiming, Source } from "../shared/types.ts";
+import type { TaskTiming, Source, RoleRecord } from "../shared/types.ts";
 import { studyTypeIds } from "../shared/research-plan.ts";
 
 export const diagnosticManifest = z
@@ -213,7 +213,57 @@ export function diagnosticReadingImage(
 ) {
   if (!visibleImage) return undefined;
   const source = sources.find((s) => s.image === visibleImage);
-  if (!source)
-    throw new Error("带读独立评价的原图无法绑定到本任务来源。");
+  if (!source) throw new Error("带读独立评价的原图无法绑定到本任务来源。");
   return { image: visibleImage, imageSourceId: source.id };
+}
+
+// Use recorded generator inputs, never reconstruct evidence from full source pages.
+const diagnosticPacket = z.object({
+  blocks: z
+    .array(z.object({ hash: z.string().min(1), text: z.string().min(1) }))
+    .min(1),
+  references: z
+    .array(
+      z.object({
+        id: z.string().min(1),
+        locator: z.string().min(1),
+        blockHash: z.string().min(1),
+      }),
+    )
+    .min(1),
+});
+export function diagnosticVisibleSources(
+  roles: Pick<RoleRecord, "role" | "input">[],
+) {
+  const generated = roles.filter(
+    (r) => r.role === "teaching" || r.role === "revision",
+  );
+  if (!generated.length)
+    throw new Error("独立评价缺少实际生成资料包，未派发评价请求。");
+  const visible = new Map<
+    string,
+    { id: string; text: string; locator: string }
+  >();
+  for (const role of generated) {
+    const parsed = z
+      .object({ sources: diagnosticPacket })
+      .safeParse(role.input);
+    if (!parsed.success)
+      throw new Error("独立评价的实际生成资料包无效，未派发评价请求。");
+    const blocks = new Map<string, string>();
+    for (const block of parsed.data.sources.blocks) {
+      if (blocks.has(block.hash) && blocks.get(block.hash) !== block.text)
+        throw new Error("独立评价资料块绑定存在歧义，未派发评价请求。");
+      blocks.set(block.hash, block.text);
+    }
+    for (const ref of parsed.data.sources.references) {
+      const text = blocks.get(ref.blockHash);
+      if (text === undefined)
+        throw new Error("独立评价来源无法绑定到实际资料块，未派发评价请求。");
+      const source = { id: ref.id, text, locator: ref.locator };
+      // The original-page hash can be shared by different actual excerpts.
+      visible.set(digest(source), source);
+    }
+  }
+  return [...visible.values()];
 }

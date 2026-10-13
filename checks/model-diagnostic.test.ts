@@ -5,6 +5,7 @@ import {
   diagnosticLimit,
   diagnosticTiming,
   diagnosticReadingImage,
+  diagnosticVisibleSources,
   assertDiagnosticRun,
   stoppedParent,
   diagnosticMetrics,
@@ -127,5 +128,84 @@ test("reading evaluation binds the image actually shown rather than the first fi
     imageSourceId: "figure-b",
   });
   assert.equal(diagnosticReadingImage(undefined, sources), undefined);
-  assert.throws(() => diagnosticReadingImage("unbound-image", sources), /无法绑定/);
+  assert.throws(
+    () => diagnosticReadingImage("unbound-image", sources),
+    /无法绑定/,
+  );
+});
+
+function exposedRole(role: string, text: string, hash = "page-hash") {
+  return {
+    role,
+    input: {
+      sources: {
+        blocks: [{ hash, text }],
+        references: [
+          {
+            id: "page",
+            locator: "PDF p4",
+            blockHash: hash,
+            caption: "Hidden full caption must not leak into review",
+          },
+        ],
+      },
+    },
+  };
+}
+test("diagnostic uses actual excerpts and merges revision exposure even with the same original-page hash", () => {
+  const teaching = exposedRole("teaching", "[0–5] visible A");
+  const revision = exposedRole("revision", "[8–12] visible B");
+  const result = diagnosticVisibleSources([
+    teaching,
+    exposedRole("grounding", "hidden entire page"),
+    revision,
+    revision,
+    exposedRole("novice", "hidden novice source"),
+  ]);
+  assert.deepEqual(result, [
+    { id: "page", locator: "PDF p4", text: "[0–5] visible A" },
+    { id: "page", locator: "PDF p4", text: "[8–12] visible B" },
+  ]);
+  assert.ok(!JSON.stringify(result).includes("Hidden"));
+  assert.deepEqual(diagnosticVisibleSources([revision]), [result[1]]);
+  const complete = exposedRole("revision", "Actually delivered complete page");
+  assert.equal(
+    diagnosticVisibleSources([teaching, complete])[1].text,
+    "Actually delivered complete page",
+  );
+});
+test("missing, malformed and ambiguous generator evidence is rejected before evaluation", () => {
+  for (const roles of [
+    [],
+    [exposedRole("novice", "unused")],
+    [{ role: "teaching", input: {} }],
+    [{ role: "revision", input: { sources: { blocks: [], references: [] } } }],
+    [
+      {
+        role: "teaching",
+        input: {
+          sources: {
+            blocks: [{ hash: "other", text: "unbound" }],
+            references: [{ id: "page", locator: "p4", blockHash: "missing" }],
+          },
+        },
+      },
+    ],
+    [
+      {
+        role: "teaching",
+        input: {
+          sources: {
+            blocks: [
+              { hash: "same", text: "a" },
+              { hash: "same", text: "b" },
+            ],
+            references: [{ id: "page", locator: "p4", blockHash: "same" }],
+          },
+        },
+      },
+    ],
+    [exposedRole("teaching", "valid"), { role: "revision", input: {} }],
+  ])
+    assert.throws(() => diagnosticVisibleSources(roles), /未派发/);
 });

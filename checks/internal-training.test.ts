@@ -333,10 +333,12 @@ test("reading review receives the original image and source binding; absent or m
   let calls = 0;
   let receivedImage: string | undefined;
   let receivedInput: any;
+  let receivedInstructions = "";
   const provider: Provider = {
     model: "fixture",
     async generate(_instructions, input, schema, _signal, visibleImage) {
       calls++;
+      receivedInstructions = _instructions;
       receivedImage = visibleImage;
       receivedInput = input;
       return { output: schema.parse({ checks: [{
@@ -352,12 +354,15 @@ test("reading review receives the original image and source binding; absent or m
     sources: [{ id: "figure", text: "图注未逐一抄录数值", locator: "Figure 2" }],
     evaluatorVersion: "explanation-and-original-image-v1-visible-text" as const,
     imageSourceId: "figure",
+    sourceExposure: "actual-generation-packets-v1" as const,
   };
   const signal = new AbortController().signal;
   const reviewed = await reviewArtifact(provider, input, signal, image);
   assert.equal(reviewed.valid, true);
   assert.equal(receivedImage, image);
   assert.equal(receivedInput.imageSourceId, "figure");
+  assert.equal(receivedInput.sourceExposure, "actual-generation-packets-v1");
+  assert.match(receivedInstructions, /不把未提供的文字判为漏读/);
   assert.deepEqual(receivedInput.sources, input.sources);
   for (const bad of [
     { value: input, image: undefined },

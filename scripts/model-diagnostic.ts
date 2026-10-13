@@ -8,6 +8,7 @@ import {
   diagnosticLimit,
   diagnosticTiming,
   diagnosticReadingImage,
+  diagnosticVisibleSources,
   stoppedParent,
   assertDiagnosticRun,
   diagnosticMetrics,
@@ -427,11 +428,7 @@ try {
         if (run.status !== "completed" || !run.result)
           throw new Error(run.error ?? run.status);
         const material = materialSources(run, frozen.paper);
-        sources = material.map((s) => ({
-          id: s.id,
-          text: s.text,
-          locator: s.locator,
-        }));
+        sources = diagnosticVisibleSources(run.roles);
         const { pptDeckImagePacket } =
           await import("../server/ppt-image-packet.ts");
         if (frozen.manifest.module === "ppt") {
@@ -465,6 +462,9 @@ try {
               : imageSourceId
                 ? "explanation-and-original-image-v1-visible-text"
                 : "explanation-v2-visible-text",
+          ...(frozen.manifest.module !== "research-plan"
+            ? { sourceExposure: "actual-generation-packets-v1" as const }
+            : {}),
           ...(imageSourceId ? { imageSourceId } : {}),
         },
         controller.signal,
