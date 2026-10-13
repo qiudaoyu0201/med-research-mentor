@@ -120,22 +120,32 @@ export function watchRequest(
   const controller = new AbortController();
   const timers = new Set<NodeJS.Timeout>();
   let outputTimer: NodeJS.Timeout | undefined,
+    outputTargetTimer: NodeJS.Timeout | undefined,
     outputLength = 0;
   const after = (ms: number, work: () => void) => {
-    const timer = setTimeout(work, Math.max(0, ms));
+    const timer = setTimeout(
+      () => {
+        timers.delete(timer);
+        work();
+      },
+      Math.max(0, ms),
+    );
     timers.add(timer);
     return timer;
   };
   const diagnose = (ms: number | undefined, layer: string) => {
     if (ms === undefined) return;
-    after(ms, () => {
+    return after(ms, () => {
       if (!controller.signal.aborted && !signal.aborted)
         emit({ type: "diagnosis", at: new Date().toISOString(), layer });
     });
   };
   diagnose(timing.targetTaskMs, "target-task");
   diagnose(timing.targetRequestMs, "target-request");
-  diagnose(timing.targetFirstOutputMs, "target-first-output");
+  const firstOutputTargetTimer = diagnose(
+    timing.targetFirstOutputMs,
+    "target-first-output",
+  );
   const stop = (layer: string) => {
     if (controller.signal.aborted || signal.aborted) return;
     emit({ type: "timeout", at: new Date().toISOString(), layer });
@@ -162,12 +172,20 @@ export function watchRequest(
         event.type === "output" ? (event.text?.trimEnd().length ?? 0) : 0;
       if (event.type !== "output" || meaningfulLength <= outputLength) return;
       outputLength = meaningfulLength;
+      if (firstOutputTargetTimer) {
+        clearTimeout(firstOutputTargetTimer);
+        timers.delete(firstOutputTargetTimer);
+      }
+      if (outputTargetTimer) {
+        clearTimeout(outputTargetTimer);
+        timers.delete(outputTargetTimer);
+      }
       if (outputTimer) {
         clearTimeout(outputTimer);
         timers.delete(outputTimer);
       }
       outputTimer = after(timing.idleMs, () => stop("output-idle"));
-      diagnose(timing.targetIdleMs, "target-output-idle");
+      outputTargetTimer = diagnose(timing.targetIdleMs, "target-output-idle");
     },
     close() {
       timers.forEach(clearTimeout);

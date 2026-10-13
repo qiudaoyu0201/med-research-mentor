@@ -7,12 +7,14 @@ import {
   assertDiagnosticRun,
   stoppedParent,
   diagnosticMetrics,
+  finishedDiagnostic,
 } from "../server/model-diagnostic.ts";
 import { BudgetLedger } from "../server/budget.ts";
 import type { TrainingBatch } from "../server/internal-training.ts";
 function batch(): TrainingBatch {
   const budget = new BudgetLedger("pilot", async () => {}).state;
   budget.limit = budget.groupLimit = diagnosticLimit;
+  budget.timing = structuredClone(diagnosticTiming);
   return {
     id: "pilot",
     phase: "M1",
@@ -95,4 +97,20 @@ test("pilot binds Sol explicitly and keeps timing targets below protection limit
   );
   assert.ok(diagnosticTiming.targetRequestMs! < diagnosticTiming.requestMs);
   assert.ok(diagnosticTiming.targetIdleMs! < diagnosticTiming.idleMs);
+});
+
+test("later diagnostics inherit prior attempts and never treat uncertain requests as free retries", () => {
+  const b = batch();
+  b.status = "stopped";
+  b.budget.attempts.push({
+    id: "cut",
+    status: "unknown",
+    tokens: {},
+    observation: { remoteTerminal: "interrupted" },
+  } as any);
+  const previous = { status: "stopped", batch: b, priorDiagnosticCalls: 3 };
+  assert.equal(finishedDiagnostic(previous), 4);
+  assert.throws(() => finishedDiagnostic({ ...previous, status: "running" }));
+  delete b.budget.attempts[0].observation!.remoteTerminal;
+  assert.throws(() => finishedDiagnostic(previous));
 });

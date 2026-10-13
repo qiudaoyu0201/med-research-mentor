@@ -18,6 +18,8 @@ export const diagnosticManifest = z
     criteria: z.array(z.string().min(1)).min(3).max(12),
     slideCount: z.number().int().min(3).max(6).default(4),
     onlineUrl: z.string().url(),
+    sharedAddition: z.string().max(3000).default(""),
+    previousDiagnostic: z.string().min(1).optional(),
   })
   .strict();
 export type DiagnosticManifest = z.infer<typeof diagnosticManifest>;
@@ -97,6 +99,7 @@ export function assertDiagnosticRun(
     batch.budget.limit !== diagnosticLimit ||
     batch.cycleLimit !== diagnosticLimit ||
     batch.budget.groupLimit !== diagnosticLimit ||
+    digest(batch.budget.timing) !== digest(diagnosticTiming) ||
     contractHash !== currentHash
   )
     throw new Error("诊断额度或冻结输入已变化。");
@@ -136,4 +139,34 @@ export function diagnosticMetrics(batch: TrainingBatch) {
     amount: null,
     amountReason: "未取得账单；不以模型名称估算现金费用。",
   };
+}
+
+export function finishedDiagnostic(previous: {
+  status: string;
+  batch: TrainingBatch;
+  priorDiagnosticCalls?: number;
+}) {
+  const calls = previous.batch.budget.attempts;
+  const prior = previous.priorDiagnosticCalls ?? 0;
+  if (
+    ![
+      "stopped",
+      "cancelled",
+      "diagnostic-passed",
+      "needs-improvement",
+    ].includes(previous.status) ||
+    previous.batch.status === "running" ||
+    !Number.isSafeInteger(prior) ||
+    prior < 0 ||
+    new Set(calls.map((a) => a.id)).size !== calls.length ||
+    calls.some(
+      (a) =>
+        a.status !== "succeeded" &&
+        !["completed", "failed", "interrupted"].includes(
+          a.observation?.remoteTerminal ?? "",
+        ),
+    )
+  )
+    throw new Error("前诊断未确认停止，不能另起请求；保留原消耗。");
+  return prior + calls.length;
 }

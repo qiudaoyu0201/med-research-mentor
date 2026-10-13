@@ -290,3 +290,107 @@ test("internal unit admission reserves time using the experiment request limit",
   reserveUnit(batch, 1, 0);
   assert.throws(() => reserveUnit(batch, 2, 0));
 });
+
+test("soft first-output and idle diagnoses follow real output instead of accumulating timers", (context) => {
+  context.mock.timers.enable({ apis: ["setTimeout", "Date"], now: 0 });
+  const events: ProviderEvent[] = [];
+  const watch = watchRequest(
+    new AbortController().signal,
+    new Date(2000).toISOString(),
+    {
+      requestMs: 1500,
+      firstOutputMs: 1000,
+      idleMs: 300,
+      targetFirstOutputMs: 100,
+      targetIdleMs: 50,
+    },
+    (e) => events.push(e),
+  );
+  try {
+    for (let n = 1; n <= 100; n++) {
+      watch.observe({
+        type: "output",
+        text: "x".repeat(n),
+        at: new Date().toISOString(),
+      });
+      context.mock.timers.tick(5);
+    }
+    assert.equal(
+      events.length,
+      0,
+      "continuous real output must not report first-output or idle slowness",
+    );
+    context.mock.timers.tick(45);
+    assert.deepEqual(
+      events.map((e) => e.layer),
+      ["target-output-idle"],
+    );
+    assert.equal(watch.signal.aborted, false);
+    context.mock.timers.tick(100);
+    assert.equal(
+      events.length,
+      1,
+      "one stall produces only one soft diagnosis",
+    );
+    watch.observe({
+      type: "output",
+      text: "x".repeat(101),
+      at: new Date().toISOString(),
+    });
+    context.mock.timers.tick(49);
+    assert.equal(events.length, 1);
+    context.mock.timers.tick(1);
+    assert.equal(
+      events.length,
+      2,
+      "a new genuine stall can be diagnosed again",
+    );
+    context.mock.timers.tick(250);
+    assert.equal(watch.signal.aborted, true);
+    assert.equal(events.at(-1)?.layer, "output-idle");
+  } finally {
+    watch.close();
+  }
+});
+
+test("whitespace and heartbeats cannot reset a soft idle diagnostic or hide the hard limit", (context) => {
+  context.mock.timers.enable({ apis: ["setTimeout", "Date"], now: 0 });
+  const events: ProviderEvent[] = [];
+  const watch = watchRequest(
+    new AbortController().signal,
+    new Date(1000).toISOString(),
+    {
+      requestMs: 900,
+      firstOutputMs: 500,
+      idleMs: 200,
+      targetFirstOutputMs: 100,
+      targetIdleMs: 50,
+    },
+    (e) => events.push(e),
+  );
+  try {
+    watch.observe({
+      type: "output",
+      text: "answer",
+      at: new Date().toISOString(),
+    });
+    context.mock.timers.tick(40);
+    watch.observe({
+      type: "output",
+      text: "answer   ",
+      at: new Date().toISOString(),
+    });
+    watch.observe({ type: "response", at: new Date().toISOString() });
+    context.mock.timers.tick(10);
+    assert.deepEqual(
+      events.map((e) => e.layer),
+      ["target-output-idle"],
+    );
+    context.mock.timers.tick(150);
+    assert.equal(watch.signal.aborted, true);
+    assert.equal(events.at(-1)?.layer, "output-idle");
+    assert.equal(events.filter((e) => e.type === "diagnosis").length, 1);
+  } finally {
+    watch.close();
+  }
+});

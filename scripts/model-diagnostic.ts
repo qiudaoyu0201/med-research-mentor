@@ -10,6 +10,7 @@ import {
   stoppedParent,
   assertDiagnosticRun,
   diagnosticMetrics,
+  finishedDiagnostic,
   type DiagnosticManifest,
   type ParentEvidence,
 } from "../server/model-diagnostic.ts";
@@ -154,6 +155,9 @@ try {
     engineHash: digest(await trainingEngine()),
     planHash: await hashFile("docs/ITERATION.md"),
     parentHash: await hashFile(resolve(value.parentReport)),
+    previousDiagnosticHash: value.previousDiagnostic
+      ? await hashFile(resolve(value.previousDiagnostic))
+      : null,
   });
   if (command === "prepare") {
     await mkdir(directory, { recursive: true });
@@ -174,6 +178,13 @@ try {
     );
     const parentEvidence = await parentAdmission(parent);
     const history = stoppedParent(parent, parentEvidence);
+    const priorDiagnosticCalls = manifest!.previousDiagnostic
+      ? finishedDiagnostic(
+          JSON.parse(
+            await readFile(resolve(manifest!.previousDiagnostic), "utf8"),
+          ),
+        )
+      : 0;
     const paper: PaperBundle = JSON.parse(
       await readFile(resolve(manifest!.paperPath), "utf8"),
     );
@@ -186,6 +197,8 @@ try {
     )
       throw new Error("样本来源绑定无效。");
     const rules = await freezeRules();
+    if (manifest!.sharedAddition)
+      rules.shared += "\n" + manifest!.sharedAddition;
     const contract = await bindings(manifest!, paper, rules);
     const budget = new BudgetLedger(
       id,
@@ -216,6 +229,7 @@ try {
       contractHash: digest(contract),
       history,
       parentEvidence,
+      priorDiagnosticCalls,
       scope:
         "独立八次诊断；父周期调用保持原状，不使用旧余额，不构成候选发布、盲测或真人效果证据。",
     });
@@ -247,6 +261,16 @@ try {
     report.parentEvidence = await parentAdmission(parent);
     stoppedParent(parent, report.parentEvidence);
     if (
+      frozen.manifest.previousDiagnostic &&
+      report.priorDiagnosticCalls !==
+        finishedDiagnostic(
+          JSON.parse(
+            await readFile(resolve(frozen.manifest.previousDiagnostic), "utf8"),
+          ),
+        )
+    )
+      throw new Error("前诊断累计变化，停止派发。");
+    if (
       await access(pausePath).then(
         () => true,
         () => false,
@@ -276,7 +300,12 @@ try {
       Date.now() + diagnosticTiming.taskMs,
     ).toISOString();
     const persist = async () => {
-      report.metrics = diagnosticMetrics(report.batch);
+      report.metrics = {
+        ...diagnosticMetrics(report.batch),
+        priorDiagnosticCalls: report.priorDiagnosticCalls,
+        combinedDiagnosticCalls:
+          report.priorDiagnosticCalls + report.batch.budget.attempts.length,
+      };
       await store.save("diagnostic", "report", report);
     };
     await persist(); // Durable claim before the first provider request.
@@ -335,6 +364,16 @@ try {
         await manager.wait(run.id);
         return run;
       });
+      report.roleMetrics = run.budget?.attempts.map((a) => ({
+        id: a.id,
+        role: a.role,
+        status: a.status,
+        durationMs: a.durationMs,
+        outputChars: a.outputChars,
+        meaningfulChars: a.rawOutput?.trimEnd().length ?? null,
+        timing: a.timing,
+        observation: a.observation,
+      }));
       report.assessment = {
         runStatus: run.status,
         mainlinePassed: mainlineDevelopmentAcceptance(run),
@@ -353,6 +392,11 @@ try {
         throw new Error("产物请求未全部成功，不再派发独立评价。");
       counted.context = "independent-evaluation";
       const sources = materialSources(run, frozen.paper);
+      const { pptImagePacket } = await import("../server/ppt-image-packet.ts");
+      const image =
+        frozen.manifest.module === "ppt"
+          ? await pptImagePacket(sources)
+          : undefined;
       report.evaluation = await reviewArtifact(
         counted,
         {
@@ -368,6 +412,7 @@ try {
           evaluatorVersion: "explanation-v1",
         },
         controller.signal,
+        image,
       );
       report.status =
         report.assessment.strictPassed &&
