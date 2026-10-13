@@ -37,7 +37,9 @@ export const diagnosticManifest = z
     onlineUrl: z.string().url(),
     sharedAddition: z.string().max(3000).default(""),
     previousDiagnostic: z.string().min(1).optional(),
-    structuredDelivery: z.enum(["native", "json-string"]).default("native"),
+    structuredDelivery: z
+      .enum(["native", "json-string", "json-string-native-novice"])
+      .default("native"),
   })
   .strict()
   .superRefine((value, context) => {

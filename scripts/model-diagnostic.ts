@@ -82,9 +82,11 @@ try {
     (await store.read<{ manifest: DiagnosticManifest }>("freeze", "inputs"))
       .manifest.structuredDelivery;
   const provider =
-    mode === "json-string"
-      ? new DiagnosticJsonProvider(rawProvider)
-      : rawProvider;
+    mode === "native"
+      ? rawProvider
+      : new DiagnosticJsonProvider(rawProvider, {
+          nativeNovice: mode === "json-string-native-novice",
+        });
   if (provider.model !== "gpt-6.1-sol")
     throw new Error("本诊断必须显式选用 gpt-6.1-sol，不回退模型。");
   const parentAdmission = async (parent: { batches: TrainingBatch[] }) => {

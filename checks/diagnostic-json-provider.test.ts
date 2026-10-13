@@ -125,3 +125,124 @@ test("double JSON encoding preserves multiline scientific text, quotes, tabs and
   assert.equal(calls, 1);
   assert.equal(adapted.id, "fixture:json-string-v2");
 });
+
+test("explicit native novice mode forwards original schema, input and controls in one call", async () => {
+  const schema = z.object({
+    understood: z.array(z.string()),
+    breakpoints: z.array(z.object({ status: z.enum(["open", "resolved"]) })),
+  });
+  const input = { question: "理解原文", draft: "正文" };
+  const signal = new AbortController().signal,
+    image = "data:image/png;base64,fixture";
+  const observe = () => {},
+    control = { managedTiming: true as const };
+  let calls = 0;
+  const adapted = new DiagnosticJsonProvider(
+    {
+      id: "fixture",
+      model: "gpt-6.1-sol",
+      async generate(
+        rules,
+        receivedInput,
+        receivedSchema,
+        receivedSignal,
+        receivedImage,
+        receivedObserve,
+        receivedControl,
+      ) {
+        calls++;
+        assert.equal(receivedInput, input);
+        assert.equal(receivedSchema, schema);
+        assert.equal(receivedSignal, signal);
+        assert.equal(receivedImage, image);
+        assert.equal(receivedObserve, observe);
+        assert.equal(receivedControl, control);
+        assert.ok(rules.startsWith("original rules"));
+        assert.ok(rules.includes("不使用payload封装"));
+        return {
+          output: receivedSchema.parse({
+            understood: ["解释"],
+            breakpoints: [{ status: "open" }],
+          }),
+          usage: { total: 9 },
+        };
+      },
+    },
+    { nativeNovice: true },
+  );
+  const result = await adapted.generate(
+    "original rules",
+    input,
+    schema,
+    signal,
+    image,
+    observe,
+    control,
+  );
+  assert.equal(calls, 1);
+  assert.equal(adapted.id, "fixture:json-string-v3-native-novice");
+  assert.deepEqual(result, {
+    output: { understood: ["解释"], breakpoints: [{ status: "open" }] },
+    usage: { total: 9 },
+  });
+});
+test("native novice mode preserves validation failures without repair or fallback", async () => {
+  let calls = 0;
+  const adapted = new DiagnosticJsonProvider(
+    {
+      model: "gpt-6.1-sol",
+      async generate() {
+        calls++;
+        return { output: { understood: [], breakpoints: [] } } as any;
+      },
+    },
+    { nativeNovice: true },
+  );
+  await assert.rejects(
+    adapted.generate(
+      "rules",
+      {},
+      z.object({
+        understood: z.array(z.string()).min(1),
+        breakpoints: z.array(z.string()),
+      }),
+      new AbortController().signal,
+    ),
+    (e) => e instanceof ProviderFailure && e.kind === "format",
+  );
+  assert.equal(calls, 1);
+});
+test("native novice option leaves generation and grounding on the original string adapter", async () => {
+  let calls = 0;
+  const schema = z.object({
+    unit: z.object({ text: z.string() }),
+    deck: z.null(),
+  });
+  const adapted = new DiagnosticJsonProvider(
+    {
+      model: "gpt-6.1-sol",
+      async generate(_rules, input, wrapper) {
+        calls++;
+        assert.ok((input as any).originalInput);
+        return {
+          output: wrapper.parse({
+            payload: JSON.stringify({ unit: { text: "科学解释" }, deck: null }),
+          }),
+        };
+      },
+    },
+    { nativeNovice: true },
+  );
+  assert.deepEqual(
+    (
+      await adapted.generate(
+        "rules",
+        { question: "question" },
+        schema,
+        new AbortController().signal,
+      )
+    ).output,
+    { unit: { text: "科学解释" }, deck: null },
+  );
+  assert.equal(calls, 1);
+});
