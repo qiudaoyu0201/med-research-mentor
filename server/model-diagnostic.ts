@@ -20,6 +20,7 @@ export const diagnosticManifest = z
     onlineUrl: z.string().url(),
     sharedAddition: z.string().max(3000).default(""),
     previousDiagnostic: z.string().min(1).optional(),
+    structuredDelivery: z.enum(["native", "json-string"]).default("native"),
   })
   .strict();
 export type DiagnosticManifest = z.infer<typeof diagnosticManifest>;

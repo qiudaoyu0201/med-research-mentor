@@ -74,7 +74,17 @@ try {
   const { freezeRules, withRuleSnapshot } = await import("../server/skills.ts");
   const { BudgetLedger } = await import("../server/budget.ts");
   const { trainingAdmission } = await import("../server/training-admission.ts");
-  const provider = createProvider();
+  const { DiagnosticJsonProvider } =
+    await import("../server/diagnostic-json-provider.ts");
+  const rawProvider = createProvider();
+  const mode =
+    manifest?.structuredDelivery ??
+    (await store.read<{ manifest: DiagnosticManifest }>("freeze", "inputs"))
+      .manifest.structuredDelivery;
+  const provider =
+    mode === "json-string"
+      ? new DiagnosticJsonProvider(rawProvider)
+      : rawProvider;
   if (provider.model !== "gpt-6.1-sol")
     throw new Error("本诊断必须显式选用 gpt-6.1-sol，不回退模型。");
   const parentAdmission = async (parent: { batches: TrainingBatch[] }) => {
