@@ -518,6 +518,11 @@ export class TaskManager {
       run.events.push({ status, time: new Date().toISOString() });
       await this.persist("runs", run.id, run);
     };
+    // Keep binary images out of text packets and saved material snapshots, but
+    // restore them when selecting panels or rendering the actual review picture.
+    const images = new Map(paper.sources.map((s) => [s.id, s.image]));
+    const illustratedSources = () =>
+      sources.map((s) => ({ ...s, image: images.get(s.id) }));
     let reviewImage: string | undefined;
     const call = async <T>(
       role: string,
@@ -730,7 +735,7 @@ export class TaskManager {
         // never a second copy of its notes. Normal product schemas stay intact.
         const scopedSchema = () => {
           const baseSchema = groundedTeachingSchema(
-            sources,
+            illustratedSources(),
             run.input.speechScript,
           );
           return run.input.diagnosticScope && run.input.module === "ppt"
@@ -763,9 +768,9 @@ export class TaskManager {
           run.input.modules ?? [run.input.module]
         ).includes("ppt");
         if (!requestedDeck) generated = { ...generated, deck: null };
-        applyDeckPanels(generated.deck, sources);
+        applyDeckPanels(generated.deck, illustratedSources());
         reviewImage = requestedDeck
-          ? await pptDeckImagePacket(generated.deck, sources)
+          ? await pptDeckImagePacket(generated.deck, illustratedSources())
           : undefined;
         run.draft = generated.unit;
         run.explanationTrace = explanationTrace(
@@ -1012,9 +1017,9 @@ export class TaskManager {
               : scopedSchema(),
           );
           if (!requestedDeck) generated = { ...generated, deck: null };
-          applyDeckPanels(generated.deck, sources);
+          applyDeckPanels(generated.deck, illustratedSources());
           reviewImage = requestedDeck
-            ? await pptDeckImagePacket(generated.deck, sources)
+            ? await pptDeckImagePacket(generated.deck, illustratedSources())
             : undefined;
           if (skills.explanationTracing)
             run.explanationTrace = {
