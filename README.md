@@ -43,7 +43,7 @@ npm.cmd ci
 npm.cmd run dev
 ```
 
-然后打开 <http://127.0.0.1:4317/>。生产构建：
+然后打开 <http://127.0.0.1:4317/>。首次启动时论文库为空，从左侧导入自己的 PDF 即可开始。生产构建：
 
 ```powershell
 npm.cmd run check
@@ -70,6 +70,8 @@ npm.cmd run check
 ```
 
 该命令执行 TypeScript 检查、Vite 生产构建和自动化测试。
+
+内置论文摘录仅保留为开发测试素材，不会自动加入论文库。需要使用该素材的浏览器回归检查，可在启动服务前显式设置 `TUTOR_EXAMPLE_PAPER=true`。
 
 ## 许可证
 

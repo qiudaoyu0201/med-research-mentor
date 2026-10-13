@@ -190,9 +190,9 @@ function App() {
   const [papers, setPapers] = useState<PaperBundle[]>([]),
     [sample, setSample] = useState<PaperBundle | null>(null),
     [profiles, setProfiles] = useState<Profile[]>([]),
-    [paperId, setPaperId] = useState("xu-2018");
+    [paperId, setPaperId] = useState("");
   const [module, setModule] = useState<Module>("paper"),
-    [mode, setMode] = useState<Mode>("example"),
+    [mode, setMode] = useState<Mode>("live"),
     [profileId, setProfileId] = useState("beginner"),
     [runs, setRuns] = useState<TaskRun[]>([]),
     [current, setCurrent] = useState<TaskRun | null>(null);
@@ -262,13 +262,18 @@ function App() {
     Promise.all([api("/api/bootstrap"), api("/api/session")])
       .then(async ([data, session]) => {
         setSample(data.sample);
-        setPapers([data.sample, ...data.papers]);
+        const available: PaperBundle[] = [
+          ...(data.sample ? [data.sample] : []),
+          ...data.papers,
+        ];
+        setPapers(available);
+        setPaperId(available[0]?.id ?? "");
         setProfiles(data.profiles);
         setRuns(data.runs);
         setSkills(data.skills);
         if (data.revisions.length) setBatch(data.revisions.at(-1));
         setOutline(data.defaultDeck);
-        if (session) {
+        if (session && available.some((p) => p.id === session.paperId)) {
           setPaperId(session.paperId);
           setPage(session.page);
           setModule(session.module);
@@ -285,7 +290,7 @@ function App() {
       .catch(() => {});
   }, []);
   useEffect(() => {
-    if (!ready) return;
+    if (!ready || !paperId) return;
     setSaveState("保存中");
     const timer = setTimeout(() => {
       void api(
@@ -804,32 +809,34 @@ function App() {
             把术语、方法和图表拆开理解，再把实验连成你能讲清楚的证据链。
           </p>
           <div className="library-grid">
-            <section className="paper-card panel">
-              <div className="paper-label">
-                基础医学 <span>示例论文</span>
-              </div>
-              <h2>
-                衰老细胞如何
-                <br />
-                影响身体功能？
-              </h2>
-              <p>Xu et al. · Nature Medicine · 2018</p>
-              <div className="paper-route">
-                <span>研究问题</span>
-                <i>→</i>
-                <span>移植实验</span>
-                <i>→</i>
-                <span>功能变化</span>
-              </div>
-              <button
-                className="primary"
-                onClick={() => {
-                  if (sample) selectPaper(sample);
-                }}
-              >
-                打开示例论文 <span>↗</span>
-              </button>
-            </section>
+            {sample && (
+              <section className="paper-card panel">
+                <div className="paper-label">
+                  基础医学 <span>示例论文</span>
+                </div>
+                <h2>
+                  衰老细胞如何
+                  <br />
+                  影响身体功能？
+                </h2>
+                <p>Xu et al. · Nature Medicine · 2018</p>
+                <div className="paper-route">
+                  <span>研究问题</span>
+                  <i>→</i>
+                  <span>移植实验</span>
+                  <i>→</i>
+                  <span>功能变化</span>
+                </div>
+                <button
+                  className="primary"
+                  onClick={() => {
+                    if (sample) selectPaper(sample);
+                  }}
+                >
+                  打开示例论文 <span>↗</span>
+                </button>
+              </section>
+            )}
             <section className="upload-card panel">
               <span className="upload-icon">＋</span>
               <h2>开始阅读你的论文</h2>

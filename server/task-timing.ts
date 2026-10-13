@@ -2,38 +2,101 @@ import type { TaskTiming } from "../shared/types.ts";
 import type { ProviderEvent } from "./provider.ts";
 export class TaskDeadline extends Error {
   constructor(readonly layer: string) {
-    super(`任务达到${layer}期限；保留输出，不自动重发。`);
+    const labels: Record<string, string> = {
+      "task-total": "整轮任务达到等待上限",
+      "request-total": "本次模型请求达到等待上限",
+      "first-output": "等待模型首段正文超时",
+      "output-idle": "模型长时间没有新增正文",
+    };
+    super(`${labels[layer] ?? layer}；已保留现有输出，未自动重发。`);
   }
 }
 
-export function taskTiming(scope: TaskTiming["scope"], size = 1): TaskTiming {
+export function taskTiming(
+  scope: TaskTiming["scope"],
+  size = 1,
+  deliveryPolicy: "internal" | "online" = "internal",
+  environment: NodeJS.ProcessEnv = process.env,
+): TaskTiming {
+  const configure = (timing: TaskTiming) => {
+    const prefix = `TUTOR_${deliveryPolicy.toUpperCase()}`;
+    const fields = {
+      taskMs: "TASK_MS",
+      requestMs: "REQUEST_MS",
+      firstOutputMs: "FIRST_OUTPUT_MS",
+      idleMs: "IDLE_MS",
+      targetTaskMs: "TARGET_TASK_MS",
+      targetRequestMs: "TARGET_REQUEST_MS",
+      targetFirstOutputMs: "TARGET_FIRST_OUTPUT_MS",
+      targetIdleMs: "TARGET_IDLE_MS",
+    } as const;
+    for (const field of Object.keys(fields) as (keyof typeof fields)[]) {
+      const name = `${prefix}_${fields[field]}`;
+      const raw = environment[name];
+      if (raw === undefined) continue;
+      const value = Number(raw);
+      if (!Number.isSafeInteger(value) || value <= 0 || value > 2_147_483_647)
+        throw new Error(`${name} 必须是有效的正整数毫秒数。`);
+      timing[field] = value;
+    }
+    return timing;
+  };
+  if (deliveryPolicy === "online")
+    return configure({
+      version: "task-timing-v1",
+      scope,
+      taskMs:
+        scope === "full"
+          ? Math.min(5_400_000, 2_700_000 + Math.max(1, size) * 180_000)
+          : 2_700_000,
+      requestMs: scope === "full" ? 1_200_000 : 900_000,
+      firstOutputMs: scope === "full" ? 600_000 : 300_000,
+      idleMs: scope === "full" ? 600_000 : 300_000,
+      targetTaskMs: scope === "full" ? 1_800_000 : 900_000,
+      targetRequestMs: scope === "full" ? 600_000 : 300_000,
+      targetFirstOutputMs: scope === "full" ? 300_000 : 120_000,
+      targetIdleMs: scope === "full" ? 300_000 : 120_000,
+      ...(scope === "explanation" ? { diagnosisMs: 90_000 } : {}),
+    });
   if (scope === "explanation")
-    return {
+    return configure({
       version: "task-timing-v1",
       scope,
       taskMs: 480_000,
       requestMs: 180_000,
       firstOutputMs: 120_000,
       idleMs: 60_000,
+      targetTaskMs: 240_000,
+      targetRequestMs: 120_000,
+      targetFirstOutputMs: 60_000,
+      targetIdleMs: 30_000,
       diagnosisMs: 90_000,
-    };
+    });
   if (scope === "fragment")
-    return {
+    return configure({
       version: "task-timing-v1",
       scope,
       taskMs: 600_000,
       requestMs: 300_000,
       firstOutputMs: 240_000,
       idleMs: 90_000,
-    };
-  return {
+      targetTaskMs: 300_000,
+      targetRequestMs: 180_000,
+      targetFirstOutputMs: 120_000,
+      targetIdleMs: 60_000,
+    });
+  return configure({
     version: "task-timing-v1",
     scope,
     taskMs: Math.min(2_400_000, 600_000 + Math.max(1, size) * 90_000),
     requestMs: 720_000,
     firstOutputMs: 300_000,
     idleMs: 120_000,
-  };
+    targetTaskMs: 1_200_000,
+    targetRequestMs: 480_000,
+    targetFirstOutputMs: 240_000,
+    targetIdleMs: 90_000,
+  });
 }
 
 // The ledger owns deadlines. RPC acknowledgments and token events cannot keep
@@ -43,7 +106,14 @@ export function watchRequest(
   deadline: string,
   timing: Pick<
     TaskTiming,
-    "requestMs" | "firstOutputMs" | "idleMs" | "diagnosisMs"
+    | "requestMs"
+    | "firstOutputMs"
+    | "idleMs"
+    | "targetTaskMs"
+    | "targetRequestMs"
+    | "targetFirstOutputMs"
+    | "targetIdleMs"
+    | "diagnosisMs"
   >,
   emit: (event: ProviderEvent) => void,
 ) {
@@ -56,6 +126,16 @@ export function watchRequest(
     timers.add(timer);
     return timer;
   };
+  const diagnose = (ms: number | undefined, layer: string) => {
+    if (ms === undefined) return;
+    after(ms, () => {
+      if (!controller.signal.aborted && !signal.aborted)
+        emit({ type: "diagnosis", at: new Date().toISOString(), layer });
+    });
+  };
+  diagnose(timing.targetTaskMs, "target-task");
+  diagnose(timing.targetRequestMs, "target-request");
+  diagnose(timing.targetFirstOutputMs, "target-first-output");
   const stop = (layer: string) => {
     if (controller.signal.aborted || signal.aborted) return;
     emit({ type: "timeout", at: new Date().toISOString(), layer });
@@ -87,6 +167,7 @@ export function watchRequest(
         timers.delete(outputTimer);
       }
       outputTimer = after(timing.idleMs, () => stop("output-idle"));
+      diagnose(timing.targetIdleMs, "target-output-idle");
     },
     close() {
       timers.forEach(clearTimeout);

@@ -6,26 +6,51 @@ import { onlineDeliveryProblem } from "../server/delivery-policy.ts";
 
 test("PPT emphasis on several figures keeps their images through large-paper selection", () => {
   const figures: Source[] = [1, 4, 5].map((n) => ({
-    id: `fig${n}`, title: `Figure ${n}`, figure: String(n),
-    kind: "paper", text: `Figure ${n} experiment and results.`,
-    caption: `Figure ${n} experiment and results.`, locator: `Figure ${n}`,
-    image: "data:image/png;base64,AA==", verified: true,
+    id: `fig${n}`,
+    title: `Figure ${n}`,
+    figure: String(n),
+    kind: "paper",
+    text: `Figure ${n} experiment and results.`,
+    caption: `Figure ${n} experiment and results.`,
+    locator: `Figure ${n}`,
+    image: "data:image/png;base64,AA==",
+    verified: true,
   }));
   const paper: PaperBundle = {
-    id: "p", version: "v", title: "Paper", scope: "fixture",
-    sources: [...figures, ...[1, 2, 3, 4, 5, 6].map((n): Source => ({
-      id: `p${n}`, title: `PDF 第 ${n} 页`, kind: "paper", page: n,
-      text: "Results and methods. ".repeat(250), locator: `p${n}`, verified: true,
-    }))],
+    id: "p",
+    version: "v",
+    title: "Paper",
+    scope: "fixture",
+    sources: [
+      ...figures,
+      ...[1, 2, 3, 4, 5, 6].map((n): Source => ({
+        id: `p${n}`,
+        title: `PDF 第 ${n} 页`,
+        kind: "paper",
+        page: n,
+        text: "Results and methods. ".repeat(250),
+        locator: `p${n}`,
+        verified: true,
+      })),
+    ],
   };
   const question = "做6页PPT，重点Figure 1、4、5的实验设计和证据";
   const defaults = defaultPaperSources(paper, question, ["figure", "ppt"]);
   const selected = selectEvidence(defaults, question, ["figure", "ppt"]);
-  assert.deepEqual(selected.filter((s) => s.image).map((s) => s.id).sort(), ["fig1", "fig4", "fig5"]);
-  assert.deepEqual(defaultPaperSources(paper, "解释Figure 1", ["figure"]).map((s) => s.id), ["fig1"]);
+  assert.deepEqual(
+    selected
+      .filter((s) => s.image)
+      .map((s) => s.id)
+      .sort(),
+    ["fig1", "fig4", "fig5"],
+  );
+  assert.deepEqual(
+    defaultPaperSources(paper, "解释Figure 1", ["figure"]).map((s) => s.id),
+    ["fig1"],
+  );
 });
 
-test("online delivery permits an explicit material-gap placeholder but still blocks fact errors", () => {
+test("major material gaps cannot bypass delivery checks through placeholder wording", () => {
   const gap = {
     id: "gap",
     type: "material" as const,
@@ -35,7 +60,21 @@ test("online delivery permits an explicit material-gap placeholder but still blo
     evidence: [],
     resolved: false,
   };
-  assert.equal(onlineDeliveryProblem({ issues: [gap], checkedSources: [], limitations: [] }), undefined);
+  assert.ok(
+    onlineDeliveryProblem({
+      issues: [gap],
+      checkedSources: [],
+      limitations: [],
+    }),
+  );
+  assert.equal(
+    onlineDeliveryProblem({
+      issues: [{ ...gap, severity: "warning" }],
+      checkedSources: [],
+      limitations: [],
+    }),
+    undefined,
+  );
   assert.equal(
     onlineDeliveryProblem({
       issues: [{ ...gap, type: "fact", location: "Figure 4 组别错误" }],

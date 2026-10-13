@@ -6,6 +6,7 @@ import type {
 } from "./provider.ts";
 import type { BudgetState } from "../shared/types.ts";
 import { BudgetLedger } from "./budget.ts";
+import { taskTiming } from "./task-timing.ts";
 import { digest } from "./materials.ts";
 import type { RuleSnapshot } from "./skills.ts";
 import {
@@ -78,7 +79,10 @@ export function reserveUnit(
   batch: TrainingBatch,
   required: number,
   cycleUsed: number,
-  minimumMs = required * 180_000 + 120_000,
+  minimumMs =
+    required *
+      (batch.budget.timing?.requestMs ?? taskTiming("explanation").requestMs) +
+    120_000,
 ) {
   const limit = batch.cycleLimit ?? (batch.phase === "M3" ? 36 : 108);
   if (

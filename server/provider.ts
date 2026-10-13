@@ -31,6 +31,7 @@ export interface Provider {
   id?: string;
   billingMode?: "chatgpt" | "api";
   capabilities?: {
+    streaming?: boolean;
     images: boolean;
     structuredOutput: "native-schema" | "local-validation";
     cancellation: "interrupt" | "abort-request";
@@ -221,6 +222,7 @@ export class CodexProvider implements Provider {
   id = "codex-chatgpt";
   billingMode: "chatgpt" | "api" = "chatgpt";
   capabilities = {
+    streaming: true,
     images: true,
     structuredOutput: "native-schema" as const,
     cancellation: "interrupt" as const,
@@ -417,7 +419,11 @@ export class CodexProvider implements Provider {
         };
         abort = () => {
           emit({ type: "cancel", layer: "signal" });
-          void stop(new Error("任务已取消或达到期限"));
+          void stop(
+            signal.reason instanceof Error
+              ? signal.reason
+              : new Error("任务已取消。"),
+          );
         };
         const onClosed = () => {
           emit({ type: "closed", status: "transport-closed" });

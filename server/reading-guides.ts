@@ -4,6 +4,7 @@ import type { PaperBundle } from "../shared/types.ts";
 import type { Provider } from "./provider.ts";
 import { TaskScheduler, taskKey } from "./scheduler.ts";
 import { BudgetLedger } from "./budget.ts";
+import { taskTiming } from "./task-timing.ts";
 import { save, list } from "./storage.ts";
 import { digest } from "./materials.ts";
 import { randomUUID } from "node:crypto";
@@ -98,6 +99,7 @@ export class ReadingGuides {
       await this.persist("reading-guides", id, guide);
     });
     ledger.state.limit = 1;
+    ledger.state.timing = taskTiming("fragment", 1, "online");
     const guide: Guide = {
       ...readingStart(paper),
       id,
@@ -128,7 +130,9 @@ export class ReadingGuides {
         taskKey(paper.id, "guide"),
         controller.signal,
         async () => {
-          ledger.state.deadline = new Date(Date.now() + 180_000).toISOString();
+          ledger.state.deadline = new Date(
+            Date.now() + ledger.state.timing!.taskMs,
+          ).toISOString();
           guide.status = "running";
           await this.persist("reading-guides", id, guide);
           const schema = z.object({

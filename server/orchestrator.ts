@@ -98,7 +98,11 @@ export function validateCitations(
     /(尚缺|缺失|未提供|缺少|补齐|材料)/.test(
       `${slide.title} ${slide.bullets.join(" ")} ${slide.notes}`,
     );
-  if (deck?.slides.some((s) => s.citations.length === 0 && !transparentGapSlide(s)))
+  if (
+    deck?.slides.some(
+      (s) => s.citations.length === 0 && !transparentGapSlide(s),
+    )
+  )
     throw new Error("汇报页缺少来源。");
   for (const section of unit.sections) {
     if (
@@ -248,9 +252,6 @@ export function needsRevision(
   if (policy === "online") {
     return (
       Boolean(onlineDeliveryProblem(review)) ||
-      review.issues.some(
-        (i) => !i.resolved && i.type !== "teaching" && i.type !== "material",
-      ) ||
       feedback.breakpoints.some((b) => b.status === "open")
     );
   }
@@ -351,7 +352,7 @@ export class TaskManager {
         }));
       skills.versions["delivery-policy"] =
         this.deliveryPolicy +
-        (this.deliveryPolicy === "online" ? "-v2" : "-v1");
+        (this.deliveryPolicy === "online" ? "-v3" : "-v1");
       skills.versions["visual-evidence-protocol"] = "endpoint-audit-v1";
       if (input.workflow === "direct")
         skills.versions["medical-research-assistant"] = (
@@ -432,6 +433,7 @@ export class TaskManager {
               ? "full"
               : "explanation",
           input.slideCount ?? 6,
+          this.deliveryPolicy,
         );
         ledger.state.deadline = new Date(
           Date.now() + ledger.state.timing.taskMs,
@@ -618,6 +620,9 @@ export class TaskManager {
         const result = await call(
           "assistant-explain",
           rules.text +
+            (this.deliveryPolicy === "online"
+              ? naturalDeliveryInstructions
+              : "") +
             "\n" +
             skills.shared +
             "\n" +
@@ -659,6 +664,9 @@ export class TaskManager {
       } else {
         const teaching =
           skills.shared +
+          (this.deliveryPolicy === "online"
+            ? naturalDeliveryInstructions
+            : "") +
           (skills.teachingContract ?? "") +
           "\n" +
           skills.modules
@@ -673,8 +681,9 @@ export class TaskManager {
             .join("\n");
         const readCheck = run.input.checks?.readability ?? true;
         const novice =
-          skills.modules.find((m) => m.id === "medical-novice-simulator")
-            ?.text ?? "";
+          (skills.modules.find((m) => m.id === "medical-novice-simulator")
+            ?.text ?? "") +
+          (this.deliveryPolicy === "online" ? onlineNoviceInstructions : "");
         const checking =
           skills.shared +
           "\n" +
@@ -818,7 +827,13 @@ export class TaskManager {
               question: b.question,
             })),
           ...review.issues
-            .filter((i) => !i.resolved && i.type === "material")
+            .filter(
+              (i) =>
+                !i.resolved &&
+                i.type === "material" &&
+                (this.deliveryPolicy === "internal" ||
+                  i.severity === "blocking"),
+            )
             .map((i) => ({
               id: i.id,
               concept: i.suggestion,
@@ -841,7 +856,10 @@ export class TaskManager {
         let supplemented = false;
         const focusIds = review.issues
           .filter(
-            (i) => !i.resolved && ["material", "teaching"].includes(i.type),
+            (i) =>
+              !i.resolved &&
+              ["material", "teaching"].includes(i.type) &&
+              (this.deliveryPolicy === "internal" || i.severity === "blocking"),
           )
           .flatMap((i) => i.evidence)
           .filter((id) => sources.some((s) => s.id === id && !s.image));
@@ -1031,7 +1049,9 @@ export class TaskManager {
             scopedChecking +
               "\n" +
               revisionAuditInstruction +
-              "\n在线交付的PPT若审核指出‘创新’缺少全文依据，必须把页面中的‘创新’改为‘设计特点’或‘本图贡献’，并同步收窄讲述提示；不得保留未经来源支持的创新断言。对明确标注原始材料缺失的占位页，可以保留占位并交付草稿。",
+              (this.deliveryPolicy === "online"
+                ? "\n不得保留未经来源支持的创新断言。必要原始材料仍缺失且影响用户目标时，不能把占位页当作已完成成果。"
+                : "\n在线交付的PPT若审核指出‘创新’缺少全文依据，必须把页面中的‘创新’改为‘设计特点’或‘本图贡献’，并同步收窄讲述提示；不得保留未经来源支持的创新断言。对明确标注原始材料缺失的占位页，可以保留占位并交付草稿。"),
             {
               sources: task.sources,
               draft: generated.unit,
@@ -1137,4 +1157,6 @@ export class TaskManager {
 import {
   onlineDeliveryProblem,
   onlineReviewInstructions,
+  naturalDeliveryInstructions,
+  onlineNoviceInstructions,
 } from "./delivery-policy.ts";

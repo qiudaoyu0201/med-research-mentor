@@ -2,6 +2,7 @@ import { effectiveRuleSnapshot, loadSkill } from "./skills.ts";
 import { randomUUID } from "node:crypto";
 import { z } from "zod";
 import { LiteratureService } from "./literature.ts";
+import { naturalDeliveryInstructions } from "./delivery-policy.ts";
 import { planDocx } from "./plan-docx.ts";
 import { sharedRules, teachingContract, explanationTracing } from "./skills.ts";
 import {
@@ -128,7 +129,15 @@ export class ResearchPlans {
     private persist: typeof save = save,
     private erase: typeof remove = remove,
     private literature = new LiteratureService(),
+    private deliveryPolicy: "internal" | "online" = "internal",
   ) {}
+  private reviewBlocks(review: PlanReview) {
+    return (
+      review.issues.some((i) => i.severity === "blocking") ||
+      (this.deliveryPolicy === "internal" &&
+        new Set(review.issues.map((i) => i.sectionId)).size > 2)
+    );
+  }
   private async locked<T>(id: string, work: () => Promise<T>): Promise<T> {
     const previous = this.locks.get(id) ?? Promise.resolve();
     let release!: () => void;
@@ -470,11 +479,16 @@ export class ResearchPlans {
     const instructions = {
       generation:
         shared +
+        (this.deliveryPolicy === "online" ? naturalDeliveryInstructions : "") +
         "\n" +
         planSkill.text +
         "\n" +
         (effective?.teachingContract ?? teachingContract()),
-      review: reviewRules,
+      review:
+        reviewRules +
+        (this.deliveryPolicy === "online"
+          ? "\n在线交付按影响分级，不按问题数量阻断。多个次要建议仍为warning；影响核心设计的缺口必须blocking。先检查实际来源和正文是否已经提出必要对照与确定路径；讨论用草案不要求预先完成实验。审核说明只存内部记录，必要科学边界必须在正文准确体现。"
+          : ""),
       ...((effective?.explanationTracing ?? explanationTracing())
         ? { traced: effective?.explanationTracing ?? explanationTracing() }
         : {}),
@@ -605,12 +619,16 @@ export class ResearchPlans {
       ledger.state.timing = taskTiming(
         input.requestedScope === "full-plan" ? "full" : "fragment",
         8,
+        this.deliveryPolicy,
       );
       ledger.state.deadline = new Date(
         Date.now() + ledger.state.timing.taskMs,
       ).toISOString();
       ledger.state.limit =
         input.retrieveLiterature && input.action !== "review" ? 3 : 2;
+      if (this.deliveryPolicy === "online" && input.action !== "review")
+        ledger.state.limit =
+          input.maxCalls + (input.retrieveLiterature ? 1 : 0);
       ledger.state.groupLimit = ledger.state.limit;
       const j: StoredJob = {
         id: jobId,
@@ -718,6 +736,11 @@ export class ResearchPlans {
     const ledger = new BudgetLedger(job.id, persist, job.budget);
     const callOptions = {
       groupId: "plan",
+      recoverTransport:
+        this.deliveryPolicy === "online" &&
+        job.budget.limit - job.budget.attempts.length >
+          (job.phase === "generation" ? 2 : 1) +
+            (input?.retrieveLiterature && !job.literature ? 1 : 0),
       sourceHash: digest(job.context.learningSourceRefs),
       skillHash: job.capability.rulesHash,
     };
@@ -957,16 +980,15 @@ export class ResearchPlans {
       !!input &&
       input.action !== "review" &&
       input.maxCalls === 4 &&
-      (report.issues.some((i) => i.severity === "blocking") ||
-        new Set(report.issues.map((i) => i.sectionId)).size > 2) &&
+      this.reviewBlocks(report) &&
+      (!job.budget.transportRecoveryOf ||
+        job.budget.attempts.length + 2 <= job.budget.limit) &&
       !ledger.state.revisions.includes("plan");
     await this.locked(job.planId, async () => {
       const latest = await this.currentFor(job, signal);
       latest.versions.find((v) => v.id === version.id)!.review = report;
       await this.storePlan(latest);
-      const blocked =
-        new Set(report.issues.map((i) => i.sectionId)).size > 2 ||
-        report.issues.some((issue) => issue.severity === "blocking");
+      const blocked = this.reviewBlocks(report);
       job.status = repair ? "generating" : blocked ? "failed" : "completed";
       job.error =
         !repair && blocked
@@ -1114,8 +1136,7 @@ export class ResearchPlans {
     if (
       !v.review ||
       v.review.versionId !== v.id ||
-      v.review.issues.some((issue) => issue.severity === "blocking") ||
-      new Set(v.review.issues.map((issue) => issue.sectionId)).size > 2 ||
+      this.reviewBlocks(v.review) ||
       this.jobs.get(v.review.jobId)?.status !== "completed"
     )
       throw new ResearchConflict(
@@ -1148,10 +1169,8 @@ export class ResearchPlans {
       ]),
       "## 假设与待确认",
       ...new Set([...v.content.assumptions, ...v.content.questions]),
-      "## 范围与核对问题",
-      ...new Set([...v.content.limitations, ...(v.review?.limitations ?? [])]),
-      ...(v.review?.issues.map((i) => `${i.message} ${citation(i.evidence)}`) ??
-        []),
+      "## 研究局限",
+      ...new Set(v.content.limitations),
       "## 来源",
       ...(refs.length
         ? refs.flatMap((r, i) => [

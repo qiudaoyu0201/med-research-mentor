@@ -3,7 +3,7 @@ import type { Attempt, BudgetState, TokenUsage } from "../shared/types.ts";
 import type { Provider, ProviderObserver } from "./provider.ts";
 import { ProviderFailure } from "./provider.ts";
 import type { z } from "zod";
-import { watchRequest, TaskDeadline } from "./task-timing.ts";
+import { watchRequest, TaskDeadline, taskTiming } from "./task-timing.ts";
 import { setTimeout as delay } from "node:timers/promises";
 
 interface CallOptions {
@@ -163,6 +163,16 @@ export class BudgetLedger {
       outputChars: 0,
       tokens: normalizeUsage(null),
     };
+    if (!options.managedTiming) {
+      const timing = (this.state.timing ??= taskTiming("explanation"));
+      attempt.timing = {
+        ...timing,
+        firstOutputMs:
+          provider.capabilities?.streaming === false
+            ? timing.requestMs
+            : timing.firstOutputMs,
+      };
+    }
     this.reserving = true;
     this.state.billingMode = provider.billingMode ?? "chatgpt";
     this.state.attempts.push(attempt);
@@ -172,11 +182,9 @@ export class BudgetLedger {
     } finally {
       this.reserving = false;
     }
-    const deadline = Math.min(
-      options.groupId ? 180_000 : 60_000,
-      Date.parse(this.state.deadline) - Date.now(),
-    );
-    if (signal.aborted || deadline <= 0) {
+    const remainingAfterReservation =
+      Date.parse(this.state.deadline) - Date.now();
+    if (signal.aborted || remainingAfterReservation <= 0) {
       attempt.status = signal.aborted ? "cancelled" : "failed";
       attempt.error = signal.aborted
         ? "预算预留后取消，未发送生成请求。"
@@ -192,11 +200,7 @@ export class BudgetLedger {
       : (watch = watchRequest(
           signal,
           this.state.deadline,
-          this.state.timing ?? {
-            requestMs: deadline,
-            firstOutputMs: deadline,
-            idleMs: deadline,
-          },
+          attempt.timing!,
           (event) => observe(event),
         )).signal;
     const started = Date.now();
@@ -204,6 +208,7 @@ export class BudgetLedger {
     let observationWrites = Promise.resolve();
     let lastObservationWrite = 0;
     let observationClosed = false;
+    let meaningfulOutputLength = 0;
     const observe: ProviderObserver = (event) => {
       if (observationClosed) return;
       watch?.observe(event);
@@ -212,6 +217,15 @@ export class BudgetLedger {
         events: [],
       });
       observation.lastActivityAt = event.at;
+      if (observation.lastMeaningfulOutputAt) {
+        const gap =
+          Date.parse(event.at) - Date.parse(observation.lastMeaningfulOutputAt);
+        if (Number.isFinite(gap) && gap >= 0)
+          observation.maxOutputGapMs = Math.max(
+            observation.maxOutputGapMs ?? 0,
+            gap,
+          );
+      }
       if (event.threadId) observation.threadId = event.threadId;
       if (event.turnId) observation.turnId = event.turnId;
       if (event.type === "response") observation.firstResponseAt ??= event.at;
@@ -220,6 +234,13 @@ export class BudgetLedger {
         observation.outputUpdates++;
         attempt.rawOutput = event.text;
         attempt.outputChars = event.text?.length ?? 0;
+        const length = event.text?.trimEnd().length ?? 0;
+        if (length > meaningfulOutputLength) {
+          meaningfulOutputLength = length;
+          observation.firstMeaningfulOutputAt ??= event.at;
+          observation.lastMeaningfulOutputAt = event.at;
+          observation.maxOutputGapMs ??= 0;
+        }
       }
       if (event.type === "usage") {
         attempt.usage = event.usage;

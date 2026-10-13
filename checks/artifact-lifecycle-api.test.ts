@@ -33,6 +33,7 @@ test(
             TUTOR_RECORDING_PREPARED: "false",
             TUTOR_READING_GUIDES: "manual",
             TUTOR_PROVIDER: "codex",
+            TUTOR_EXAMPLE_PAPER: "false",
           },
           stdio: ["ignore", "pipe", "pipe"],
         },
@@ -78,6 +79,15 @@ test(
     }
     try {
       await start();
+      const firstWorkspace = await api("/api/workspace");
+      assert.deepEqual(firstWorkspace.paperIds, [fixture.paper.id]);
+      const bootstrap = await api("/api/bootstrap");
+      assert.equal(bootstrap.sample, null);
+      assert.deepEqual(bootstrap.defaultDeck.slides, []);
+      assert.deepEqual(
+        bootstrap.papers.map((p: { id: string }) => p.id),
+        [fixture.paper.id],
+      );
       const draft = await api("/api/artifacts/plan", {});
       await api(
         `/api/artifacts/plan/${draft.id}`,
@@ -165,6 +175,9 @@ test(
       assert.equal(deck.sourceSnapshot.id, fixture.paper.id);
       await stop();
       await start();
+      const emptyWorkspace = await api("/api/workspace");
+      assert.deepEqual(emptyWorkspace.paperIds, []);
+      assert.deepEqual(emptyWorkspace.papers, []);
       const exported = await api(
         "/api/deck-versions/lifecycle-version/export",
         { conversationId: "lifecycle-ppt" },

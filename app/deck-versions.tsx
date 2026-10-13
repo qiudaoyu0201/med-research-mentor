@@ -292,7 +292,7 @@ export function DeckVersionPanel({
             )}
             {v.error && <p>{v.error}</p>}
             {v.review.issues
-              .filter((i) => !i.resolved)
+              .filter((i) => !i.resolved && i.severity === "blocking")
               .map((i) => (
                 <p key={i.id}>
                   {i.location}：{i.suggestion}
