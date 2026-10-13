@@ -451,8 +451,8 @@ try {
           sources,
           evaluatorVersion:
             frozen.manifest.module === "ppt"
-              ? "explanation-and-deck-images-v2"
-              : "explanation-v1",
+              ? "explanation-and-deck-images-v3-visible-text"
+              : "explanation-v2-visible-text",
         },
         controller.signal,
         image,

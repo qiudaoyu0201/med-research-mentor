@@ -419,6 +419,10 @@ test("PPTX keeps editable text and separate notes, and rejects lost referenced i
   const notes = Object.keys(zip).filter((k) =>
     /^ppt\/notesSlides\/notesSlide\d+\.xml$/.test(k),
   );
+  for (const match of strFromU8(zip["[Content_Types].xml"]).matchAll(
+    /<Override\b[^>]*PartName="([^"]+)"/g,
+  ))
+    assert.ok(zip[match[1].slice(1)], "declared part exists: " + match[1]);
   assert.equal(slides.length, 8);
   assert.equal(notes.length, 8);
   for (const file of notes) {

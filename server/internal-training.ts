@@ -200,6 +200,31 @@ export function textValues(value: unknown): string[] {
     return Object.values(value).flatMap(textValues);
   return [];
 }
+// These fields bind evidence and layout but are not text delivered to the reader.
+// Legacy evaluations retain their original scope.
+export function visibleReviewArtifact(value: unknown): unknown {
+  if (Array.isArray(value)) return value.map(visibleReviewArtifact);
+  if (!value || typeof value !== "object") return value;
+  const metadata = new Set([
+    "id",
+    "kind",
+    "citations",
+    "imageSource",
+    "imageCrop",
+    "imagePanel",
+    "sources",
+    "references",
+    "sourceIds",
+    "sourceSnapshot",
+    "layout",
+    "style",
+  ]);
+  return Object.fromEntries(
+    Object.entries(value)
+      .filter(([key]) => !metadata.has(key))
+      .map(([key, item]) => [key, visibleReviewArtifact(item)]),
+  );
+}
 function locationMatches(text: string, location: string) {
   // Providers sometimes quote a sentence when returning a location. Accept
   // only removable presentation wrappers; the substantive text must remain
@@ -217,10 +242,15 @@ export function validateReview(
   artifact: unknown,
   sourceIds: string[],
   review: z.infer<typeof reviewSchema>,
+  locationScope: "all-text" | "visible-text" = "all-text",
 ) {
   const findings: string[] = [],
     invalid: string[] = [],
-    strings = textValues(artifact);
+    strings = textValues(
+      locationScope === "visible-text"
+        ? visibleReviewArtifact(artifact)
+        : artifact,
+    );
   for (const criterion of criteria) {
     const matches = review.checks.filter((c) => c.criterion === criterion);
     if (matches.length !== 1) {
@@ -257,16 +287,27 @@ export async function reviewArtifact(
     criteria: string[];
     artifact: unknown;
     sources: { id: string; text: string; locator: string }[];
-    evaluatorVersion?: "explanation-v1" | "explanation-and-deck-images-v2";
+    evaluatorVersion?:
+      | "explanation-v1"
+      | "explanation-v2-visible-text"
+      | "explanation-and-deck-images-v2"
+      | "explanation-and-deck-images-v3-visible-text";
   },
   signal: AbortSignal,
   image?: string,
 ) {
   const result = await provider.generate(
     input.evaluatorVersion === "explanation-v1" ||
-      input.evaluatorVersion === "explanation-and-deck-images-v2"
+      input.evaluatorVersion === "explanation-v2-visible-text" ||
+      input.evaluatorVersion === "explanation-and-deck-images-v2" ||
+      input.evaluatorVersion === "explanation-and-deck-images-v3-visible-text"
       ? explanationReviewInstructions +
-          (input.evaluatorVersion === "explanation-and-deck-images-v2"
+          (input.evaluatorVersion?.endsWith("visible-text")
+            ? "\n面向用户的正文与讲稿只指title、sections中的title/text、terms中的name/explanation、slides的title/bullets/notes、speechScript及方案内容。citations、imageSource、imageCrop、kind、引用副本和版式字段是结构化元数据；这些字段合法保留来源ID不构成正文出现内部编号。若正文或备注自身出现内部问题编号仍须失败。评价位置必须给实际正文标题或逐字原句，不能将JSON字段片段或元数据当作正文定位。"
+            : "") +
+          (input.evaluatorVersion === "explanation-and-deck-images-v2" ||
+          input.evaluatorVersion ===
+            "explanation-and-deck-images-v3-visible-text"
             ? "\n图片为各页实际展示区域，页标签仅定位展示位置，不是新的引用ID。逐页对照图件区域与标题、要点和讲述提示；未出现在当前裁剪中的内容不能声称已在该页图中展示。原文可支持额外事实，但不能代替对应页面的图件检查。本次仍未看到导出排版，不据此宣称实际PPT排版通过。"
             : "")
       : reviewInstructions,
@@ -280,6 +321,9 @@ export async function reviewArtifact(
     input.artifact,
     input.sources.map((s) => s.id),
     result.output,
+    input.evaluatorVersion?.endsWith("visible-text")
+      ? "visible-text"
+      : "all-text",
   );
 }
 

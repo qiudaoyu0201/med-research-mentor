@@ -1,11 +1,12 @@
 import PptxGenJS from "pptxgenjs";
-import { mkdir } from "node:fs/promises";
+import { mkdir, writeFile } from "node:fs/promises";
 import { resolve } from "node:path";
 import { createCanvas, loadImage } from "@napi-rs/canvas";
 import { deckSchema } from "./schemas.ts";
 import { slideLayout } from "../shared/slide-layout.ts";
 import type { DeckOutline, PaperBundle, TaskRun } from "../shared/types.ts";
 import { safeId } from "./storage.ts";
+import { completePptxPackage } from "./pptx-package.ts";
 import { cropPixels } from "../shared/image-region.ts";
 export async function exportDeck(
   outline: DeckOutline,
@@ -116,7 +117,10 @@ export async function exportDeck(
   }
   await mkdir("exports", { recursive: true });
   const path = resolve("exports", `${safeId(id)}.pptx`);
-  await pptx.writeFile({ fileName: path });
+  const bytes = await pptx.write({ outputType: "nodebuffer" });
+  if (!(bytes instanceof Uint8Array))
+    throw new Error("PPTX导出未返回文件数据。");
+  await writeFile(path, completePptxPackage(bytes));
   return path;
 }
 export function exportNotes(run: TaskRun) {

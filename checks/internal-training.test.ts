@@ -258,3 +258,71 @@ test("research-plan service freezes the scoped candidate into actual generation 
   assert.equal((await freezeRules()).entries["medical-research-plan"].text.includes("PLAN_SKILL_CANDIDATE_MARKER"), false);
   assert.equal((await sharedRules()).includes(feedbackCandidate), false);
 });
+
+test("visible-text evaluation rejects metadata locations while preserving actual body errors and legacy scope", () => {
+  const artifact = {
+    unit: {
+      sections: [
+        {
+          title: "研究方法",
+          text: "正文里错误地写入issue-9。",
+          citations: ["source-1"],
+        },
+      ],
+      sources: [{ text: "这是引用副本", id: "source-1" }],
+    },
+    deck: {
+      slides: [
+        {
+          title: "结果",
+          notes: "这是实际讲稿。",
+          imageSource: "figure-source",
+          imageCrop: { label: "panel-metadata" },
+        },
+      ],
+    },
+  };
+  const review = (location: string) => ({
+    checks: [
+      {
+        criterion: "body",
+        passed: false,
+        location,
+        sourceIds: ["source-1"],
+        explanation: "须修正",
+      },
+    ],
+  });
+  for (const location of [
+    "source-1",
+    "figure-source",
+    "panel-metadata",
+    "这是引用副本",
+  ]) {
+    assert.equal(
+      validateReview(
+        ["body"],
+        artifact,
+        ["source-1"],
+        review(location),
+        "visible-text",
+      ).valid,
+      false,
+    );
+    assert.equal(
+      validateReview(["body"], artifact, ["source-1"], review(location)).valid,
+      true,
+    );
+  }
+  for (const location of ["研究方法", "issue-9", "这是实际讲稿。"]) {
+    const result = validateReview(
+      ["body"],
+      artifact,
+      ["source-1"],
+      review(location),
+      "visible-text",
+    );
+    assert.equal(result.valid, true);
+    assert.equal(result.passed, false);
+  }
+});
