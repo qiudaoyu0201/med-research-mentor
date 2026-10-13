@@ -338,6 +338,11 @@ export interface TaskTiming {
   requestMs: number;
   firstOutputMs: number;
   idleMs: number;
+  /** Soft evaluation targets. They emit observations but never cancel a call. */
+  targetTaskMs?: number;
+  targetRequestMs?: number;
+  targetFirstOutputMs?: number;
+  targetIdleMs?: number;
   diagnosisMs?: number;
 }
 export type AssistantAction =

@@ -25,6 +25,10 @@ export function taskTiming(
       requestMs: "REQUEST_MS",
       firstOutputMs: "FIRST_OUTPUT_MS",
       idleMs: "IDLE_MS",
+      targetTaskMs: "TARGET_TASK_MS",
+      targetRequestMs: "TARGET_REQUEST_MS",
+      targetFirstOutputMs: "TARGET_FIRST_OUTPUT_MS",
+      targetIdleMs: "TARGET_IDLE_MS",
     } as const;
     for (const field of Object.keys(fields) as (keyof typeof fields)[]) {
       const name = `${prefix}_${fields[field]}`;
@@ -48,6 +52,10 @@ export function taskTiming(
       requestMs: scope === "full" ? 1_200_000 : 900_000,
       firstOutputMs: scope === "full" ? 600_000 : 300_000,
       idleMs: scope === "full" ? 600_000 : 300_000,
+      targetTaskMs: scope === "full" ? 1_800_000 : 900_000,
+      targetRequestMs: scope === "full" ? 600_000 : 300_000,
+      targetFirstOutputMs: scope === "full" ? 300_000 : 120_000,
+      targetIdleMs: scope === "full" ? 300_000 : 120_000,
       ...(scope === "explanation" ? { diagnosisMs: 90_000 } : {}),
     });
   if (scope === "explanation")
@@ -58,6 +66,10 @@ export function taskTiming(
       requestMs: 180_000,
       firstOutputMs: 120_000,
       idleMs: 60_000,
+      targetTaskMs: 240_000,
+      targetRequestMs: 120_000,
+      targetFirstOutputMs: 60_000,
+      targetIdleMs: 30_000,
       diagnosisMs: 90_000,
     });
   if (scope === "fragment")
@@ -68,6 +80,10 @@ export function taskTiming(
       requestMs: 300_000,
       firstOutputMs: 240_000,
       idleMs: 90_000,
+      targetTaskMs: 300_000,
+      targetRequestMs: 180_000,
+      targetFirstOutputMs: 120_000,
+      targetIdleMs: 60_000,
     });
   return configure({
     version: "task-timing-v1",
@@ -76,6 +92,10 @@ export function taskTiming(
     requestMs: 720_000,
     firstOutputMs: 300_000,
     idleMs: 120_000,
+    targetTaskMs: 1_200_000,
+    targetRequestMs: 480_000,
+    targetFirstOutputMs: 240_000,
+    targetIdleMs: 90_000,
   });
 }
 
@@ -86,7 +106,14 @@ export function watchRequest(
   deadline: string,
   timing: Pick<
     TaskTiming,
-    "requestMs" | "firstOutputMs" | "idleMs" | "diagnosisMs"
+    | "requestMs"
+    | "firstOutputMs"
+    | "idleMs"
+    | "targetTaskMs"
+    | "targetRequestMs"
+    | "targetFirstOutputMs"
+    | "targetIdleMs"
+    | "diagnosisMs"
   >,
   emit: (event: ProviderEvent) => void,
 ) {
@@ -99,6 +126,16 @@ export function watchRequest(
     timers.add(timer);
     return timer;
   };
+  const diagnose = (ms: number | undefined, layer: string) => {
+    if (ms === undefined) return;
+    after(ms, () => {
+      if (!controller.signal.aborted && !signal.aborted)
+        emit({ type: "diagnosis", at: new Date().toISOString(), layer });
+    });
+  };
+  diagnose(timing.targetTaskMs, "target-task");
+  diagnose(timing.targetRequestMs, "target-request");
+  diagnose(timing.targetFirstOutputMs, "target-first-output");
   const stop = (layer: string) => {
     if (controller.signal.aborted || signal.aborted) return;
     emit({ type: "timeout", at: new Date().toISOString(), layer });
@@ -130,6 +167,7 @@ export function watchRequest(
         timers.delete(outputTimer);
       }
       outputTimer = after(timing.idleMs, () => stop("output-idle"));
+      diagnose(timing.targetIdleMs, "target-output-idle");
     },
     close() {
       timers.forEach(clearTimeout);

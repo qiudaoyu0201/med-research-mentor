@@ -135,6 +135,7 @@ test("online and internal timing overrides remain independent and reject invalid
     TUTOR_ONLINE_IDLE_MS: "240000",
     TUTOR_INTERNAL_IDLE_MS: "45000",
     TUTOR_INTERNAL_REQUEST_MS: "600000",
+    TUTOR_ONLINE_TARGET_IDLE_MS: "90000",
   };
   assert.equal(
     taskTiming("explanation", 1, "online", environment).idleMs,
@@ -152,12 +153,47 @@ test("online and internal timing overrides remain independent and reject invalid
     taskTiming("explanation", 1, "online", environment).requestMs,
     taskTiming("explanation", 1, "online", {}).requestMs,
   );
+  assert.equal(
+    taskTiming("explanation", 1, "online", environment).targetIdleMs,
+    90000,
+  );
   for (const value of ["0", "-1", "NaN", "Infinity", "2147483648", "1.5", ""]) {
     assert.throws(
       () =>
         taskTiming("full", 8, "internal", { TUTOR_INTERNAL_IDLE_MS: value }),
       /TUTOR_INTERNAL_IDLE_MS/,
     );
+  }
+});
+
+test("test targets are separate from protection limits", (context) => {
+  context.mock.timers.enable({ apis: ["setTimeout", "Date"], now: 0 });
+  const timing = taskTiming("explanation", 1, "online");
+  assert.ok(timing.targetIdleMs! < timing.idleMs);
+  const events: ProviderEvent[] = [];
+  const watch = watchRequest(
+    new AbortController().signal,
+    new Date(timing.taskMs).toISOString(),
+    timing,
+    (event) => events.push(event),
+  );
+  try {
+    context.mock.timers.tick(timing.targetFirstOutputMs!);
+    assert.equal(watch.signal.aborted, false);
+    assert.ok(
+      events.some(
+        (event) =>
+          event.type === "diagnosis" && event.layer === "target-first-output",
+      ),
+    );
+    context.mock.timers.tick(
+      timing.firstOutputMs - timing.targetFirstOutputMs! - 1,
+    );
+    assert.equal(watch.signal.aborted, false);
+    context.mock.timers.tick(1);
+    assert.equal(events.at(-1)?.layer, "first-output");
+  } finally {
+    watch.close();
   }
 });
 
