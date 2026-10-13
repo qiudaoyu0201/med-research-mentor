@@ -228,6 +228,7 @@ const diagnosticPacket = z.object({
         id: z.string().min(1),
         locator: z.string().min(1),
         blockHash: z.string().min(1),
+        caption: z.string().optional(),
       }),
     )
     .min(1),
@@ -260,7 +261,11 @@ export function diagnosticVisibleSources(
       const text = blocks.get(ref.blockHash);
       if (text === undefined)
         throw new Error("独立评价来源无法绑定到实际资料块，未派发评价请求。");
-      const source = { id: ref.id, text, locator: ref.locator };
+      const deliveredText =
+        ref.caption && !text.includes(ref.caption)
+          ? text + "\n[实际提供的图注]\n" + ref.caption
+          : text;
+      const source = { id: ref.id, text: deliveredText, locator: ref.locator };
       // The original-page hash can be shared by different actual excerpts.
       visible.set(digest(source), source);
     }

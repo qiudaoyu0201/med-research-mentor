@@ -145,7 +145,6 @@ function exposedRole(role: string, text: string, hash = "page-hash") {
             id: "page",
             locator: "PDF p4",
             blockHash: hash,
-            caption: "Hidden full caption must not leak into review",
           },
         ],
       },
@@ -208,4 +207,26 @@ test("missing, malformed and ambiguous generator evidence is rejected before eva
     [exposedRole("teaching", "valid"), { role: "revision", input: {} }],
   ])
     assert.throws(() => diagnosticVisibleSources(roles), /未派发/);
+});
+
+test("diagnostic retains captions explicitly delivered in generator references without reconstructing a hidden caption", () => {
+  const role = exposedRole("teaching", "Actual block");
+  const sources: any = role.input.sources;
+  sources.references[0].caption =
+    "Caption explicitly received by the generator";
+  assert.equal(
+    diagnosticVisibleSources([role])[0].text,
+    "Actual block\n[实际提供的图注]\nCaption explicitly received by the generator",
+  );
+  sources.blocks[0].text += " Caption explicitly received by the generator";
+  assert.equal(
+    diagnosticVisibleSources([role])[0].text,
+    sources.blocks[0].text,
+  );
+  delete sources.references[0].caption;
+  sources.blocks[0].text = "Excerpt with no caption delivered";
+  assert.equal(
+    diagnosticVisibleSources([role])[0].text,
+    sources.blocks[0].text,
+  );
 });
