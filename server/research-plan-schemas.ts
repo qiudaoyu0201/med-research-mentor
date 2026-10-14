@@ -76,6 +76,17 @@ export const planContentSchema = z
     (x) => new Set(x.sections.map((s) => s.id)).size === x.sections.length,
     { message: "章节 ID 重复" },
   );
+export function groundedPlanContentSchema(sourceIds: string[]) {
+  const refs = z
+    .array(sourceIds.length ? z.enum(sourceIds) : researchId)
+    .max(sourceIds.length ? 12 : 0, "章节引用了未提供的来源。");
+  return planContentSchema.safeExtend({
+    sections: z
+      .array(sectionSchema.extend({ sourceRefs: refs }))
+      .min(1)
+      .max(12),
+  });
+}
 export const planReviewSchema = z
   .object({
     issues: z

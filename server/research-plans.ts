@@ -31,6 +31,7 @@ import { TaskScheduler } from "./scheduler.ts";
 import { list, remove, save, safeId } from "./storage.ts";
 import {
   planContentSchema,
+  groundedPlanContentSchema,
   planJobInputSchema,
   groundedPlanReviewSchema,
   planSaveInputSchema,
@@ -484,7 +485,7 @@ export class ResearchPlans {
         (this.deliveryPolicy === "online" ? naturalDeliveryInstructions : "") +
         "\n" +
         planSkill.text +
-        "\n" +
+        "\n每节 sourceRefs 只可逐字复制当前 sources[].id，不得截短或用原论文 sourceId 替代；无来源时用空数组，不编造编号。\n" +
         (effective?.teachingContract ?? teachingContract()),
       review:
         reviewRules +
@@ -835,6 +836,9 @@ export class ResearchPlans {
       if (!input) throw new Error("生成状态不确定，请显式创建新任务。");
       job.status = "generating";
       await persist();
+      const generationSchema = groundedPlanContentSchema(
+        job.context.learningSourceRefs.map((source) => source.id),
+      );
       const generated = await ledger.call(
         this.provider,
         "plan-assistant",
@@ -857,10 +861,10 @@ export class ResearchPlans {
           sectionId: input.sectionId ?? null,
         },
         job.instructions.traced
-          ? planContentSchema.extend({
+          ? generationSchema.safeExtend({
               explanationLinks: tracingSchema(job.instructions.traced),
             })
-          : planContentSchema,
+          : generationSchema,
         signal,
         callOptions,
       );

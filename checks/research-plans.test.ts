@@ -916,3 +916,77 @@ test("plan checker with no supplied source permits empty evidence without permit
   const j = await h.store.start(p.id, input(p));
   assert.equal((await h.store.wait(j.id)).status, "completed");
 });
+
+test("plan generator restricts section citations to full current source IDs and keeps unique section IDs", async () => {
+  let generated = false;
+  const h = harness([], async (_instructions, value: any, schema) => {
+    if (value.artifactVersion) return { output: schema.parse(review) };
+    const ref = value.sources[0].id;
+    const valid = {
+      ...content,
+      sections: content.sections.map((section) => ({
+        ...section,
+        sourceRefs: [ref],
+      })),
+    };
+    assert.equal(schema.safeParse(valid).success, true);
+    for (const wrong of [ref.slice(0, -8), "duplicate", "unrelated-source"]) {
+      assert.equal(
+        schema.safeParse({
+          ...valid,
+          sections: [{ ...valid.sections[0], sourceRefs: [wrong] }],
+        }).success,
+        false,
+      );
+    }
+    assert.equal(
+      schema.safeParse({
+        ...valid,
+        sections: [valid.sections[0], valid.sections[0]],
+      }).success,
+      false,
+      "grounding must retain the duplicate-section guard",
+    );
+    const outputSchema = z.toJSONSchema(schema);
+    assert.ok(JSON.stringify(outputSchema).includes(JSON.stringify(ref)));
+    generated = true;
+    return { output: schema.parse(valid) };
+  });
+  const p = await h.store.create({
+    ...topic,
+    sources: [{ paperId: "a", sourceVersion: "1", sourceId: "duplicate" }],
+  });
+  const j = await h.store.start(p.id, input(p));
+  assert.equal((await h.store.wait(j.id)).status, "completed");
+  assert.equal(generated, true);
+  assert.deepEqual(
+    h.store.get(p.id).versions[0].content.sections[0].sourceRefs,
+    [p.topic.sources[0].id],
+  );
+});
+
+test("source-free plan generation allows empty citations without an empty enum or invented IDs", async () => {
+  let generated = false;
+  const h = harness([], async (_instructions, value: any, schema) => {
+    if (value.artifactVersion) return { output: schema.parse(review) };
+    assert.deepEqual(value.sources, []);
+    assert.equal(schema.safeParse(content).success, true);
+    assert.equal(
+      schema.safeParse({
+        ...content,
+        sections: [{ ...content.sections[0], sourceRefs: ["invented"] }],
+      }).success,
+      false,
+    );
+    const outputSchema = z.toJSONSchema(schema);
+    assert.equal(JSON.stringify(outputSchema).includes('"enum":[]'), false);
+    const sections = outputSchema.properties?.sections as any;
+    assert.equal(sections.items.properties.sourceRefs.maxItems, 0);
+    generated = true;
+    return { output: schema.parse(content) };
+  });
+  const p = await h.store.create(topic);
+  const j = await h.store.start(p.id, input(p));
+  assert.equal((await h.store.wait(j.id)).status, "completed");
+  assert.equal(generated, true);
+});
