@@ -14,6 +14,11 @@ import { profiles, exampleUnits, defaultDeck } from "../examples/bundle.ts";
 import { applyDeckPanels } from "./figure-panels.ts";
 import { pptImagePacket, pptDeckImagePacket } from "./ppt-image-packet.ts";
 import {
+  assertPptLayout,
+  withPptLayoutReview,
+  pptLayoutContractVersion,
+} from "./ppt-layout-review.ts";
+import {
   teachingSchema,
   noviceSchema,
   reviewSchema,
@@ -260,6 +265,9 @@ export function cacheKey(
         selector: selectionVersion,
         foundations: foundationCatalog.version,
         groundingContract: groundingContractVersion,
+        pptLayoutContract: (input.modules ?? [input.module]).includes("ppt")
+          ? pptLayoutContractVersion
+          : undefined,
         feedbackContext: simulatedFeedbackContext,
         versions,
         profile: profiles.find((p) => p.id === input.profileId),
@@ -611,6 +619,7 @@ export class TaskManager {
     try {
       const profile = profiles.find((p) => p.id === run.input.profileId)!;
       if (run.cacheHit) {
+        assertPptLayout(run.deck, sources);
         validateCitations(
           run.result!,
           run.review!,
@@ -847,6 +856,7 @@ export class TaskManager {
           },
           groundedReviewSchema(sources),
         );
+        review = withPptLayoutReview(review, generated.deck, sources);
         validateCitations(
           generated.unit,
           review,
@@ -1137,6 +1147,12 @@ export class TaskManager {
             },
             groundedReviewSchema(sources),
           );
+          review = withPptLayoutReview(
+            review,
+            generated.deck,
+            sources,
+            firstReview,
+          );
         }
         validateCitations(
           generated.unit,
@@ -1157,6 +1173,7 @@ export class TaskManager {
           )
             request.status = "resolved";
         }
+        assertPptLayout(generated.deck, sources);
         validateRunSurface(
           run,
           generated.unit,

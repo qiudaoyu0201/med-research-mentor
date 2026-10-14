@@ -1,0 +1,205 @@
+import test from "node:test";
+import assert from "node:assert/strict";
+import { readFile, unlink } from "node:fs/promises";
+import { randomUUID } from "node:crypto";
+import { createCanvas } from "@napi-rs/canvas";
+import type { Provider } from "../server/provider.ts";
+import type { DeckOutline, ReviewResult } from "../shared/types.ts";
+import { sample, exampleUnits } from "../examples/bundle.ts";
+import { groundedTeachingSchema } from "../server/schemas.ts";
+import { TaskManager } from "../server/orchestrator.ts";
+import { ResultCache } from "../server/cache.ts";
+import { exportDeck } from "../server/export.ts";
+import { slideLayout } from "../shared/slide-layout.ts";
+import {
+  pptLayoutIssues,
+  withPptLayoutReview,
+} from "../server/ppt-layout-review.ts";
+
+const canvas = createCanvas(800, 500);
+canvas.getContext("2d").fillRect(20, 20, 760, 460);
+const paper = {
+  ...sample,
+  sources: sample.sources.map((source) =>
+    source.id === "xu-fig1"
+      ? { ...source, image: canvas.toDataURL("image/png") }
+      : source,
+  ),
+};
+const unit = {
+  ...exampleUnits.paper,
+  sections: exampleUnits.paper.sections.slice(0, 2),
+  terms: [],
+};
+const dense: DeckOutline = {
+  slides: [
+    {
+      title: "工程测试页面",
+      bullets: Array.from({ length: 3 }, () => "工程排版测试字符".repeat(14)),
+      notes: "仅用于检验文字是否能在固定图页空间内完整排版。",
+      citations: ["xu-fig1"],
+      imageSource: "xu-fig1",
+    },
+  ],
+};
+const compact: DeckOutline = {
+  slides: [
+    {
+      ...dense.slides[0],
+      bullets: ["工程比较：保留主结果", "必要限定：不扩展结论"],
+    },
+  ],
+};
+const clear: ReviewResult = {
+  issues: [],
+  checkedSources: ["xu-fig1"],
+  limitations: ["工程流程测试，不评价科学主张。"],
+};
+
+function provider(outputs: unknown[]): Provider {
+  return {
+    model: "fixture-test-only",
+    async generate<T>(
+      _instructions: string,
+      _input: unknown,
+      schema: import("zod").z.ZodType<T>,
+      signal: AbortSignal,
+    ) {
+      signal.throwIfAborted();
+      assert.ok(outputs.length, "unexpected extra model request");
+      return { output: schema.parse(outputs.shift()) };
+    },
+  };
+}
+async function runDeck(revised: DeckOutline, finalReview = clear) {
+  const manager = new TaskManager(
+    provider([
+      { unit, deck: dense },
+      clear,
+      { unit, deck: revised },
+      finalReview,
+    ]),
+    async () => {},
+    "online",
+  );
+  const run = await manager.start(
+    {
+      paperId: paper.id,
+      module: "ppt",
+      mode: "live",
+      question: "工程验证一页图件汇报",
+      profileId: "beginner",
+      sourceIds: paper.sources.map((s) => s.id),
+      taughtConcepts: [],
+      slideCount: 1,
+      checks: { readability: false, reason: "工程排版回归" },
+    },
+    paper,
+  );
+  await manager.wait(run.id);
+  return run;
+}
+
+test("schema-valid figure text can exceed real layout capacity; text-only capacity differs", () => {
+  assert.equal(
+    groundedTeachingSchema(paper.sources).safeParse({ unit, deck: dense })
+      .success,
+    true,
+  );
+  assert.throws(
+    () =>
+      slideLayout(dense.slides[0], paper.sources, { width: 800, height: 500 }),
+    /过密/,
+  );
+  const issues = pptLayoutIssues(dense, paper.sources);
+  assert.equal(issues.length, 1);
+  assert.equal(issues[0].severity, "blocking");
+  assert.deepEqual(
+    pptLayoutIssues(
+      { slides: [{ ...dense.slides[0], imageSource: "" }] },
+      paper.sources,
+    ),
+    [],
+  );
+  assert.deepEqual(pptLayoutIssues(compact, paper.sources), []);
+});
+
+test("clear model reviews still trigger one layout repair, and repaired product exports", async () => {
+  const run = await runDeck(compact);
+  assert.equal(run.status, "completed", run.error);
+  assert.equal(run.calls, 4);
+  assert.deepEqual(
+    run.roles.map((r) => r.role),
+    ["teaching", "grounding", "revision", "grounding-final"],
+  );
+  const revision = run.roles.find((r) => r.role === "revision")!.input as any;
+  assert.equal(revision.review.issues[0].severity, "blocking");
+  assert.equal(
+    run.review!.issues.find((i) => i.id === "ppt-layout-1")!.resolved,
+    true,
+  );
+  const output = await exportDeck(
+    run.deck!,
+    paper,
+    "layout-regression-" + randomUUID(),
+  );
+  try {
+    assert.ok((await readFile(output)).length > 1000);
+  } finally {
+    await unlink(output);
+  }
+});
+
+test("model-resolved layout issue remains blocking when revised page still cannot fit", async () => {
+  const initial = withPptLayoutReview(clear, dense, paper.sources);
+  const claimsResolved = {
+    ...clear,
+    issues: initial.issues.map((i) => ({ ...i, resolved: true })),
+  };
+  const run = await runDeck(dense, claimsResolved);
+  assert.equal(run.status, "failed");
+  assert.equal(run.calls, 4);
+  assert.equal(run.deck, undefined);
+  assert.match(run.error!, /过密/);
+  assert.equal(
+    run.review!.issues.find((i) => i.id === "ppt-layout-1")!.resolved,
+    false,
+  );
+});
+
+test("cached completed figure deck is rechecked before delivery", async () => {
+  const repaired = await runDeck(compact);
+  const stale = {
+    ...repaired,
+    id: "legacy-layout-cache",
+    deck: dense,
+    review: clear,
+  };
+  const cache = new ResultCache(
+    "fixture-cache",
+    async () => {},
+    async <T>() => stale as unknown as T,
+  );
+  const manager = new TaskManager(provider([]), async () => {}, "online");
+  const run = await manager.start(
+    {
+      paperId: paper.id,
+      module: "ppt",
+      mode: "live",
+      question: "工程缓存回归",
+      profileId: "beginner",
+      sourceIds: paper.sources.map((s) => s.id),
+      taughtConcepts: [],
+      checks: { readability: false, reason: "工程缓存回归" },
+    },
+    paper,
+    undefined,
+    undefined,
+    { cache },
+  );
+  await manager.wait(run.id);
+  assert.equal(run.cacheHit, stale.id);
+  assert.equal(run.status, "failed");
+  assert.equal(run.calls, 0);
+  assert.match(run.error!, /过密/);
+});

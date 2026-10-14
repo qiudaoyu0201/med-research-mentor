@@ -203,6 +203,67 @@ test("Chinese trial questions retain endpoint, margin and safety definitions wit
       assert.ok(block.includes(page.text.slice(range.start, range.end)));
 });
 
+test("Chinese clinical-validation requests retain population and outcome anchors in bounded excerpts", () => {
+  const pages = [
+    {
+      id: "validation-population",
+      title: "PDF 第 4 页",
+      page: 4,
+      kind: "paper" as const,
+      locator: "PDF 4",
+      verified: false,
+      text:
+        "Results and methods. " +
+        "Background details. ".repeat(180) +
+        "Patients were screened for eligibility; 142 participants met inclusion criteria. Observations with unavailable labels were excluded from analysis. " +
+        "Closing details. ".repeat(170),
+    },
+    {
+      id: "validation-endpoint",
+      title: "PDF 第 5 页",
+      page: 5,
+      kind: "paper" as const,
+      locator: "PDF 5",
+      verified: false,
+      text:
+        "Methods and statistical analysis. " +
+        "Background details. ".repeat(180) +
+        "The outcome was hospital admission for more than 48 hours. Calibration compared observed and predicted probabilities before and after recalibration. " +
+        "Closing details. ".repeat(170),
+    },
+  ];
+  const sources = [
+    ...pages,
+    ...Array.from({ length: 6 }, (_, i) => ({
+      ...pages[0],
+      id: `validation-other-${i}`,
+      title: `PDF 第 ${i + 6} 页`,
+      text: `Page ${i + 6}. ` + "Unrelated narrative. ".repeat(260),
+    })),
+  ];
+  const packet = materialPacket(
+    sources,
+    "汇报预测模型外部验证：研究对象、入组和分析人群、研究结局与校准前后比较",
+  );
+  const texts = pages.map((page) => {
+    const ref = packet.references.find((r) => r.id === page.id)!;
+    assert.ok("visibleRanges" in ref && ref.fullText === false);
+    const text = packet.blocks.find((b) => b.hash === ref.blockHash)!.text;
+    if ("visibleRanges" in ref)
+      for (const range of ref.visibleRanges!)
+        assert.ok(text.includes(page.text.slice(range.start, range.end)));
+    return text;
+  });
+  assert.match(texts[0], /142 participants met inclusion criteria/);
+  assert.match(texts[0], /excluded from analysis/);
+  assert.match(
+    texts[1],
+    /outcome was hospital admission for more than 48 hours/,
+  );
+  assert.match(texts[1], /before and after recalibration/);
+  assert.ok(packet.blocks.reduce((n, b) => n + b.text.length, 0) <= 20_000);
+});
+
 test("material requests restore complete selected evidence without exceeding the shared packet allowance", () => {
   const sources = Array.from({ length: 12 }, (_, i) => ({
     id: `p-${i}`,

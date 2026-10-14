@@ -3,7 +3,7 @@ import type { Source, PaperBundle } from "../shared/types.ts";
 import { preferredSources } from "../shared/image-region.ts";
 export const digest = (value: unknown) =>
   createHash("sha256").update(JSON.stringify(value)).digest("hex");
-export const selectionVersion = "generic-evidence-v8-trial-anchors";
+export const selectionVersion = "generic-evidence-v9-validation-anchors";
 export function figureNumber(text: string) {
   const match = /(?:Figure|Fig\.?|图)\s*([\d一二两三四五六七八九十]+)/i.exec(
     text,
@@ -147,7 +147,8 @@ export function selectEvidence(
 const targetFigure = (question: string) => figureNumber(question);
 function evidenceTerms(question: string) {
   const normalized = question.toLowerCase();
-  const terms: string[] = normalized.match(/[a-z][a-z0-9-]{2,}|[\u4e00-\u9fff]{2,}/g) ?? [];
+  const terms: string[] =
+    normalized.match(/[a-z][a-z0-9-]{2,}|[\u4e00-\u9fff]{2,}/g) ?? [];
   // Page text is usually English while the user may ask in Chinese. Keep
   // method-specific anchors together so excerpting does not leave only a
   // section heading and its final sentence. These aliases are selection hints,
@@ -158,6 +159,17 @@ function evidenceTerms(question: string) {
     terms.push("interim", "stopping", "alpha-spending");
   if (/随机|分组|随访|流程/.test(normalized))
     terms.push("randomized", "allocation", "follow-up");
+  if (/研究对象|研究人群|人群|入组|纳排|队列|外部验证/.test(normalized))
+    terms.push(
+      "population",
+      "patients",
+      "participants",
+      "eligibility",
+      "inclusion",
+      "excluded",
+    );
+  if (/结局/.test(normalized)) terms.push("outcome", "endpoint");
+  if (/校准/.test(normalized)) terms.push("calibration", "recalibration");
   if (/主要终点|主要结局/.test(normalized))
     terms.push("primary", "outcome", "endpoint");
   if (/安全性|不良事件/.test(normalized))
@@ -254,7 +266,10 @@ export function materialPacket(
             ? 12
             : 0) +
           (/results|结果/i.test(part) ? 5 : 0) +
-          terms.reduce((n, w) => n + (containsEvidenceTerm(part, w) ? 10 : 0), 0),
+          terms.reduce(
+            (n, w) => n + (containsEvidenceTerm(part, w) ? 10 : 0),
+            0,
+          ),
       });
     }
     let remaining = quota;
