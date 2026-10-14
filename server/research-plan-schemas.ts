@@ -95,6 +95,25 @@ export const planReviewSchema = z
     limitations: z.array(text(1000)).min(1).max(20),
   })
   .strict();
+export function groundedPlanReviewSchema(
+  sectionIds: string[],
+  sourceIds: string[],
+) {
+  const refs = z
+    .array(sourceIds.length ? z.enum(sourceIds) : researchId)
+    .max(sourceIds.length ? 12 : 0);
+  return planReviewSchema.extend({
+    issues: z
+      .array(
+        planReviewSchema.shape.issues.element.extend({
+          sectionId: z.enum(sectionIds),
+          evidence: refs,
+        }),
+      )
+      .max(30),
+    checkedSourceRefs: refs,
+  });
+}
 export const planJobInputSchema = z
   .object({
     retrieveLiterature: z.boolean().default(false),
