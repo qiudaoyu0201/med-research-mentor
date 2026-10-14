@@ -142,6 +142,32 @@ test("online peripheral advice does not force another model call, internal revie
     true,
   );
 });
+test("grounded PPT schema keeps generated slide text within the renderable budget", () => {
+  const schema = groundedTeachingSchema(sample.sources);
+  const base = structuredClone(defaultDeck);
+  assert.equal(schema.safeParse({ unit, deck: base }).success, true);
+  assert.equal(
+    schema.safeParse({
+      unit,
+      deck: {
+        ...base,
+        slides: [{ ...base.slides[0], bullets: ["a", "b", "c", "d", "e"] }],
+      },
+    }).success,
+    false,
+  );
+  assert.equal(
+    schema.safeParse({
+      unit,
+      deck: {
+        ...base,
+        slides: [{ ...base.slides[0], bullets: ["x".repeat(121)] }],
+      },
+    }).success,
+    false,
+  );
+});
+
 test("full speech is explicit, required when selected, and isolated in cache; generic PPT includes methods", () => {
   const ordinary = { unit, deck: defaultDeck };
   assert.throws(() =>

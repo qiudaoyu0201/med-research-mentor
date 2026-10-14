@@ -134,6 +134,9 @@ export function groundedTeachingSchema(
       ),
   });
   const slides = slideSchema.omit({ imageCrop: true }).extend({
+    // The rendered evidence layout reserves a narrow text column. Keep generated
+    // bullets compact enough to survive the actual PowerPoint export.
+    bullets: z.array(z.string().trim().min(1).max(120)).min(1).max(4),
     citations: ids,
     imagePanel: z
       .enum(["", ...panelSelectionIds(sources)])
