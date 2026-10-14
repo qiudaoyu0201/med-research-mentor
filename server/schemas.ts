@@ -154,6 +154,23 @@ export function groundedTeachingSchema(
       .optional()
       .describe("仅写原图来源 ID；无图写空字符串，不能附说明。"),
   });
+  const groundedSlides = z
+    .array(slides)
+    .min(1)
+    .max(16)
+    .superRefine((items, ctx) => {
+      for (const [index, slide] of items.entries()) {
+        if (slide.imageSource && slide.bullets.length > 3)
+          ctx.addIssue({
+            code: "too_big",
+            origin: "array",
+            maximum: 3,
+            inclusive: true,
+            path: [index, "bullets"],
+            message: "带图页面最多保留三条正文要点。",
+          });
+      }
+    });
   return teachingSchema.extend({
     unit: unitSchema.extend({ sections: z.array(sections).min(1).max(10) }),
     deck: (speechScript
@@ -162,7 +179,7 @@ export function groundedTeachingSchema(
         })
       : deckSchema.omit({ speechScript: true })
     )
-      .extend({ slides: z.array(slides).min(1).max(16) })
+      .extend({ slides: groundedSlides })
       .nullable(),
   });
 }

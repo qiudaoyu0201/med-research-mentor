@@ -166,6 +166,22 @@ test("grounded PPT schema keeps generated slide text within the renderable budge
     }).success,
     false,
   );
+  assert.equal(
+    schema.safeParse({
+      unit,
+      deck: {
+        ...base,
+        slides: [
+          {
+            ...base.slides[0],
+            imageSource: "xu-fig1",
+            bullets: ["a", "b", "c", "d"],
+          },
+        ],
+      },
+    }).success,
+    false,
+  );
 });
 
 test("full speech is explicit, required when selected, and isolated in cache; generic PPT includes methods", () => {
