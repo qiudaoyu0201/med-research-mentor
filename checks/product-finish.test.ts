@@ -160,6 +160,49 @@ test("missing-data questions preserve the MAR/MICE method paragraph in compresse
   assert.match(block, /MAR/);
   assert.match(block, /MICE/);
 });
+test("Chinese trial questions retain endpoint, margin and safety definitions within the evidence budget", () => {
+  const page = {
+    id: "trial-methods",
+    title: "PDF 第 6 页",
+    page: 6,
+    kind: "paper" as const,
+    locator: "PDF 6",
+    verified: false,
+    text:
+      "Methods and statistical analysis. " +
+      "Background details. ".repeat(80) +
+      "The primary outcome was recovery assessed per person. " +
+      "Background details. ".repeat(90) +
+      "The non-inferiority margin of 0.75 units was fixed before analysis; confidence intervals determine the comparison. " +
+      "Background details. ".repeat(90) +
+      "Serious adverse events included complications; safety observations were weekly. " +
+      "Closing details. ".repeat(170),
+  };
+  const sources = [
+    page,
+    ...Array.from({ length: 5 }, (_, i) => ({
+      ...page,
+      id: `trial-other-${i}`,
+      title: `PDF 第 ${i + 1} 页`,
+      text: `Page ${i + 1}. ` + "Unrelated narrative. ".repeat(250),
+    })),
+  ];
+  const packet = materialPacket(
+    sources,
+    "带读这项非劣效随机试验，解释主要终点、界值、置信区间和安全性",
+  );
+  const ref = packet.references.find((r) => r.id === page.id)!;
+  const block = packet.blocks.find((b) => b.hash === ref.blockHash)!.text;
+  assert.ok(block.includes("margin of 0.75 units"));
+  assert.ok(block.includes("primary outcome was recovery"));
+  assert.ok(block.includes("Serious adverse events included complications"));
+  assert.ok("visibleRanges" in ref && ref.fullText === false);
+  assert.ok(packet.blocks.reduce((n, b) => n + b.text.length, 0) <= 22_000);
+  if ("visibleRanges" in ref)
+    for (const range of ref.visibleRanges!)
+      assert.ok(block.includes(page.text.slice(range.start, range.end)));
+});
+
 test("material requests restore complete selected evidence without exceeding the shared packet allowance", () => {
   const sources = Array.from({ length: 12 }, (_, i) => ({
     id: `p-${i}`,

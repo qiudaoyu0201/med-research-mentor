@@ -3,7 +3,7 @@ import type { Source, PaperBundle } from "../shared/types.ts";
 import { preferredSources } from "../shared/image-region.ts";
 export const digest = (value: unknown) =>
   createHash("sha256").update(JSON.stringify(value)).digest("hex");
-export const selectionVersion = "generic-evidence-v7-revision-exposure";
+export const selectionVersion = "generic-evidence-v8-trial-anchors";
 export function figureNumber(text: string) {
   const match = /(?:Figure|Fig\.?|图)\s*([\d一二两三四五六七八九十]+)/i.exec(
     text,
@@ -158,6 +158,20 @@ function evidenceTerms(question: string) {
     terms.push("interim", "stopping", "alpha-spending");
   if (/随机|分组|随访|流程/.test(normalized))
     terms.push("randomized", "allocation", "follow-up");
+  if (/主要终点|主要结局/.test(normalized))
+    terms.push("primary", "outcome", "endpoint");
+  if (/安全性|不良事件/.test(normalized))
+    terms.push("adverse", "serious", "complications", "safety");
+  if (/非劣|等效|non[ -]?inferior|equivalence/.test(normalized))
+    terms.push(
+      "non-inferiority",
+      "noninferiority",
+      "equivalence",
+      "margin",
+      "confidence",
+      "intention-to-treat",
+      "per-protocol",
+    );
   return [...new Set(terms)];
 }
 function containsEvidenceTerm(text: string, term: string) {

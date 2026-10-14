@@ -5,9 +5,13 @@ import { pdfRuntime } from "../server/pdf-runtime.ts";
 import { pageFigures } from "../server/pdf-figures.ts";
 
 // Tiny original PDF with real vector geometry and independently styled caption runs.
-function fixture(caption: string, graphics = true) {
+function fixture(caption: string, graphics: boolean | string = true) {
   const stream = [
-    graphics ? "90 220 400 250 re S" : "",
+    typeof graphics === "string"
+      ? graphics
+      : graphics
+        ? "90 220 400 250 re S"
+        : "",
     graphics ? "BT /F1 10 Tf 96 230 Td (Y axis) Tj ET" : "",
     caption,
   ].join("\n");
@@ -59,7 +63,7 @@ const split = (suffix = ".", x = 58, y = 160) =>
     text("F1", x, y, suffix),
     text("F1", 65, 160, "Outcome by group."),
   ].join("\n");
-async function extract(caption: string, graphics = true) {
+async function extract(caption: string, graphics: boolean | string = true) {
   const task = getDocument({ ...pdfRuntime, data: fixture(caption, graphics) });
   try {
     const pdf = await task.promise;
@@ -195,4 +199,25 @@ test("caption extraction stops before separated body text and publication footer
   const caption = result.sources[0].caption!;
   assert.match(caption, /Caption comparison/);
   assert.doesNotMatch(caption, /Unrelated body|Publication footer/);
+});
+
+test("uppercase panel labels in original PDF geometry bind separate figure regions", async () => {
+  const result = await extract(
+    [
+      text("F2", 96, 400, "A"),
+      text("F2", 300, 400, "B"),
+      text("F1", 36, 160, "Figure 4. (A) Measurement. (B) Control."),
+    ].join("\n"),
+    "90 220 400 250 re S",
+  );
+  assert.equal(result.sources.length, 1);
+  const panels = result.sources[0].imagePanels!;
+  assert.deepEqual(
+    panels.map((p) => p.label),
+    ["a", "b"],
+  );
+  assert.ok(
+    panels[0].region.left + panels[0].region.width <= panels[1].region.left,
+  );
+  assert.ok(panels[0].region.width < 0.6 && panels[1].region.width < 0.6);
 });

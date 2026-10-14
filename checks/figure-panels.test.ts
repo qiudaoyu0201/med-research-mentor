@@ -48,6 +48,27 @@ test("uppercase parenthesized captions bind uppercase printed labels", () => {
   );
 });
 
+test("uppercase captions do not invent raster panels or accept ambiguous labels", () => {
+  const caption = "(A) Measurement. (B) Control.";
+  const uppercase = labels.slice(0, 2).map((p) => ({
+    ...p,
+    text: p.text.toUpperCase(),
+  }));
+  assert.deepEqual(figurePanels(box, caption, []), []);
+  assert.deepEqual(figurePanels(box, caption, [uppercase[0]]), []);
+  assert.deepEqual(
+    figurePanels(box, caption, [...uppercase, point("a", 100, 70)]),
+    [],
+  );
+  assert.deepEqual(
+    figurePanels(box, caption, [
+      uppercase[1],
+      { ...uppercase[0], left: 300, right: 305 },
+    ]),
+    [],
+  );
+});
+
 test("printed panels keep the tall table intact while the lower left panel starts separately", () => {
   const panels = figurePanels(box, caption, labels);
   assert.equal(panels.length, 7);

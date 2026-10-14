@@ -37,7 +37,7 @@ export function figurePanels(
         ...caption.matchAll(/(?:^|\s)([A-P])\s*[,]\s+/gi),
       ]
         .sort((a, b) => (a.index ?? 0) - (b.index ?? 0))
-        .map((m) => (m[1] ?? m[2]).toLowerCase()),
+        .map((m) => m[1].toLowerCase()),
     ),
   ];
   if (
