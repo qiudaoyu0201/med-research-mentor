@@ -856,3 +856,29 @@ test("slide wrapping keeps digit-leading scientific identifiers intact without c
       );
   }
 });
+
+test("slide wrapping preserves compound pressure units at real column widths", () => {
+  const context = createCanvas(1, 1).getContext("2d");
+  for (const [text, unit] of [
+    ["舒张压≥90或收缩压≥140 mm Hg：告知高血压并鼓励就医", "mm Hg"],
+    ["呼吸机压力记录为20 cm H2O，按相同时间窗比较", "cm H2O"],
+  ]) {
+    for (const [width, fontSize] of [
+      [5.18, 26],
+      [3.5, 19],
+    ]) {
+      const lines = wrapSlideText(text, width, fontSize);
+      assert.equal(lines.join("").replace(/\s/g, ""), text.replace(/\s/g, ""));
+      assert.ok(
+        lines.some((line) => line.includes(unit)),
+        "Pressure unit split: " + lines.join(" | "),
+      );
+      context.font = fontSize + "pt Microsoft YaHei";
+      for (const line of lines)
+        assert.ok(
+          context.measureText(line).width <= width * 96,
+          "Actual font width overflow: " + line,
+        );
+    }
+  }
+});
