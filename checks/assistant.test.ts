@@ -252,7 +252,10 @@ test("optional full speech reaches PPT generation, grounding and saved deck with
   const h = harness(
     [
       {
-        unit: exampleUnits.paper,
+        unit: {
+          ...exampleUnits.paper,
+          sections: exampleUnits.paper.sections.slice(0, 3),
+        },
         deck: {
           ...defaultDeck,
           slides: defaultDeck.slides.map((slide) => ({
@@ -729,6 +732,7 @@ test("Figure + methods + three slides uses one teaching group and novice sees th
     s.citations = ["xu-fig1"];
   });
   const unit = structuredClone(exampleUnits.figure);
+  unit.sections = unit.sections.slice(0, 3);
   unit.sections.forEach((s) => {
     s.citations = ["xu-fig1"];
   });

@@ -751,6 +751,7 @@ export class TaskManager {
           const baseSchema = groundedTeachingSchema(
             illustratedSources(),
             run.input.speechScript,
+            { compactUnit: run.input.module === "ppt" },
           );
           return run.input.diagnosticScope && run.input.module === "ppt"
             ? baseSchema.extend({

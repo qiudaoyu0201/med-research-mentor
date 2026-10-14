@@ -115,6 +115,7 @@ export const groundingContractVersion = "grounded-output-v4-source-kinds";
 export function groundedTeachingSchema(
   sources: Source[],
   speechScript = false,
+  options: { compactUnit?: boolean } = {},
 ) {
   const ids = z.array(z.enum(sources.map((s) => s.id))).max(20);
   const kinds = [
@@ -171,8 +172,15 @@ export function groundedTeachingSchema(
           });
       }
     });
+  const unitSections = z
+    .array(sections)
+    .min(1)
+    .max(options.compactUnit ? 3 : 10);
+  const unitTerms = options.compactUnit
+    ? unitSchema.shape.terms.max(5)
+    : unitSchema.shape.terms;
   return teachingSchema.extend({
-    unit: unitSchema.extend({ sections: z.array(sections).min(1).max(10) }),
+    unit: unitSchema.extend({ sections: unitSections, terms: unitTerms }),
     deck: (speechScript
       ? deckSchema.extend({
           speechScript: deckSchema.shape.speechScript.unwrap(),

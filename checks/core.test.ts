@@ -182,6 +182,46 @@ test("grounded PPT schema keeps generated slide text within the renderable budge
     }).success,
     false,
   );
+  const compact = groundedTeachingSchema(sample.sources, false, {
+    compactUnit: true,
+  });
+  const shortSections = Array.from({ length: 3 }, (_, index) => ({
+    ...unit.sections[0],
+    title: `导读${index + 1}`,
+  }));
+  assert.equal(
+    compact.safeParse({
+      unit: { ...unit, sections: shortSections },
+      deck: base,
+    }).success,
+    true,
+  );
+  assert.equal(
+    compact.safeParse({
+      unit: {
+        ...unit,
+        sections: [
+          ...shortSections,
+          { ...unit.sections[0], title: "导读4" },
+        ],
+      },
+      deck: base,
+    }).success,
+    false,
+  );
+  assert.equal(
+    compact.safeParse({
+      unit: {
+        ...unit,
+        terms: Array.from({ length: 6 }, (_, index) => ({
+          name: `术语${index + 1}`,
+          explanation: "简短解释",
+        })),
+      },
+      deck: base,
+    }).success,
+    false,
+  );
 });
 
 test("full speech is explicit, required when selected, and isolated in cache; generic PPT includes methods", () => {
