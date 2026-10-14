@@ -32,9 +32,12 @@ export function figurePanels(
 ): FigurePanel[] {
   const expected = [
     ...new Set(
-      [...caption.matchAll(/(?:^|\s)([a-p])\s*[,]\s+(?=[A-Z])/g)].map(
-        (m) => m[1],
-      ),
+      [
+        ...caption.matchAll(/\(([A-P])\)/gi),
+        ...caption.matchAll(/(?:^|\s)([A-P])\s*[,]\s+/gi),
+      ]
+        .sort((a, b) => (a.index ?? 0) - (b.index ?? 0))
+        .map((m) => (m[1] ?? m[2]).toLowerCase()),
     ),
   ];
   if (
@@ -44,7 +47,7 @@ export function figurePanels(
     return [];
   const points = texts.filter(
     (t) =>
-      /^[a-p]$/.test(t.text.trim()) &&
+      /^[a-p]$/i.test(t.text.trim()) &&
       t.height >= 5 &&
       t.height <= 20 &&
       t.left >= figure.left &&
@@ -59,14 +62,20 @@ export function figurePanels(
         ps.length >= expected.length &&
         ps.length <= 16 &&
         expected.every(
-          (l) => ps.filter((p) => p.text.trim() === l).length === 1,
+          (l) =>
+            ps.filter((p) => p.text.trim().toLowerCase() === l).length === 1,
         ) &&
         [...ps]
-          .sort((a, b) => a.text.localeCompare(b.text))
-          .every((p, i) => p.text.trim() === String.fromCharCode(97 + i)),
+          .sort((a, b) =>
+            a.text.localeCompare(b.text, undefined, { sensitivity: "base" }),
+          )
+          .every(
+            (p, i) =>
+              p.text.trim().toLowerCase() === String.fromCharCode(97 + i),
+          ),
     );
   if (groups.length !== 1) return [];
-  const sequence = groups[0].map((p) => p.text.trim()).sort();
+  const sequence = groups[0].map((p) => p.text.trim().toLowerCase()).sort();
   const rows: { y: number; points: PanelText[] }[] = [];
   for (const point of [...groups[0]].sort(
     (a, b) => a.top - b.top || a.left - b.left,
@@ -80,8 +89,9 @@ export function figurePanels(
   }
   for (const row of rows) row.points.sort((a, b) => a.left - b.left);
   if (
-    rows.flatMap((r) => r.points.map((p) => p.text.trim())).join("") !==
-    sequence.join("")
+    rows
+      .flatMap((r) => r.points.map((p) => p.text.trim().toLowerCase()))
+      .join("") !== sequence.join("")
   )
     return [];
   const panels: (FigureBox & { label: string })[] = [];
@@ -105,7 +115,7 @@ export function figurePanels(
             : (inherited?.left ?? figure.right);
       if (right - left < 25) return [];
       const box = {
-        label: row.points[i].text.trim(),
+        label: row.points[i].text.trim().toLowerCase(),
         left,
         right,
         top,

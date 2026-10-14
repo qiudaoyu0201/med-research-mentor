@@ -31,6 +31,23 @@ const labels = [
   point("g", 8, 310),
 ];
 
+test("uppercase parenthesized captions bind uppercase printed labels", () => {
+  const uppercaseLabels = labels.map((p) => ({
+    ...p,
+    text: p.text.toUpperCase(),
+  }));
+  const panels = figurePanels(
+    box,
+    "(A) Design. (B) Marker. (C) Count. (D) Stain. (E) Death. (F) Table. (G) RNA.",
+    uppercaseLabels,
+  );
+  assert.equal(panels.length, 7);
+  assert.deepEqual(
+    panels.map((panel) => panel.label),
+    ["a", "b", "c", "d", "e", "f", "g"],
+  );
+});
+
 test("printed panels keep the tall table intact while the lower left panel starts separately", () => {
   const panels = figurePanels(box, caption, labels);
   assert.equal(panels.length, 7);
