@@ -28,7 +28,12 @@ import type { Provider } from "./provider.ts";
 import { save } from "./storage.ts";
 import { BudgetLedger } from "./budget.ts";
 import { taskTiming } from "./task-timing.ts";
-import { materialPacket, digest, selectionVersion } from "./materials.ts";
+import {
+  materialPacket,
+  revisionMaterialPacket,
+  digest,
+  selectionVersion,
+} from "./materials.ts";
 import { foundationCatalog } from "./foundations.ts";
 import type { ResultCache } from "./cache.ts";
 import { legacyPreferences } from "../shared/learning-intent.ts";
@@ -812,7 +817,7 @@ export class TaskManager {
           scopedChecking,
           {
             question: run.input.question,
-            sources: materialPacket(sources, run.input.question),
+            sources: task.sources,
             draft: generated.unit,
             previous: run.input.previous ?? null,
             previousIsContextOnly: true,
@@ -878,7 +883,8 @@ export class TaskManager {
           )
           .flatMap((i) => i.evidence)
           .filter((id) => sources.some((s) => s.id === id && !s.image));
-        const focusedPacket = materialPacket(
+        const focusedPacket = revisionMaterialPacket(
+          task.sources,
           sources,
           run.input.question,
           focusIds,
@@ -933,9 +939,31 @@ export class TaskManager {
             provided = true;
           if (added.length) {
             try {
-              materialPacket([...sources, ...added]);
-              sources.push(...added);
-              supplemented = true;
+              const extended = revisionMaterialPacket(
+                task.sources,
+                [...sources, ...added],
+                run.input.question,
+                focusIds,
+              );
+              const delivered = added.filter((source) =>
+                extended.references.some(
+                  (ref) =>
+                    ref.id === source.id &&
+                    !("fullText" in ref && ref.fullText === false),
+                ),
+              );
+              if (delivered.length) {
+                sources.push(...delivered);
+                task.sources = extended;
+                supplemented = true;
+              }
+              provided = matches.every((source) =>
+                task.sources.references.some(
+                  (ref) =>
+                    ref.id === source.id &&
+                    !("fullText" in ref && ref.fullText === false),
+                ),
+              );
             } catch {
               provided = false;
             }
@@ -968,7 +996,12 @@ export class TaskManager {
               .filter((s) => !run.input.sourceIds.includes(s.id))
               .map((s) => s.id),
           });
-          task.sources = materialPacket(sources, run.input.question, focusIds);
+          task.sources = revisionMaterialPacket(
+            task.sources,
+            sources,
+            run.input.question,
+            focusIds,
+          );
           await this.persist("runs", run.id, run);
         }
         if (

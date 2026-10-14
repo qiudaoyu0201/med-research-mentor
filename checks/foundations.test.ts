@@ -802,3 +802,88 @@ test("evaluation has its own deadline and preserves the expired product ledger",
   assert.deepEqual(run.budget, original);
   assert.equal(generationAttempts(run).length, 4);
 });
+
+test("teaching, revision and recheck retain previously delivered trial assumptions after a page request", async () => {
+  const p = bindPaperEvidence({
+    id: "retained-trial",
+    title: "Trial",
+    version: "v1",
+    scope: "test",
+    sources: Array.from({ length: 8 }, (_, i) => ({
+      id: `trial-p${i + 1}`,
+      title: `PDF 第 ${i + 1} 页`,
+      page: i + 1,
+      kind: "paper" as const,
+      locator: `PDF ${i + 1}`,
+      verified: false,
+      text:
+        `Page ${i + 1}. ` +
+        "Generic evidence. ".repeat(128) +
+        (i === 5
+          ? "50% eligible, 60% initiate, 30% overall, design target 42.5%."
+          : "Other evidence.") +
+        " Remaining details. ".repeat(140),
+    })),
+  });
+  const audit = {
+    ...review,
+    issues: [
+      {
+        id: "sample-size",
+        type: "material",
+        severity: "blocking",
+        location: "正文",
+        suggestion: "补充第八页方法原文",
+        evidence: ["trial-p8"],
+        resolved: false,
+      },
+    ],
+  };
+  const outputs = [
+    lesson("trial-p6", "paper"),
+    feedback,
+    audit,
+    lesson("trial-p6", "paper"),
+    feedback,
+    review,
+  ];
+  const inputs: any[] = [];
+  const manager = new TaskManager(
+    {
+      model: "test",
+      async generate(_i, input, schema) {
+        inputs.push(structuredClone(input));
+        return { output: schema.parse(outputs.shift()) };
+      },
+    },
+    discard,
+  );
+  const run = await manager.start(
+    {
+      paperId: p.id,
+      module: "paper",
+      mode: "live",
+      question: "trial denominators",
+      profileId: "beginner",
+      sourceIds: p.sources.map((s) => s.id),
+      taughtConcepts: [],
+    },
+    p,
+  );
+  await manager.wait(run.id);
+  assert.equal(run.status, "completed", run.error);
+  assert.equal(run.calls, 6);
+  for (const index of [0, 2, 3, 5]) {
+    const packet = inputs[index].sources;
+    const ref = packet.references.find((r: any) => r.id === "trial-p6");
+    assert.match(
+      packet.blocks.find((b: any) => b.hash === ref.blockHash).text,
+      /30% overall/,
+    );
+    assert.ok(
+      packet.blocks.reduce((n: number, b: any) => n + b.text.length, 0) <=
+        22_000,
+    );
+  }
+  assert.deepEqual(inputs[3].sources, inputs[5].sources);
+});

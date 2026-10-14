@@ -17,6 +17,7 @@ import { parsePdf } from "../server/pdf.ts";
 import {
   selectEvidence,
   materialPacket,
+  revisionMaterialPacket,
   defaultPaperSources,
 } from "../server/materials.ts";
 import { DeckVersions } from "../server/deck-versions.ts";
@@ -155,6 +156,152 @@ test("material requests restore complete selected evidence without exceeding the
   const bounded = materialPacket(oversized, "complete presentation", ["p-0"]);
   assert.ok(bounded.blocks.reduce((n, b) => n + b.text.length, 0) <= 22000);
   assert.ok("visibleRanges" in bounded.references[0]);
+});
+
+const revisionPages = () =>
+  Array.from({ length: 8 }, (_, i) => ({
+    id: `revision-p${i + 1}`,
+    title: `PDF 第 ${i + 1} 页`,
+    page: i + 1,
+    kind: "paper" as const,
+    locator: `PDF ${i + 1}`,
+    verified: false,
+    text:
+      `Page ${i + 1}. ` +
+      "Generic evidence. ".repeat(128) +
+      (i === 5
+        ? "50% eligible, 60% initiate, 30% overall, design target 42.5%."
+        : "Other evidence.") +
+      " Remaining details. ".repeat(140),
+  }));
+function assertPriorExposure(
+  previous: ReturnType<typeof materialPacket>,
+  next: ReturnType<typeof materialPacket>,
+  sources: ReturnType<typeof revisionPages>,
+) {
+  for (const ref of previous.references) {
+    const source = sources.find((s) => s.id === ref.id)!;
+    const after = next.references.find((r) => r.id === ref.id)!;
+    assert.ok(after, "Previously delivered references must remain present");
+    const oldRanges =
+      "fullText" in ref && ref.fullText === false
+        ? ref.visibleRanges!
+        : [{ start: 0, end: source.text.length }];
+    const newRanges =
+      "fullText" in after && after.fullText === false
+        ? after.visibleRanges!
+        : [{ start: 0, end: source.text.length }];
+    for (const range of oldRanges)
+      assert.ok(
+        newRanges.some((r) => r.start <= range.start && r.end >= range.end),
+      );
+  }
+  assert.ok(next.blocks.reduce((n, b) => n + b.text.length, 0) <= 22_000);
+}
+
+test("revision supplementation preserves earlier sample-size assumptions within the same evidence bound", () => {
+  const sources = revisionPages();
+  const original = materialPacket(sources, "trial denominators");
+  const p6 = original.references.find((r) => r.id === "revision-p6")!;
+  assert.match(
+    original.blocks.find((b) => b.hash === p6.blockHash)!.text,
+    /30% overall/,
+  );
+  const independentlyCompressed = materialPacket(
+    sources,
+    "trial denominators",
+    ["revision-p8"],
+  );
+  assert.doesNotMatch(
+    independentlyCompressed.blocks.find((b) => b.hash === p6.blockHash)!.text,
+    /30% overall/,
+  );
+  const revised = revisionMaterialPacket(
+    original,
+    sources,
+    "trial denominators",
+    ["revision-p8"],
+  );
+  assertPriorExposure(original, revised, sources);
+  assert.match(
+    revised.blocks.find((b) => b.hash === p6.blockHash)!.text,
+    /30% overall/,
+  );
+  const again = revisionMaterialPacket(revised, sources, "trial denominators", [
+    "revision-p8",
+  ]);
+  assertPriorExposure(revised, again, sources);
+  assert.deepEqual(again, revised);
+});
+
+test("revision evidence stays partial when requested pages cannot fit and new foundations remain pending", () => {
+  const sources = revisionPages(),
+    original = materialPacket(sources, "trial denominators");
+  const foundation = {
+    ...sources[0],
+    id: "new-foundation",
+    title: "New foundation",
+    kind: "foundation" as const,
+    text: "Foundation definition. ".repeat(400),
+  };
+  const revised = revisionMaterialPacket(
+    original,
+    [...sources, foundation],
+    "trial denominators",
+    sources.map((s) => s.id),
+  );
+  assertPriorExposure(original, revised, sources);
+  assert.ok(
+    revised.references.some((r) => "fullText" in r && r.fullText === false),
+  );
+  assert.ok(!revised.references.some((r) => r.id === foundation.id));
+  assert.match(revised.coverage!, /不代表全文/);
+  const aliasFoundation = {
+    ...sources[7],
+    id: "alias-foundation",
+    kind: "foundation" as const,
+  };
+  const aliasPacket = revisionMaterialPacket(
+    original,
+    [...sources, aliasFoundation],
+    "trial denominators",
+    sources.map((s) => s.id),
+  );
+  assert.ok(
+    !aliasPacket.references.some((r) => r.id === aliasFoundation.id),
+    "A partial shared block must not report a whole new foundation as delivered",
+  );
+});
+
+test("revision evidence deduplicates shared text and rejects changed or ambiguous prior exposure", () => {
+  const sources = revisionPages();
+  sources.push({ ...sources[0], id: "alias" });
+  const original = materialPacket(sources, "trial denominators");
+  const revised = revisionMaterialPacket(
+    original,
+    sources,
+    "trial denominators",
+    ["alias"],
+  );
+  assertPriorExposure(original, revised, sources);
+  assert.equal(revised.blocks.length, 8);
+  assert.equal(revised.references.length, 9);
+  const duplicate = structuredClone(original);
+  duplicate.blocks.push({ ...duplicate.blocks[0] });
+  assert.throws(() => revisionMaterialPacket(duplicate, sources), /重复/);
+  const badText = structuredClone(original);
+  badText.blocks[0].text += " fabricated";
+  assert.throws(
+    () => revisionMaterialPacket(badText, sources),
+    /可见范围不一致/,
+  );
+  const changed = sources.map((s, i) =>
+    i ? s : { ...s, text: s.text + " changed" },
+  );
+  assert.throws(() => revisionMaterialPacket(original, changed), /来源改变/);
+  const orphan = structuredClone(original);
+  orphan.blocks.push({ hash: "orphan", text: "unbound" });
+  assert.throws(() => revisionMaterialPacket(orphan, sources), /未绑定/);
 });
 
 test("valid JSON with invalid nested shape is quarantined before startup consumers; workspace restores its backup", async () => {
@@ -691,7 +838,6 @@ test("mixed Latin and Chinese lines fit the actual export font width", () => {
   }
 });
 
-
 test("slide wrapping keeps digit-leading scientific identifiers intact without changing scientific text", () => {
   const context = createCanvas(1, 1).getContext("2d");
   context.font = "19pt Microsoft YaHei";
@@ -699,8 +845,14 @@ test("slide wrapping keeps digit-leading scientific identifiers intact without c
     const text = "抗ATM反向捕获：检出" + token + "，未检出SUZ12";
     const lines = wrapSlideText(text, 3.5, 19);
     assert.equal(lines.join(""), text);
-    assert.ok(lines.some((line) => line.includes(token)), "Identifier must stay in one line: " + token);
+    assert.ok(
+      lines.some((line) => line.includes(token)),
+      "Identifier must stay in one line: " + token,
+    );
     for (const line of lines)
-      assert.ok(context.measureText(line).width <= 3.5 * 96, "Actual font width overflow: " + line);
+      assert.ok(
+        context.measureText(line).width <= 3.5 * 96,
+        "Actual font width overflow: " + line,
+      );
   }
 });
