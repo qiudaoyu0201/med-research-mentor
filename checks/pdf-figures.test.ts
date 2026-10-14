@@ -116,3 +116,83 @@ test("a split caption without original plot geometry does not invent a figure", 
   const result = await extract(split(), false);
   assert.deepEqual(result.sources, []);
 });
+
+test("short caption titles retain wide multi-panel explanations and their controls", async () => {
+  const result = await extract(
+    [
+      text("F2", 36, 160, "Figure 2. Outcome."),
+      text(
+        "F1",
+        36,
+        150,
+        "(A) Oxygen treatment is compared with its matched control.",
+      ),
+      text(
+        "F1",
+        36,
+        140,
+        "(B) Expression is normalized to the loading reference.",
+      ),
+      text("F1", 36, 130, "(C) si-C is a scrambled control; N is untreated."),
+    ].join("\n"),
+  );
+  assert.equal(result.sources.length, 1);
+  const caption = result.sources[0].caption!;
+  assert.match(caption, /Oxygen treatment/);
+  assert.match(caption, /loading reference/);
+  assert.match(caption, /si-C is a scrambled control; N is untreated/);
+});
+
+test("short caption titles retain continuation lines wider than the original plot", async () => {
+  const explanation = "(A) " + "Control measurements ".repeat(7) + "n=3.";
+  const result = await extract(
+    [
+      text("F2", 36, 160, "Figure 4. Short title."),
+      text("F1", 36, 150, explanation),
+    ].join("\n"),
+  );
+  const continuation = result.items.find((item: any) =>
+    item.str?.includes("Control measurements"),
+  ) as any;
+  assert.ok(
+    36 + continuation.width > 497,
+    "fixture must extend beyond the plot and its padding",
+  );
+  assert.equal(result.sources.length, 1);
+  assert.match(result.sources[0].caption!, /Control measurements/);
+});
+
+test("long captions keep final panel methods beyond the old 110-point cutoff", async () => {
+  const lines = Array.from({ length: 15 }, (_, i) =>
+    text(
+      "F1",
+      36,
+      160 - i * 8,
+      i === 0
+        ? "Figure 3. Result."
+        : i === 14
+          ? "(E) Final method and independent repeat count n=3."
+          : "Caption explanation of the plotted comparison.",
+    ),
+  );
+  const result = await extract(lines.join("\n"));
+  assert.equal(result.sources.length, 1);
+  assert.match(
+    result.sources[0].caption!,
+    /Final method and independent repeat count n=3/,
+  );
+});
+
+test("caption extraction stops before separated body text and publication footers", async () => {
+  const result = await extract(
+    [
+      text("F1", 36, 160, "Figure 2. Outcome."),
+      text("F1", 36, 150, "(A) Caption comparison and its control."),
+      text("F1", 36, 118, "Unrelated body text that must remain on the page."),
+      text("F1", 36, 100, "Publication footer and page number."),
+    ].join("\n"),
+  );
+  const caption = result.sources[0].caption!;
+  assert.match(caption, /Caption comparison/);
+  assert.doesNotMatch(caption, /Unrelated body|Publication footer/);
+});

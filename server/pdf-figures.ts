@@ -161,19 +161,58 @@ export async function pageFigures(
     top = Math.max(topLimit, top - 7);
     bottom = Math.min(cap.top - 2, bottom + 7);
     if (right - left < 60 || bottom - top < 35) continue;
-    const caption = texts
+    // A short caption title can sit above full-width explanatory lines. When
+    // the first continuation line starts at the caption margin, use its real
+    // width instead of the title or plot width; this keeps long captions while
+    // retaining the column guard for unrelated body text.
+    const captionRight = Math.max(
+      column.right,
+      right,
+      ...texts
+        .filter(
+          (t) =>
+            t.top > cap.top + cap.height * 0.8 &&
+            t.top <= cap.top + cap.height * 2.2 &&
+            t.left >= cap.left - 2 &&
+            t.left <= cap.left + cap.height * 1.2 &&
+            t.height <= cap.height * 1.1,
+        )
+        .map((t) => t.right),
+    );
+    const nextCaption = captions.find(
+      (c) =>
+        c.top > cap.top + cap.height &&
+        c.left < captionRight &&
+        c.right > cap.left,
+    );
+    const captionBottom = Math.min(
+      H * 0.95,
+      cap.top + H * 0.25,
+      nextCaption?.top ?? H,
+    );
+    const candidates = texts
       .filter(
         (t) =>
           t.top >= cap.top - 1 &&
-          t.top < cap.top + Math.min(110, H * 0.15) &&
+          t.top < captionBottom &&
           t.left >= cap.left - 2 &&
-          t.right <= column.right + 2 &&
-          t.height <= cap.height * 1.25,
+          t.right <= captionRight + 2 &&
+          t.height <= cap.height * 1.1,
       )
       .sort(
         (a, b) =>
           Math.round(a.top / 3) - Math.round(b.top / 3) || a.left - b.left,
-      )
+      );
+    const captionRuns: typeof texts = [];
+    let lastCaptionTop = cap.top;
+    for (const t of candidates) {
+      // A vertical break marks body text or a footer, even if its font matches.
+      if (t.top - lastCaptionTop > cap.height * 1.8) break;
+      captionRuns.push(t);
+      lastCaptionTop = Math.max(lastCaptionTop, t.top);
+      if (/^doi\s*:/i.test(t.text.trim())) break;
+    }
+    const caption = captionRuns
       .map((t) => t.text)
       .join(" ")
       .slice(0, 7000);
