@@ -146,12 +146,26 @@ export function selectEvidence(
 }
 const targetFigure = (question: string) => figureNumber(question);
 function evidenceTerms(question: string) {
-  return [
-    ...new Set(
-      question.toLowerCase().match(/[a-z][a-z0-9-]{2,}|[\u4e00-\u9fff]{2,}/g) ??
-        [],
-    ),
-  ];
+  const normalized = question.toLowerCase();
+  const terms: string[] = normalized.match(/[a-z][a-z0-9-]{2,}|[\u4e00-\u9fff]{2,}/g) ?? [];
+  // Page text is usually English while the user may ask in Chinese. Keep
+  // method-specific anchors together so excerpting does not leave only a
+  // section heading and its final sentence. These aliases are selection hints,
+  // not claims about what the paper used.
+  if (/缺失|失访|插补|不完整/.test(normalized))
+    terms.push("missing", "imputation", "mice", "mar", "mnar");
+  if (/中期|停止|提前结束|alpha|显著性/.test(normalized))
+    terms.push("interim", "stopping", "alpha-spending");
+  if (/随机|分组|随访|流程/.test(normalized))
+    terms.push("randomized", "allocation", "follow-up");
+  return [...new Set(terms)];
+}
+function containsEvidenceTerm(text: string, term: string) {
+  if (/^[a-z][a-z0-9-]*$/i.test(term)) {
+    const escaped = term.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+    return new RegExp(`\\b${escaped}\\b`, "i").test(text);
+  }
+  return text.includes(term);
 }
 function pageScore(s: Source, terms: string[], modules: string[]) {
   const t = s.text.toLowerCase();
@@ -165,7 +179,7 @@ function pageScore(s: Source, terms: string[], modules: string[]) {
       : 0) +
     (/results|结果/i.test(t) ? 45 : 0) +
     (s.section === "methods" ? 60 : 0) +
-    terms.reduce((n, w) => n + (t.includes(w) ? 15 : 0), 0)
+    terms.reduce((n, w) => n + (containsEvidenceTerm(t, w) ? 15 : 0), 0)
   );
 }
 export function materialPacket(
@@ -226,7 +240,7 @@ export function materialPacket(
             ? 12
             : 0) +
           (/results|结果/i.test(part) ? 5 : 0) +
-          terms.reduce((n, w) => n + (part.includes(w) ? 10 : 0), 0),
+          terms.reduce((n, w) => n + (containsEvidenceTerm(part, w) ? 10 : 0), 0),
       });
     }
     let remaining = quota;

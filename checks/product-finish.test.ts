@@ -127,6 +127,39 @@ test("long ordinary paper includes late methods and explicit exact excerpt range
     );
 });
 
+test("missing-data questions preserve the MAR/MICE method paragraph in compressed page evidence", () => {
+  const p7 = {
+    id: "missing-page",
+    title: "PDF 第 7 页",
+    page: 7,
+    kind: "paper" as const,
+    locator: "PDF 7",
+    verified: false,
+    text:
+      "Sample size and statistical analysis. " +
+      "Background details. ".repeat(175) +
+      "Missing data. Presence and patterns of missing data were explored. " +
+      "Although missing not at random (MNAR) cannot be ruled out, we assume a missing at random (MAR) mechanism conditional on observed covariates. " +
+      "We used multiple imputation by chained equations (MICE), generated multiple datasets, and pooled estimates using Rubin's rules. " +
+      "Closing details. ".repeat(160),
+  };
+  const sources = [
+    p7,
+    ...Array.from({ length: 5 }, (_, i) => ({
+      ...p7,
+      id: `other-${i}`,
+      page: i + 1,
+      title: `PDF 第 ${i + 1} 页`,
+      text: `Page ${i + 1}. ` + "Unrelated narrative. ".repeat(240),
+    })),
+  ];
+  const packet = materialPacket(sources, "解释缺失值处理、失访和插补假设");
+  const ref = packet.references.find((r) => r.id === "missing-page")!;
+  const block = packet.blocks.find((b) => b.hash === ref.blockHash)!.text;
+  assert.match(block, /MNAR/);
+  assert.match(block, /MAR/);
+  assert.match(block, /MICE/);
+});
 test("material requests restore complete selected evidence without exceeding the shared packet allowance", () => {
   const sources = Array.from({ length: 12 }, (_, i) => ({
     id: `p-${i}`,
