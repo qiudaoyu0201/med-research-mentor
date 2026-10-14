@@ -953,12 +953,72 @@ test("simulated understanding is labelled through revision without replacing the
   assert.notEqual(inputs[3].question, simulated.understood[0]);
 });
 
-test("teaching surface rejects internal source-status metadata", () => {
+test("teaching surface isolates workflow metadata while retaining medical evidence limits", () => {
   const p = paper("metadata-surface");
-  const output = lesson("metadata-surface-result", "paper");
-  output.unit.sections[0].text = "这段通用背景未作为正式基础来源核验。";
-  assert.throws(
-    () => validateTeachingSurface(output.unit, output.deck ?? undefined, [], p.sources),
-    /内部来源状态/,
+  const output = {
+    ...lesson("metadata-surface-result", "paper"),
+    unit: {
+      ...lesson("metadata-surface-result", "paper").unit,
+      terms: [{ name: "Verification bias", explanation: "验证偏倚" }],
+    },
+    deck: {
+      slides: [
+        {
+          title: "医学AI的判别与校准",
+          bullets: ["当前材料未提供逐日校准结果"],
+          notes: "随访测量未用于训练，但仍来自同批患者，不等于独立外部验证。",
+          citations: ["metadata-surface-result"],
+        },
+      ],
+      speechScript: "以下是教学示意，不是本文实测结果。",
+    },
+  };
+  output.unit.sections[0].text =
+    "verification bias（验证偏倚）涉及确诊机会随检测结果变化。所给资料已提供测量范围，但不能证明已改善临床结局。";
+  assert.doesNotThrow(() =>
+    validateTeachingSurface(output.unit, output.deck, [], p.sources),
   );
+  const hiddenReview = {
+    issues: [],
+    checkedSources: ["metadata-surface-result"],
+    limitations: ["来源核验状态保存在内部审核记录。"],
+  };
+  assert.doesNotThrow(() =>
+    validateCitations(output.unit, hiddenReview, p.sources, output.deck),
+  );
+  const workflowText = "这段通用背景未作为正式基础来源核验。";
+  const surfaces = [
+    (value: typeof output) => {
+      value.unit.title = workflowText;
+    },
+    (value: typeof output) => {
+      value.unit.question = workflowText;
+    },
+    (value: typeof output) => {
+      value.unit.nextQuestion = workflowText;
+    },
+    (value: typeof output) => {
+      value.unit.sections[0].text = workflowText;
+    },
+    (value: typeof output) => {
+      value.unit.terms[0].explanation = workflowText;
+    },
+    (value: typeof output) => {
+      value.deck.slides[0].bullets[0] = workflowText;
+    },
+    (value: typeof output) => {
+      value.deck.slides[0].notes = workflowText;
+    },
+    (value: typeof output) => {
+      value.deck.speechScript = workflowText;
+    },
+  ];
+  for (const replaceSurface of surfaces) {
+    const leaked = structuredClone(output);
+    replaceSurface(leaked);
+    assert.throws(
+      () => validateTeachingSurface(leaked.unit, leaked.deck, [], p.sources),
+      /内部来源状态/,
+    );
+  }
 });

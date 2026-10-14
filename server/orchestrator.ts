@@ -147,13 +147,21 @@ export function validateTeachingSurface(
 ) {
   const visible = [
     unit.title,
+    unit.question,
     unit.nextQuestion,
     ...unit.sections.flatMap((s) => [s.title, s.text]),
     ...unit.terms.flatMap((t) => [t.name, t.explanation]),
     ...(deck?.slides.flatMap((s) => [s.title, ...s.bullets, s.notes]) ?? []),
     deck?.speechScript ?? "",
   ].join("\n");
-  if (/(?:未作为|不作为|不是|属于内部)(?:正式)?(?:基础)?来源(?:核验|验证|依据)|(?:来源|资料)(?:的)?(?:访问状态|已读范围|核验状态|已提供)|(?:官方发布说明|DOI访问(?:受限|状态)|readScope|verification)/i.test(visible))
+  // Match workflow declarations, not scientific uncertainty or validation terminology.
+  const sourceWorkflowStatus = [
+    /(?:未|不|尚未)(?:作为|经过|通过)(?:正式)?(?:基础)?来源(?:的)?(?:核验|验证)/,
+    /内部(?:的)?(?:来源|资料)(?:核验|验证|访问|检索)(?:状态|记录)/,
+    /官方(?:发布说明已读|说明已核对)|DOI访问(?:受限|状态)/,
+    /\b(?:internal|source)\s+(?:verification|access)\s+status\b/i,
+  ];
+  if (sourceWorkflowStatus.some((pattern) => pattern.test(visible)))
     throw new Error("讲解或讲稿包含内部来源状态，未保存为完成结果。");
   for (const id of new Set(internalIds)) {
     if (
