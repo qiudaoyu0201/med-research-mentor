@@ -81,6 +81,7 @@ export function publicProviderDiagnostic(value: unknown, limit = 600) {
 }
 export class CodexClient {
   private proc: ChildProcessWithoutNullStreams;
+  private reader: ReturnType<typeof createInterface>;
   private seq = 0;
   private closed = false;
   private pending = new Map<
@@ -92,35 +93,39 @@ export class CodexClient {
     }
   >();
   events = new EventEmitter();
-  constructor() {
+  constructor(launch?: () => ChildProcessWithoutNullStreams) {
     const env = { ...process.env };
     delete env.OPENAI_API_KEY;
     delete env.AZURE_OPENAI_API_KEY;
-    this.proc = spawn(
-      process.env.CODEX_BIN || "codex",
-      [
-        "app-server",
-        "--listen",
-        "stdio://",
-        "-c",
-        'web_search="disabled"',
-        "-c",
-        "features.shell_tool=false",
-        "-c",
-        "features.multi_agent=false",
-        "-c",
-        "features.apps=false",
-        "-c",
-        "features.code_mode=false",
-        "-c",
-        "features.memories=false",
-        "-c",
-        "mcp_servers={}",
-      ],
-      { env, windowsHide: true, stdio: "pipe" },
-    );
+    this.proc = launch
+      ? launch()
+      : spawn(
+          process.env.CODEX_BIN || "codex",
+          [
+            "app-server",
+            "--listen",
+            "stdio://",
+            "-c",
+            'web_search="disabled"',
+            "-c",
+            "features.shell_tool=false",
+            "-c",
+            "features.multi_agent=false",
+            "-c",
+            "features.apps=false",
+            "-c",
+            "features.code_mode=false",
+            "-c",
+            "features.memories=false",
+            "-c",
+            "mcp_servers={}",
+          ],
+          { env, windowsHide: true, stdio: "pipe" },
+        );
     this.proc.stderr.on("data", () => {}); // Account and raw service diagnostics never enter browser/logs.
-    createInterface({ input: this.proc.stdout }).on("line", (line) => {
+    this.reader = createInterface({ input: this.proc.stdout });
+    this.reader.on("line", (line) => {
+      if (this.closed) return;
       try {
         const msg = JSON.parse(line);
         if (msg.id !== undefined && this.pending.has(msg.id)) {
@@ -156,19 +161,12 @@ export class CodexClient {
         } else this.events.emit("message", msg);
       } catch {}
     });
-    const stop = () => {
-      if (this.closed) return;
-      this.closed = true;
-      for (const p of this.pending.values()) {
-        clearTimeout(p.timer);
-        p.reject(new Error("Codex 进程不可用；未自动重发请求。"));
-      }
-      this.pending.clear();
-      this.events.emit("closed");
-    };
+    const stop = () => this.close();
     this.proc.on("error", stop);
     this.proc.on("exit", stop);
     this.proc.stdin.on("error", stop);
+    this.proc.stdout.on("error", stop);
+    this.proc.stderr.on("error", stop);
   }
   rpc(method: string, params: unknown, timeout = 30_000): Promise<any> {
     if (this.closed)
@@ -197,7 +195,19 @@ export class CodexClient {
     );
   }
   close() {
-    this.proc.kill();
+    if (this.closed) return;
+    this.closed = true;
+    for (const p of this.pending.values()) {
+      clearTimeout(p.timer);
+      p.reject(new Error("Codex 进程不可用；未自动重发请求。"));
+    }
+    this.pending.clear();
+    this.reader.close();
+    this.proc.stdin.destroy();
+    this.proc.stdout.destroy();
+    this.proc.stderr.destroy();
+    if (this.proc.exitCode === null && !this.proc.killed) this.proc.kill();
+    this.events.emit("closed");
   }
 }
 export class CodexProvider implements Provider {
