@@ -31,12 +31,27 @@ export async function pageFigures(
       };
     });
   const captions = texts
-    .filter(
-      (t) =>
-        /^(?:Fig(?:ure)?\.?|图)\s*\d+\s*(?:[|:：.]|\s)/i.test(t.text.trim()) &&
-        t.top > H * 0.06 &&
-        t.top < H * 0.95,
-    )
+    .filter((t) => {
+      const label = t.text.trim();
+      const wholeAnchor = /^(?:Fig(?:ure)?\.?|图)\s*\d+\s*(?:[|:：.]|\s)/i.test(
+        label,
+      );
+      // Some PDFs put the bold figure number and normal punctuation in separate runs.
+      // Require adjacent punctuation on the same baseline; bare in-text references do not qualify.
+      const splitAnchor =
+        /^(?:Fig(?:ure)?\.?|图)\s*\d+$/i.test(label) &&
+        texts.some(
+          (next) =>
+            /^[|:：.](?:\s|$)/.test(next.text.trim()) &&
+            Math.abs(next.bottom - t.bottom) <=
+              Math.max(t.height, next.height) * 0.35 &&
+            next.left >= t.right - 1 &&
+            next.left <= t.right + Math.max(t.height, next.height) * 1.5,
+        );
+      return (
+        (wholeAnchor || splitAnchor) && t.top > H * 0.06 && t.top < H * 0.95
+      );
+    })
     .sort((a, b) => a.top - b.top);
   if (!captions.length) return [];
   const ops = await page.getOperatorList(),
