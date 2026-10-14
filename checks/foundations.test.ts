@@ -887,3 +887,68 @@ test("teaching, revision and recheck retain previously delivered trial assumptio
   }
   assert.deepEqual(inputs[3].sources, inputs[5].sources);
 });
+
+test("simulated understanding is labelled through revision without replacing the actual user's question", async () => {
+  const p = paper("feedback-origin");
+  const actualQuestion = "我认为 OR 不是风险比，请解释条件比较与边际比较。";
+  const simulated = {
+    understood: ["我已理解调整后的 OR 可以当作风险比"],
+    breakpoints: [],
+  };
+  const audit = {
+    ...review,
+    issues: [
+      {
+        id: "clarify-comparison",
+        type: "teaching",
+        severity: "blocking",
+        location: "正文",
+        suggestion: "解释条件与边际比较",
+        evidence: ["feedback-origin-result"],
+        resolved: false,
+      },
+    ],
+  };
+  const outputs = [
+    lesson("feedback-origin-result", "paper"),
+    simulated,
+    audit,
+    lesson("feedback-origin-result", "paper"),
+    feedback,
+    review,
+  ];
+  const inputs: any[] = [];
+  const manager = new TaskManager(
+    {
+      model: "test",
+      async generate(_instructions, input, schema) {
+        inputs.push(structuredClone(input));
+        return { output: schema.parse(outputs.shift()) };
+      },
+    },
+    discard,
+  );
+  const run = await manager.start(
+    {
+      paperId: p.id,
+      module: "paper",
+      mode: "live",
+      question: actualQuestion,
+      profileId: "beginner",
+      sourceIds: ["feedback-origin-result"],
+      taughtConcepts: [],
+    },
+    p,
+  );
+  await manager.wait(run.id);
+  assert.equal(run.status, "completed", run.error);
+  assert.equal(run.calls, 6);
+  for (const index of [2, 3, 5]) {
+    assert.equal(inputs[index].feedbackContext.origin, "simulated-novice");
+    assert.equal(inputs[index].feedbackContext.isActualUserStatement, false);
+  }
+  assert.equal(inputs[0].question, actualQuestion);
+  assert.equal(inputs[3].question, actualQuestion);
+  assert.deepEqual(inputs[3].feedback, simulated);
+  assert.notEqual(inputs[3].question, simulated.understood[0]);
+});

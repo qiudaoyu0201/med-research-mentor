@@ -48,6 +48,13 @@ import {
   validateExplanationLinks,
 } from "./explanation-links.ts";
 
+const simulatedFeedbackContext = {
+  origin: "simulated-novice",
+  isActualUserStatement: false,
+  usage:
+    "feedback 是内部模型模拟的理解与断点，只用于发现解释缺口，不是实际用户的作答、掌握情况或原始证据。把有效缺口融入科学解释；不得据此在正文、术语、后续问题、PPT 页面、备注或讲稿中评价或引用用户回答。只有真实用户问题或明确的真实对话上下文包含对应作答时，才能回应该作答；正常第二人称教学可以保留。审核同样遵守此来源边界。",
+};
+
 export function visibleInput(
   input: TaskInput,
   unit: LearningUnit,
@@ -243,6 +250,7 @@ export function cacheKey(
         selector: selectionVersion,
         foundations: foundationCatalog.version,
         groundingContract: groundingContractVersion,
+        feedbackContext: simulatedFeedbackContext,
         versions,
         profile: profiles.find((p) => p.id === input.profileId),
         model,
@@ -823,6 +831,7 @@ export class TaskManager {
             previousIsContextOnly: true,
             deck: generated.deck,
             feedback,
+            feedbackContext: simulatedFeedbackContext,
             learningIntent: run.input.learningIntent ?? null,
           },
           groundedReviewSchema(sources),
@@ -1026,6 +1035,7 @@ export class TaskManager {
               draft: generated.unit,
               deck: generated.deck,
               feedback,
+              feedbackContext: simulatedFeedbackContext,
               review,
               materialRequests: run.materialRequests,
               revisionEvidence: {
@@ -1042,7 +1052,7 @@ export class TaskManager {
                 verifiedSourceIds: firstReview.checkedSources,
               },
               instruction:
-                "只修订一次。逐项审计当前问题的位置、来源和理解缺口后融入正文。审核建议也可能误读图像，不得直接把suggestion当作事实：修改比较组前重新从原图的图例、组别顺序和括号两端核实；原稿正确时保留，不为迎合审核改错。已核实的对象、比较组、参照、单位、方向与证据边界依来源保留；首稿若有错误，给实际依据再纠正，不凭图注词义填造公式。核对所有新增或改变的事实。内部编号留在工作记录。",
+                "只修订一次。遵守 feedbackContext 的来源边界：模拟反馈不能冒充真实用户发言或学习结果；补足解释，不评价虚构的用户作答。逐项审计当前问题的位置、来源和理解缺口后融入正文。审核建议也可能误读图像，不得直接把suggestion当作事实：修改比较组前重新从原图的图例、组别顺序和括号两端核实；原稿正确时保留，不为迎合审核改错。已核实的对象、比较组、参照、单位、方向与证据边界依来源保留；首稿若有错误，给实际依据再纠正，不凭图注词义填造公式。核对所有新增或改变的事实。内部编号留在工作记录。",
             },
             skills.explanationTracing
               ? scopedSchema().extend({
@@ -1109,6 +1119,7 @@ export class TaskManager {
               draft: generated.unit,
               deck: generated.deck,
               feedback,
+              feedbackContext: simulatedFeedbackContext,
               previousIssues: review.issues,
               revisionAudit: revisionAuditInput(trace),
               learningIntent: run.input.learningIntent ?? null,
