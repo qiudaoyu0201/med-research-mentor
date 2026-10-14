@@ -153,6 +153,8 @@ export function validateTeachingSurface(
     ...(deck?.slides.flatMap((s) => [s.title, ...s.bullets, s.notes]) ?? []),
     deck?.speechScript ?? "",
   ].join("\n");
+  if (/(?:未作为|不作为|不是|属于内部)(?:正式)?(?:基础)?来源(?:核验|验证|依据)|(?:来源|资料)(?:的)?(?:访问状态|已读范围|核验状态|已提供)|(?:官方发布说明|DOI访问(?:受限|状态)|readScope|verification)/i.test(visible))
+    throw new Error("讲解或讲稿包含内部来源状态，未保存为完成结果。");
   for (const id of new Set(internalIds)) {
     if (
       id.length < 2 ||

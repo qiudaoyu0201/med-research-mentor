@@ -131,7 +131,7 @@ export function groundedTeachingSchema(
     kind: z
       .enum(kinds)
       .describe(
-        "证据性质：paper为本文事实，interpretation为基于来源的解释，background为无正式基础来源的通用原理；foundation仅在提供对应基础来源时可用。",
+        "证据性质：paper为本文事实，interpretation为基于来源的解释，background为通用背景解释，foundation仅在提供对应基础来源时可用；kind仅为结构化分类，不得写入用户正文或讲述提示中的来源状态。",
       ),
   });
   const slides = slideSchema.omit({ imageCrop: true }).extend({

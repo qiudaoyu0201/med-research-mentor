@@ -952,3 +952,13 @@ test("simulated understanding is labelled through revision without replacing the
   assert.deepEqual(inputs[3].feedback, simulated);
   assert.notEqual(inputs[3].question, simulated.understood[0]);
 });
+
+test("teaching surface rejects internal source-status metadata", () => {
+  const p = paper("metadata-surface");
+  const output = lesson("metadata-surface-result", "paper");
+  output.unit.sections[0].text = "这段通用背景未作为正式基础来源核验。";
+  assert.throws(
+    () => validateTeachingSurface(output.unit, output.deck ?? undefined, [], p.sources),
+    /内部来源状态/,
+  );
+});
