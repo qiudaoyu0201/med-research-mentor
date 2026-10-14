@@ -1,9 +1,13 @@
+import {
+  containsEvidenceTerm,
+  evidenceExcerptRanges,
+} from "./evidence-excerpts.ts";
 import { createHash } from "node:crypto";
 import type { Source, PaperBundle } from "../shared/types.ts";
 import { preferredSources } from "../shared/image-region.ts";
 export const digest = (value: unknown) =>
   createHash("sha256").update(JSON.stringify(value)).digest("hex");
-export const selectionVersion = "generic-evidence-v9-validation-anchors";
+export const selectionVersion = "generic-evidence-v10-natural-topics";
 export function figureNumber(text: string) {
   const match = /(?:Figure|Fig\.?|图)\s*([\d一二两三四五六七八九十]+)/i.exec(
     text,
@@ -186,13 +190,6 @@ function evidenceTerms(question: string) {
     );
   return [...new Set(terms)];
 }
-function containsEvidenceTerm(text: string, term: string) {
-  if (/^[a-z][a-z0-9-]*$/i.test(term)) {
-    const escaped = term.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
-    return new RegExp(`\\b${escaped}\\b`, "i").test(text);
-  }
-  return text.includes(term);
-}
 function pageScore(s: Source, terms: string[], modules: string[]) {
   const t = s.text.toLowerCase();
   return (
@@ -251,37 +248,7 @@ export function materialPacket(
       blocks.set(hash, { hash, text });
       return { ...source, blockHash: hash };
     }
-    const chunks: { start: number; end: number; score: number }[] = [];
-    for (let start = 0; start < text.length; start += 600) {
-      const end = Math.min(text.length, start + 600),
-        part = text.slice(start, end).toLowerCase();
-      chunks.push({
-        start,
-        end,
-        score:
-          (start === 0 ? 8 : 0) +
-          (/methods|materials|statistical analysis|研究方法|统计分析/i.test(
-            part,
-          )
-            ? 12
-            : 0) +
-          (/results|结果/i.test(part) ? 5 : 0) +
-          terms.reduce(
-            (n, w) => n + (containsEvidenceTerm(part, w) ? 10 : 0),
-            0,
-          ),
-      });
-    }
-    let remaining = quota;
-    const slices = chunks
-      .sort((a, b) => b.score - a.score || a.start - b.start)
-      .flatMap((c) => {
-        if (remaining < 100) return [];
-        const end = Math.min(c.end, c.start + remaining);
-        remaining -= end - c.start;
-        return [{ start: c.start, end }];
-      })
-      .sort((a, b) => a.start - b.start);
+    const slices = evidenceExcerptRanges(text, quota, terms, question);
     const excerpt = slices
       .map(
         (c) => `[提取字符 ${c.start}–${c.end}]\n${text.slice(c.start, c.end)}`,

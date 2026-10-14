@@ -1019,3 +1019,70 @@ test("slide wrapping preserves compound pressure units at real column widths", (
     }
   }
 });
+
+test("compressed clinical evidence retains a complete requested endpoint beside calibration and eligibility", () => {
+  const definition =
+    "Primary outcome\n" +
+    "The primary outcome was defined as a composite of admission longer than 36 hours, death within 12 hours, or transfer within 60 hours. " +
+    "Outcomes were established by telephone follow-up on day eight. " +
+    "A transfer counted only after independent clinician review, and repeat contacts without a new event did not count as outcomes. " +
+    "The definition preserved the separate observation windows rather than treating every participant as having eight days of continuous follow-up.\n";
+  const page = {
+    id: "clinical-methods",
+    title: "PDF 第 4 页",
+    page: 4,
+    kind: "paper" as const,
+    locator: "PDF 4",
+    verified: false,
+    text:
+      "Methods\n" +
+      "Data were recorded on encrypted devices. ".repeat(24) +
+      "\n" +
+      definition +
+      "Calibration validation evaluated calibration slope, recalibration intercept and observed outcome rates in participants. ".repeat(
+        32,
+      ) +
+      "\nInclusion criteria\nThe population included paediatric patients attending the two hospitals; participants outside the age limit were excluded.\n",
+  };
+  const sources = [
+    page,
+    ...Array.from({ length: 9 }, (_, i) => ({
+      ...page,
+      id: "clinical-other-" + i,
+      title: "PDF 第 " + (i + 5) + " 页",
+      page: i + 5,
+      text:
+        "Page " + (i + 5) + ". " + "Unrelated background details. ".repeat(210),
+    })),
+  ];
+  const packet = materialPacket(
+    sources,
+    "为老师汇报该预测研究，说明研究对象、外部验证、复合结局与校准表现",
+  );
+  const reference = packet.references.find((r) => r.id === page.id)!;
+  const block = packet.blocks.find((b) => b.hash === reference.blockHash)!.text;
+  assert.ok(
+    block.includes(definition),
+    "The full endpoint definition and its unequal windows must remain together",
+  );
+  assert.match(block, /Inclusion criteria/);
+  assert.match(block, /Calibration validation/);
+  assert.ok("visibleRanges" in reference && reference.fullText === false);
+  if ("visibleRanges" in reference) {
+    const ranges = reference.visibleRanges!;
+    const start = page.text.indexOf(definition);
+    assert.ok(
+      ranges.some(
+        (r) => r.start <= start && r.end >= start + definition.length,
+      ),
+    );
+    for (const range of ranges)
+      assert.ok(block.includes(page.text.slice(range.start, range.end)));
+    assert.ok(
+      ranges.reduce((n, r) => n + r.end - r.start, 0) <= 1900,
+      "Keep the existing per-page allowance",
+    );
+  }
+  assert.ok(packet.blocks.reduce((n, b) => n + b.text.length, 0) <= 22000);
+  assert.match(packet.coverage!, /不代表全文/);
+});
