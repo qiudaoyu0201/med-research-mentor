@@ -221,3 +221,41 @@ test("uppercase panel labels in original PDF geometry bind separate figure regio
   );
   assert.ok(panels[0].region.width < 0.6 && panels[1].region.width < 0.6);
 });
+
+test("a figure reference at the end of a body line cannot relabel an earlier plot", async () => {
+  for (const reference of [
+    text("F2", 220, 100, "Fig 2."),
+    [text("F2", 220, 100, "Fig 2"), text("F1", 241, 100, ".")].join("\n"),
+  ]) {
+    const result = await extract(
+      [
+        text("F1", 36, 160, "Fig 1. Outcome."),
+        text("F1", 140, 100, "Results are shown in "),
+        reference,
+      ].join("\n"),
+    );
+    assert.ok(result.items.some((item: any) => /^Fig 2/.test(item.str)));
+    assert.deepEqual(
+      result.sources.map((source) => source.figure),
+      ["1"],
+    );
+    assert.doesNotMatch(result.sources[0].caption!, /Results are shown/);
+  }
+});
+
+test("separate column captions on the same baseline remain independent anchors", async () => {
+  const result = await extract(
+    [
+      text("F1", 36, 160, "Fig 1. Left outcome."),
+      text("F2", 350, 160, "Fig 2"),
+      text("F1", 371, 160, ". Right outcome."),
+    ].join("\n"),
+    "40 220 210 250 re S\n350 220 210 250 re S",
+  );
+  assert.deepEqual(
+    result.sources.map((source) => source.figure),
+    ["1", "2"],
+  );
+  const [left, right] = result.sources.map((source) => source.imageRegion!);
+  assert.ok(left.left + left.width < right.left);
+});

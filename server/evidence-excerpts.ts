@@ -55,6 +55,11 @@ function requestedTopics(question: string): Topic[] {
     ["adverse", "serious", "complications", "safety"],
     /(?:serious\s+)?adverse\s+events|安全性|不良事件/i,
   );
+  add(
+    /随访|生存|删失|\bfollow[ -]?up\b|\bsurvival\b|\bcensor(?:ing|ed)?\b/i,
+    ["follow-up", "followup", "survival", "censoring", "censored", "mortality"],
+    /time\s+(?:to\s+event|from)|follow[ -]?up|date\s+of\s+censoring|随访|删失/i,
+  );
   return topics;
 }
 // Preserve natural source blocks, including PDF hard-wrapped definitions. Only
@@ -105,6 +110,47 @@ function naturalSpans(text: string): EvidenceRange[] {
   }
   return spans;
 }
+// A printed table DOI gives a verifiable end boundary. Preserve a compact,
+// relevant table as one block; do not infer missing rows or span other tables.
+function linkedTableSpans(
+  text: string,
+  quota: number,
+  terms: string[],
+  topics: Topic[],
+): EvidenceRange[] {
+  const headings = [
+    ...text.matchAll(/(?:^|\n)[ \t]*(?:Table|表)\s*(\d+)\s*[.：:。]/gi),
+  ];
+  return headings.flatMap((heading, index) => {
+    const start = heading.index! + (heading[0].startsWith("\n") ? 1 : 0);
+    const limit = headings[index + 1]?.index ?? text.length;
+    const titleEnd = text.indexOf("\n", start);
+    const title = text
+      .slice(start, titleEnd < 0 ? limit : titleEnd)
+      .toLowerCase();
+    if (
+      !terms.some((term) => containsEvidenceTerm(title, term)) &&
+      !topics.some((topic) => topic.anchor.test(title))
+    )
+      return [];
+    const tail = text.slice(start, limit);
+    const link = [
+      ...tail.matchAll(
+        /https?:\/\/(?:dx\.)?doi\.org\/[^\s]+\.t(\d+)(?=\s|$)/gi,
+      ),
+    ].find((match) => Number(match[1]) === Number(heading[1]));
+    if (!link) return [];
+    const end = start + link.index! + link[0].length;
+    if (end - start > quota) return [];
+    const rows = text.slice(
+      titleEnd < 0 ? end : titleEnd + 1,
+      start + link.index!,
+    );
+    if (rows.split(/\r?\n/).filter((line) => /\d/.test(line)).length < 2)
+      return [];
+    return [{ start, end }];
+  });
+}
 export function evidenceExcerptRanges(
   text: string,
   quota: number,
@@ -112,7 +158,28 @@ export function evidenceExcerptRanges(
   question: string,
 ): EvidenceRange[] {
   const topics = requestedTopics(question);
-  const chunks = naturalSpans(text).map((range) => {
+  const tables = linkedTableSpans(text, quota, terms, topics);
+  const spans = naturalSpans(text)
+    .flatMap((range) =>
+      tables.reduce<EvidenceRange[]>(
+        (fragments, table) =>
+          fragments.flatMap((fragment) => {
+            if (fragment.end <= table.start || fragment.start >= table.end)
+              return [fragment];
+            return [
+              ...(fragment.start < table.start
+                ? [{ start: fragment.start, end: table.start }]
+                : []),
+              ...(fragment.end > table.end
+                ? [{ start: table.end, end: fragment.end }]
+                : []),
+            ];
+          }),
+        [range],
+      ),
+    )
+    .concat(tables);
+  const chunks = spans.map((range) => {
     const part = text.slice(range.start, range.end).toLowerCase();
     return {
       ...range,
@@ -150,7 +217,14 @@ export function evidenceExcerptRanges(
   });
   const selected: EvidenceRange[] = [];
   let remaining = quota;
-  for (const chunk of [...new Set(representatives)]) {
+  const completeTables = chunks
+    .filter((chunk) =>
+      tables.some(
+        (table) => table.start === chunk.start && table.end === chunk.end,
+      ),
+    )
+    .sort((a, b) => b.score - a.score || a.start - b.start);
+  for (const chunk of [...new Set([...completeTables, ...representatives])]) {
     if (chunk.end - chunk.start > remaining) continue;
     selected.push({ start: chunk.start, end: chunk.end });
     remaining -= chunk.end - chunk.start;

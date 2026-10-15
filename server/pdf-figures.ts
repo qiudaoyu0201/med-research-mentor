@@ -48,8 +48,23 @@ export async function pageFigures(
             next.left >= t.right - 1 &&
             next.left <= t.right + Math.max(t.height, next.height) * 1.5,
         );
+      // Font changes can split a body sentence just before "Fig 2.". A caption
+      // must start its local line, not borrow a plot from a preceding caption.
+      // Check only adjacent runs so independent columns remain valid anchors.
+      const inlineReference = texts.some(
+        (previous) =>
+          previous !== t &&
+          Math.abs(previous.bottom - t.bottom) <=
+            Math.max(previous.height, t.height) * 0.35 &&
+          previous.left < t.left &&
+          previous.right <= t.left + 1 &&
+          previous.right >= t.left - Math.max(previous.height, t.height) * 1.5,
+      );
       return (
-        (wholeAnchor || splitAnchor) && t.top > H * 0.06 && t.top < H * 0.95
+        (wholeAnchor || splitAnchor) &&
+        !inlineReference &&
+        t.top > H * 0.06 &&
+        t.top < H * 0.95
       );
     })
     .sort((a, b) => a.top - b.top);
