@@ -1,8 +1,14 @@
 import test from "node:test";
 import assert from "node:assert/strict";
-import { readFile, unlink } from "node:fs/promises";
+import { readFile, writeFile, unlink } from "node:fs/promises";
 import { randomUUID } from "node:crypto";
 import { createCanvas } from "@napi-rs/canvas";
+import { unzipSync, zipSync, strFromU8, strToU8 } from "fflate";
+import {
+  verifyTrainingDeliveryFiles,
+  trainingGuidance,
+} from "../server/training-delivery.ts";
+import type { LearningProduct } from "../server/learning-exposure.ts";
 import type { Provider } from "../server/provider.ts";
 import type { DeckOutline, ReviewResult } from "../shared/types.ts";
 import { sample, exampleUnits } from "../examples/bundle.ts";
@@ -202,4 +208,116 @@ test("cached completed figure deck is rechecked before delivery", async () => {
   assert.equal(run.status, "failed");
   assert.equal(run.calls, 0);
   assert.match(run.error!, /过密/);
+});
+
+test("wide evidence gets more image area while preserving every claim and the full image", () => {
+  const slide = {
+    ...compact.slides[0],
+    bullets: ["横轴为效应量，纵轴列出各研究", "区间较宽，不能据点估计断言差异"],
+  };
+  const wide = slideLayout(slide, paper.sources, { width: 2100, height: 700 });
+  assert.equal(wide.composition, "evidence-wide");
+  assert.ok(
+    wide.image!.w > 11,
+    "A wide figure should use more than the old 7.95-inch column",
+  );
+  assert.ok(Math.abs(wide.image!.w / wide.image!.h - 3) < 1e-9);
+  const text = wide.text.filter((box) => box.role === "bullet");
+  assert.deepEqual(
+    text.map((box) => box.lines.join("")),
+    slide.bullets,
+  );
+  assert.ok(
+    text.every(
+      (box) =>
+        box.fontSize >= 20 && box.y >= wide.image!.y + wide.image!.h + 0.2,
+    ),
+  );
+  assert.ok(text.every((box) => box.y + box.h <= 6.68 + 1e-9));
+  const portrait = slideLayout(slide, paper.sources, {
+    width: 700,
+    height: 1400,
+  });
+  assert.equal(portrait.composition, "evidence");
+  assert.ok(Math.abs(portrait.image!.w / portrait.image!.h - 0.5) < 1e-9);
+  assert.throws(
+    () =>
+      slideLayout(dense.slides[0], paper.sources, { width: 2100, height: 700 }),
+    /过密/,
+  );
+});
+
+test("actual PPT export preserves a selected crop and rejects changed image placement", async () => {
+  const sourceImage = createCanvas(2100, 1400);
+  const ctx = sourceImage.getContext("2d");
+  ctx.fillStyle = "white";
+  ctx.fillRect(0, 0, 2100, 1400);
+  ctx.fillStyle = "#245968";
+  ctx.fillRect(40, 40, 2020, 620);
+  const localPaper = {
+    ...paper,
+    sources: paper.sources.map((source) =>
+      source.id === "xu-fig1"
+        ? { ...source, image: sourceImage.toDataURL("image/png") }
+        : source,
+    ),
+  };
+  const deck: DeckOutline = {
+    slides: [
+      {
+        ...compact.slides[0],
+        imageCrop: { left: 0, top: 0, width: 1, height: 0.5 },
+      },
+      {
+        ...compact.slides[0],
+        title: "记录与比较",
+        imageSource: "",
+        bullets: ["记录对象", "比较分母", "不确定性", "推广范围"],
+      },
+    ],
+  };
+  const path = await exportDeck(
+    deck,
+    localPaper,
+    "wide-delivery-" + randomUUID(),
+  );
+  const guidancePath = path.replace(/\.pptx$/, "-guidance.md");
+  const product: LearningProduct = {
+    id: "wide-delivery",
+    side: "candidate",
+    status: "generated",
+    exportPath: path,
+    artifact: { deck },
+    delivery: { version: "separate-guidance-v1", guidancePath },
+  };
+  try {
+    await writeFile(guidancePath, trainingGuidance(deck));
+    const parts = unzipSync(await readFile(path));
+    const slide = strFromU8(parts["ppt/slides/slide1.xml"]);
+    const picture = /<p:pic\b[\s\S]*?<\/p:pic>/.exec(slide)![0];
+    const imageWidth = Number(/<a:ext\b[^>]*cx="(\d+)"/.exec(picture)![1]);
+    assert.ok(
+      imageWidth > 11 * 914400,
+      "Actual exported crop should exceed the old figure column",
+    );
+    assert.equal(
+      (await verifyTrainingDeliveryFiles(product, localPaper)).slides,
+      2,
+    );
+    const changedPicture = picture.replace(
+      /(<a:off\b[^>]*x=")(\d+)/,
+      (_all, before, value) => before + (Number(value) + 914400),
+    );
+    assert.notEqual(changedPicture, picture);
+    parts["ppt/slides/slide1.xml"] = strToU8(
+      slide.replace(picture, changedPicture),
+    );
+    await writeFile(path, zipSync(parts));
+    await assert.rejects(
+      verifyTrainingDeliveryFiles(product, localPaper),
+      /图件位置/,
+    );
+  } finally {
+    await Promise.all([unlink(path), unlink(guidancePath)]);
+  }
 });

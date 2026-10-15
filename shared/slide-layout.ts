@@ -182,8 +182,64 @@ export function slideLayout(
     });
     return true;
   };
-  let custom = false;
+  // A wide original can be larger above a short band of unchanged claims.
+  // Keep the usual side column when the band would be dense or reduce the image.
+  let wideEvidence:
+    | { text: TextBox[]; image: { x: number; y: number; w: number; h: number } }
+    | undefined;
   if (
+    imageSize &&
+    count > 0 &&
+    count <= 3 &&
+    imageSize.width / imageSize.height >= 1.65
+  ) {
+    const width = (11.9 - (count - 1) * 0.38) / count;
+    const blocks = slide.bullets.map((value) => {
+      const lines = wrapSlideText(value, width, 20);
+      return { lines, h: (lines.length * 20 * 1.18) / 72 + 0.09 };
+    });
+    const bandHeight = Math.max(...blocks.map((b) => b.h));
+    const area = {
+      x: 0.72,
+      y: 1.53,
+      w: 11.9,
+      h: 6.68 - bandHeight - 0.24 - 1.53,
+    };
+    const scale = Math.min(area.w / imageSize.width, area.h / imageSize.height);
+    const previousScale = Math.min(
+      7.95 / imageSize.width,
+      5.18 / imageSize.height,
+    );
+    if (bandHeight <= 1.2 && scale >= previousScale * 1.12) {
+      const w = imageSize.width * scale,
+        h = imageSize.height * scale;
+      wideEvidence = {
+        image: {
+          x: area.x + (area.w - w) / 2,
+          y: area.y + (area.h - h) / 2,
+          w,
+          h,
+        },
+        text: blocks.map((block, i) => ({
+          x: 0.72 + i * (width + 0.38),
+          y: 6.68 - bandHeight,
+          w: width,
+          h: block.h,
+          fontSize: 20,
+          lines: block.lines,
+          color: "303039",
+          role: "bullet",
+          sourceIndex: i,
+        })),
+      };
+    }
+  }
+  let custom = false;
+  if (wideEvidence) {
+    composition = "evidence-wide";
+    customText.push(...wideEvidence.text);
+    custom = true;
+  } else if (
     !hasImage &&
     count >= 3 &&
     count <= 5 &&
@@ -446,7 +502,9 @@ export function slideLayout(
     role: "footer",
   });
   let image;
-  if (imageSize) {
+  if (wideEvidence) {
+    image = wideEvidence.image;
+  } else if (imageSize) {
     const area = { x: 0.72, y: 1.53, w: 7.95, h: 5.18 },
       scale = Math.min(area.w / imageSize.width, area.h / imageSize.height),
       w = imageSize.width * scale,

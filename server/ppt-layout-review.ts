@@ -1,7 +1,7 @@
 import { slideLayout } from "../shared/slide-layout.ts";
 import type { DeckOutline, ReviewResult, Source } from "../shared/types.ts";
 
-export const pptLayoutContractVersion = "ppt-layout-v1";
+export const pptLayoutContractVersion = "ppt-layout-v2-wide-evidence";
 
 const layoutId = (index: number) => `ppt-layout-${index + 1}`;
 
@@ -11,8 +11,8 @@ export function pptLayoutIssues(
 ): ReviewResult["issues"] {
   return (deck?.slides ?? []).flatMap((slide, index) => {
     try {
-      // Text capacity depends on whether a figure occupies the fixed image area,
-      // not on its aspect ratio. The exporter measures the actual bitmap later.
+      // Conservatively require the standard side-column capacity. A short text
+      // band may enlarge wide figures later, but never rescues an overfull page.
       slideLayout(
         slide,
         sources.filter((source) => slide.citations.includes(source.id)),

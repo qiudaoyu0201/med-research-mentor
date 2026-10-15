@@ -1,8 +1,10 @@
 {
   "id": "medical-journal-club-ppt",
   "title": "汇报大纲",
-  "version": "1.4.5",
-  "dependencies": ["shared"],
+  "version": "1.4.6",
+  "dependencies": [
+    "shared"
+  ],
   "origin": "project-original",
   "referenceRecord": "docs/ARCHITECTURE.md"
 }
