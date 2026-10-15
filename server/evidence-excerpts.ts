@@ -1,5 +1,5 @@
 export type EvidenceRange = { start: number; end: number };
-type Topic = { terms: string[]; anchor: RegExp };
+type Topic = { terms: string[]; anchor: RegExp; requireAnchor: boolean };
 export function containsEvidenceTerm(text: string, term: string) {
   if (/^[a-z][a-z0-9-]*$/i.test(term)) {
     // The guard permits only letters, digits and literal hyphens.
@@ -9,8 +9,13 @@ export function containsEvidenceTerm(text: string, term: string) {
 }
 function requestedTopics(question: string): Topic[] {
   const topics: Topic[] = [];
-  const add = (request: RegExp, terms: string[], anchor: RegExp) => {
-    if (request.test(question)) topics.push({ terms, anchor });
+  const add = (
+    request: RegExp,
+    terms: string[],
+    anchor: RegExp,
+    requireAnchor = false,
+  ) => {
+    if (request.test(question)) topics.push({ terms, anchor, requireAnchor });
   };
   add(
     /缺失|失访|插补|不完整|\bmissing\b|\bimputation\b/i,
@@ -29,10 +34,45 @@ function requestedTopics(question: string): Topic[] {
     ],
     /study\s+population|eligibility|inclusion\s+criteria|exclusion\s+criteria|纳排|入组/i,
   );
+  // Assignment to a strategy and regrouping for analysis answer different
+  // questions. Keep both definitions when the reader asks about trial groups.
+  const trialGroups =
+    /随机(?:分配|分组|比较|试验|对照)|分组|选择权|偏好|切换|按实际|意向(?:性)?治疗|\brandomi[sz](?:ed|ation)\b|\b(?:assignment|allocation|as[ -]treated|per[ -]protocol|intention[ -]to[ -]treat)\b/i;
+  add(
+    trialGroups,
+    ["enrollment", "enrolment", "rerandomized", "rerandomised", "withdrawals"],
+    /erroneously[\s\S]{0,50}rerandomi[sz]ed|(?:second|duplicate)[\s\S]{0,100}(?:randomi[sz]ation|enrol[l]?ment|record)|participant\s+flow|重复随机|重复记录|受试者流程/i,
+  );
+  add(
+    trialGroups,
+    [
+      "choice",
+      "preference",
+      "preferences",
+      "choose",
+      "chose",
+      "switch",
+      "switching",
+    ],
+    /choice\s+(?:arm|group)|(?:allowed|option|permitted|free)\s+to\s+switch|participants?\s+(?:could|chose|choose)|选择权|偏好|切换/i,
+  );
+  add(
+    trialGroups,
+    [
+      "intention-to-treat",
+      "itt",
+      "as-treated",
+      "per-protocol",
+      "reclassified",
+      "reassigned",
+    ],
+    /as[ -]treated|per[ -]protocol|intention[ -]to[ -]treat|analy[sz]ed\s+in[\s\S]{0,100}randomi[sz]ed|按实际|意向(?:性)?治疗|重新分组/i,
+  );
   add(
     /结局|终点|\boutcomes?\b|\bendpoints?\b/i,
     ["outcome", "outcomes", "endpoint", "endpoints"],
     /primary\s+(?:outcome|endpoint)|(?:outcomes?|endpoints?)\s+(?:was|were|is|are)\s+defined|主要结局|主要终点/i,
+    true,
   );
   add(
     /校准|\bcalibration\b|\brecalibration\b/i,
@@ -200,12 +240,13 @@ export function evidenceExcerptRanges(
           : 0) +
         (/results|结果/i.test(part) ? 5 : 0) +
         terms.reduce((n, w) => n + (containsEvidenceTerm(part, w) ? 10 : 0), 0),
-      topics: topics.map(
-        (t) =>
-          t.terms.reduce(
-            (n, w) => n + (containsEvidenceTerm(part, w) ? 1 : 0),
-            0,
-          ) + (t.anchor.test(part) ? 5 : 0),
+      topics: topics.map((t) =>
+        t.requireAnchor && !t.anchor.test(part)
+          ? 0
+          : t.terms.reduce(
+              (n, w) => n + (containsEvidenceTerm(part, w) ? 1 : 0),
+              0,
+            ) + (t.anchor.test(part) ? 5 : 0),
       ),
     };
   });

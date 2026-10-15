@@ -122,6 +122,60 @@ test("independent evaluator rejects bogus locations, missing, duplicate and unkn
     assert.ok(result.findings.some((f) => /无效|缺少|重复|未知/.test(f)));
   }
 });
+test("independent review request binds the fixed criteria verbatim and keeps invalid judgments invalid", async () => {
+  const criteria = ["比较 A 与 B", "保留 生存边界"];
+  const check = {
+    criterion: criteria[0],
+    passed: true,
+    location: "真实句子",
+    sourceIds: ["s"],
+    explanation: "与提供的来源相符",
+  };
+  const checks = [check, { ...check, criterion: criteria[1] }];
+  let calls = 0;
+  const provider: Provider = {
+    model: "fixture",
+    async generate(_instructions, _input, schema) {
+      calls += 1;
+      const parse = (value: unknown) => schema.safeParse(value).success;
+      assert.equal(parse({ evaluations: checks }), false);
+      assert.equal(
+        parse({ checks: [{ ...check, criterion: "比较A与B" }, checks[1]] }),
+        false,
+      );
+      assert.equal(parse({ checks: [check] }), false);
+      assert.equal(parse({ checks: [...checks, check] }), false);
+      return { output: schema.parse({ checks }) };
+    },
+  };
+  const result = await reviewArtifact(
+    provider,
+    {
+      question: "比较设计与边界",
+      conditions: "只用当前材料",
+      criteria,
+      artifact: { text: "真实句子" },
+      sources: [{ id: "s", text: "真实证据", locator: "原文" }],
+    },
+    new AbortController().signal,
+  );
+  assert.equal(calls, 1);
+  assert.equal(result.valid, true);
+  assert.equal(result.passed, true);
+  assert.deepEqual(
+    result.review.checks.map((c) => c.criterion),
+    criteria,
+  );
+  const invalid = validateReview(criteria, { text: "真实句子" }, ["s"], {
+    checks: [{ ...check, criterion: "比较A与B" }, checks[1]],
+  });
+  assert.equal(invalid.valid, false);
+  assert.equal(invalid.passed, false);
+  const duplicated = validateReview(criteria, { text: "真实句子" }, ["s"], {
+    checks: [check, check],
+  });
+  assert.equal(duplicated.valid, false);
+});
 test("evaluator location accepts presentation quotes while retaining substantive artifact binding", () => {
   const check = {
     criterion: "boundary",

@@ -153,3 +153,95 @@ test("ordinary clinical statistical-model questions do not activate AI deploymen
     evidenceExcerptRanges(text, 600, ["methods"], "说明临床变量与治疗选择"),
   );
 });
+
+test("randomized strategy questions preserve informed choice and actual analysis grouping within the same quota", () => {
+  const choice =
+    "Participants were randomly assigned to supervised care, self-care or an informed choice arm. Within the choice arm, a nurse reviewed preferences before participants chose their delivery strategy. They had the option to switch strategies at any time.";
+  const analysis =
+    "All participants were analyzed in their randomized arms. In the as-treated analysis, choice-arm participants were allocated to their initial choice of strategy, rather than their last recorded treatment.";
+  const interval =
+    "Bonferroni-corrected confidence intervals were used for the planned comparisons; a nonsignificant difference was not evidence of equivalence.";
+  const flow =
+    "Of 900 screened participants, 600 were randomized. One participant was erroneously rerandomized; only the second enrollment record was excluded.";
+  const text = [
+    "Methods and outcome analysis were reviewed. ".repeat(80),
+    flow,
+    choice,
+    interval,
+    "Further outcome analysis and methods were reviewed. ".repeat(80),
+    analysis,
+    "Additional outcome analysis was summarized. ".repeat(80),
+  ].join("\n");
+  const ranges = evidenceExcerptRanges(
+    text,
+    900,
+    ["methods", "outcome", "analysis"],
+    "说明随机比较的三种支持策略、结局、分组方法和等效误区",
+  );
+  const visible = ranges.map((r) => text.slice(r.start, r.end)).join("\n");
+  assert.ok(visible.includes(interval));
+  assert.ok(visible.includes(flow));
+  assert.ok(visible.includes(choice));
+  assert.ok(visible.includes(analysis));
+  assert.ok(ranges.reduce((sum, r) => sum + r.end - r.start, 0) <= 900);
+  for (const range of ranges)
+    assert.ok(range.start >= 0 && range.end <= text.length);
+});
+
+test("an English trial-analysis question retains the prespecified as-treated definition instead of only repeated results", () => {
+  const analysis =
+    "The as-treated analysis reassigned participants according to treatment received. The intention-to-treat analysis retained the original randomized groups.";
+  const text = [
+    "Methods and results were reviewed. ".repeat(80),
+    analysis,
+    "Further methods and results were reviewed. ".repeat(80),
+  ].join("\n");
+  const ranges = evidenceExcerptRanges(
+    text,
+    450,
+    ["methods", "results"],
+    "Explain the randomized trial and as-treated analysis.",
+  );
+  assert.ok(
+    ranges
+      .map((r) => text.slice(r.start, r.end))
+      .join("\n")
+      .includes(analysis),
+  );
+  assert.ok(ranges.reduce((sum, r) => sum + r.end - r.start, 0) <= 450);
+});
+
+test("random measurement error alone does not activate trial strategy selection", () => {
+  const text = [
+    "Methods and measurement precision were reviewed. ".repeat(80),
+    "In the choice arm participants could switch strategies. An as-treated analysis regrouped participants.",
+    "Additional measurement methods were reviewed. ".repeat(80),
+  ].join("\n");
+  assert.deepEqual(
+    evidenceExcerptRanges(text, 450, ["methods"], "说明测量的随机误差与图例"),
+    evidenceExcerptRanges(text, 450, ["methods"], "说明测量误差与图例"),
+  );
+});
+
+test("an outcome request does not reserve space for a secondary-outcome list when the page has no outcome definition", () => {
+  const unrelated =
+    "Additional secondary outcomes include staff preferences and provider interviews, reported separately.";
+  const text = [
+    "Methods for comparing treatment groups were prespecified. ".repeat(60),
+    unrelated,
+  ].join("\n");
+  const ranges = evidenceExcerptRanges(
+    text,
+    200,
+    ["methods"],
+    "解释结局的定义",
+  );
+  const visible = ranges.map((r) => text.slice(r.start, r.end)).join("\n");
+  assert.ok(
+    visible.includes(
+      "Methods for comparing treatment groups were prespecified.",
+    ),
+  );
+  assert.ok(!visible.includes(unrelated));
+  assert.ok(ranges.reduce((sum, r) => sum + r.end - r.start, 0) <= 200);
+});

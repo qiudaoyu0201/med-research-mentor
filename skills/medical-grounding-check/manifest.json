@@ -1,7 +1,7 @@
 {
   "id": "medical-grounding-check",
   "title": "来源核对",
-  "version": "1.3.5",
+  "version": "1.3.6",
   "dependencies": [
     "shared"
   ],
