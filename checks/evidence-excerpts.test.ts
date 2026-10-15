@@ -93,3 +93,63 @@ test("survival follow-up questions retain time origin and censoring definitions 
   assert.ok(visible.includes(definition));
   assert.ok(ranges.reduce((n, r) => n + r.end - r.start, 0) <= 1000);
 });
+
+test("clinical AI comparisons preserve delivered care, model use and time origin within the evidence allowance", () => {
+  const delivered =
+    "Treatment data reflect therapies actually performed and documented in medical records, rather than unimplemented recommendations.";
+  const modelUse =
+    "Models were accessed after the registry period. No patient received treatment based on model recommendations. Outputs were retrospectively compared with recorded care.";
+  const timeOrigin =
+    "Time to event was measured from treatment initiation to death or censoring.";
+  const text = [
+    "Survival results and model performance were reviewed. ".repeat(75),
+    delivered,
+    "Other model analysis details were reviewed. ".repeat(75),
+    modelUse,
+    timeOrigin,
+    "Further survival results were summarized. ".repeat(75),
+  ].join("\n");
+  const ranges = evidenceExcerptRanges(
+    text,
+    700,
+    ["survival", "model"],
+    "讲解真实治疗与LLM建议的比较方式和生存随访",
+  );
+  const visible = ranges.map((r) => text.slice(r.start, r.end)).join("\n");
+  for (const block of [delivered, modelUse, timeOrigin])
+    assert.ok(visible.includes(block));
+  assert.ok(ranges.reduce((sum, r) => sum + r.end - r.start, 0) <= 700);
+  for (const range of ranges)
+    assert.ok(range.start >= 0 && range.end <= text.length);
+});
+
+test("clinical AI design selection also retains prospective allocation rather than assuming retrospective use", () => {
+  const allocation =
+    "Patients were randomly assigned to model-guided care or usual care. The model was used before treatment decisions.";
+  const text = [
+    "Model performance and statistical methods were summarized. ".repeat(80),
+    allocation,
+    "Additional model performance details were summarized. ".repeat(80),
+  ].join("\n");
+  const ranges = evidenceExcerptRanges(
+    text,
+    500,
+    ["model", "performance"],
+    "说明临床AI如何参与治疗分配",
+  );
+  const visible = ranges.map((r) => text.slice(r.start, r.end)).join("\n");
+  assert.ok(visible.includes(allocation));
+  assert.ok(ranges.reduce((sum, r) => sum + r.end - r.start, 0) <= 500);
+});
+
+test("ordinary clinical statistical-model questions do not activate AI deployment selection", () => {
+  const text = [
+    "Methods and clinical statistical analysis were reviewed. ".repeat(80),
+    "No patient received treatment based on model recommendations. Models were accessed after follow-up.",
+    "Further methods and statistical analysis were reviewed. ".repeat(80),
+  ].join("\n");
+  assert.deepEqual(
+    evidenceExcerptRanges(text, 600, ["methods"], "说明临床模型与治疗选择"),
+    evidenceExcerptRanges(text, 600, ["methods"], "说明临床变量与治疗选择"),
+  );
+});

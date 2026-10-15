@@ -60,6 +60,16 @@ function requestedTopics(question: string): Topic[] {
     ["follow-up", "followup", "survival", "censoring", "censored", "mortality"],
     /time\s+(?:to\s+event|from)|follow[ -]?up|date\s+of\s+censoring|随访|删失/i,
   );
+  add(
+    /(?=[\s\S]*(?:\bai\b|\bllms?\b|人工智能|语言模型|机器学习|深度学习))(?=[\s\S]*(?:治疗|临床|建议|生存|\btreatment\b|\brecommendations?\b|\bsurvival\b))/i,
+    ["prospective", "retrospective", "implemented", "deployed", "accessed"],
+    /no\s+patients?\s+(?:received|were\s+treated)[\s\S]{0,140}(?:\bai\b|\bllms?\b|model)|patients?\s+were\s+(?:randomly\s+)?(?:assigned|allocated)[\s\S]{0,140}(?:\bai\b|\bllms?\b|model)|(?:models?|llms?)\s+were\s+accessed/i,
+  );
+  add(
+    /实际治疗|真实治疗|实际干预|(?:treatment|intervention)[\s\S]{0,60}(?:received|delivered|administered)/i,
+    ["performed", "documented", "implemented", "administered"],
+    /(?:therapies|treatment)[\s\S]{0,100}(?:actually\s+performed|documented\s+in)|actual\s+therapy\s+administered/i,
+  );
   return topics;
 }
 // Preserve natural source blocks, including PDF hard-wrapped definitions. Only
