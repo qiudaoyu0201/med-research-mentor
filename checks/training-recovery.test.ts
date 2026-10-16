@@ -179,8 +179,12 @@ test("PPT C preserves full speech and binds explanations to actual slide notes t
   const revised = structuredClone(deck);
   revised.slides[0].notes += " 两组采用相同操作条件。";
   revised.speechScript += "\n两组采用相同操作条件。";
+  const compactUnit = {
+    ...exampleUnits.paper,
+    sections: exampleUnits.paper.sections.slice(0, 3),
+  };
   const generated = (value: typeof deck) => ({
-    unit: exampleUnits.paper,
+    unit: compactUnit,
     deck: value,
     explanationLinks: [
       {

@@ -21,17 +21,32 @@ export type SlideShape = {
   fill: string;
 };
 export const slideSize = { width: 13.333333, height: 7.5 };
+// Explicit point advances keep SVG, capacity checks, and PowerPoint in sync.
+export const slideLineHeight = 1.18;
+
+const slideWordSegmenter = new Intl.Segmenter("zh", { granularity: "word" });
+
 export function wrapSlideText(text: string, width: number, fontSize: number) {
-  // Office glyph placement needs room beyond nominal character widths.
+  // Reserve room for Office glyph placement. Mixed Latin/CJK labels such as
+  // repeated acronyms overflowed the former 0.52-em Latin estimate in PowerPoint.
   const limit = (width * 72 * 0.95) / fontSize,
     lines: string[] = [];
   for (const paragraph of text.split("\n")) {
     let line = "",
       length = 0;
-    const tokens =
+    // Keep signed estimates, compound pressure units, and scientific identifiers intact.
+    const tokens = (
       paragraph.match(
-        /\d[\d,.]*(?:[–—−-]\d[\d,.]*)?(?:%|％)?|[A-Za-z\u0370-\u03ff][A-Za-z0-9\u0370-\u03ff_./+-]*|[^\x00-\x7f]|\s+|./gu,
-      ) ?? [];
+        /\d+(?:[∶:]\d+)+|(?:mm|cm)[ \t\u00a0]+(?:Hg|H2O)\b|[0-9]+[A-Za-z\u0370-\u03ff][A-Za-z0-9\u0370-\u03ff_./+-]*|(?:[+−±-][ \t\u00a0]*)?\d[\d,.]*(?:[–—−-][+−-]?\d[\d,.]*)?(?:%|％|‰)?|[A-Za-z\u0370-\u03ff][A-Za-z0-9\u0370-\u03ff_./+-]*|\p{Script=Han}+|[^\x00-\x7f]|\s+|./gu,
+      ) ?? []
+    ).flatMap((token) =>
+      /^\p{Script=Han}+$/u.test(token)
+        ? Array.from(
+            slideWordSegmenter.segment(token),
+            ({ segment }) => segment,
+          )
+        : [token],
+    );
     const words: string[] = [];
     // Keep closing punctuation with the preceding token before wrapping;
     // appending it after wrapping would overflow an already full line.
@@ -49,7 +64,7 @@ export function wrapSlideText(text: string, width: number, fontSize: number) {
     }
     for (const word of words) {
       const units = [...word].reduce(
-        (n, c) => n + (/[\x00-\x7f]/.test(c) ? 0.52 : 1),
+        (n, c) => n + (/[\x00-\x7f]/.test(c) ? 0.62 : 1),
         0,
       );
       if (length + units > limit && line) {
@@ -59,7 +74,7 @@ export function wrapSlideText(text: string, width: number, fontSize: number) {
       }
       if (units > limit) {
         for (const c of word) {
-          const u = /[\x00-\x7f]/.test(c) ? 0.52 : 1;
+          const u = /[\x00-\x7f]/.test(c) ? 0.62 : 1;
           if (length + u > limit && line) {
             lines.push(line);
             line = "";
@@ -114,11 +129,14 @@ export function slideLayout(
   let composition = "standard";
   let titleSize = 32,
     titleLines = wrapSlideText(slide.title, 11.8, titleSize);
-  while ((titleLines.length * titleSize * 1.18) / 72 > 0.9 && titleSize > 22) {
+  while (
+    (titleLines.length * titleSize * slideLineHeight) / 72 > 0.9 &&
+    titleSize > 22
+  ) {
     titleSize--;
     titleLines = wrapSlideText(slide.title, 11.8, titleSize);
   }
-  if ((titleLines.length * titleSize * 1.18) / 72 > 0.9)
+  if ((titleLines.length * titleSize * slideLineHeight) / 72 > 0.9)
     throw new Error("幻灯片标题太长，请精简后再导出。");
   text.push({
     x: 0.75,
@@ -161,11 +179,15 @@ export function slideLayout(
   ) => {
     let fontSize = preferred;
     let lines = wrapSlideText(value, w, fontSize);
-    while ((lines.length * fontSize * 1.18) / 72 + 0.09 > h && fontSize > 18) {
+    while (
+      (lines.length * fontSize * slideLineHeight) / 72 + 0.09 > h &&
+      fontSize > 18
+    ) {
       fontSize--;
       lines = wrapSlideText(value, w, fontSize);
     }
-    if ((lines.length * fontSize * 1.18) / 72 + 0.09 > h) return false;
+    if ((lines.length * fontSize * slideLineHeight) / 72 + 0.09 > h)
+      return false;
     customText.push({
       x,
       y,
@@ -180,8 +202,64 @@ export function slideLayout(
     });
     return true;
   };
-  let custom = false;
+  // A wide original can be larger above a short band of unchanged claims.
+  // Keep the usual side column when the band would be dense or reduce the image.
+  let wideEvidence:
+    | { text: TextBox[]; image: { x: number; y: number; w: number; h: number } }
+    | undefined;
   if (
+    imageSize &&
+    count > 0 &&
+    count <= 3 &&
+    imageSize.width / imageSize.height >= 1.65
+  ) {
+    const width = (11.9 - (count - 1) * 0.38) / count;
+    const blocks = slide.bullets.map((value) => {
+      const lines = wrapSlideText(value, width, 20);
+      return { lines, h: (lines.length * 20 * slideLineHeight) / 72 + 0.09 };
+    });
+    const bandHeight = Math.max(...blocks.map((b) => b.h));
+    const area = {
+      x: 0.72,
+      y: 1.53,
+      w: 11.9,
+      h: 6.68 - bandHeight - 0.24 - 1.53,
+    };
+    const scale = Math.min(area.w / imageSize.width, area.h / imageSize.height);
+    const previousScale = Math.min(
+      7.95 / imageSize.width,
+      5.18 / imageSize.height,
+    );
+    if (bandHeight <= 1.2 && scale >= previousScale * 1.12) {
+      const w = imageSize.width * scale,
+        h = imageSize.height * scale;
+      wideEvidence = {
+        image: {
+          x: area.x + (area.w - w) / 2,
+          y: area.y + (area.h - h) / 2,
+          w,
+          h,
+        },
+        text: blocks.map((block, i) => ({
+          x: 0.72 + i * (width + 0.38),
+          y: 6.68 - bandHeight,
+          w: width,
+          h: block.h,
+          fontSize: 20,
+          lines: block.lines,
+          color: "303039",
+          role: "bullet",
+          sourceIndex: i,
+        })),
+      };
+    }
+  }
+  let custom = false;
+  if (wideEvidence) {
+    composition = "evidence-wide";
+    customText.push(...wideEvidence.text);
+    custom = true;
+  } else if (
     !hasImage &&
     count >= 3 &&
     count <= 5 &&
@@ -390,7 +468,9 @@ export function slideLayout(
         const lines = wrapSlideText(b, bulletW, fontSize);
         return {
           lines,
-          h: (Math.max(1, lines.length) * fontSize * 1.18) / 72 + 0.09,
+          h:
+            (Math.max(1, lines.length) * fontSize * slideLineHeight) / 72 +
+            0.09,
         };
       });
     let blocks = measure();
@@ -444,7 +524,9 @@ export function slideLayout(
     role: "footer",
   });
   let image;
-  if (imageSize) {
+  if (wideEvidence) {
+    image = wideEvidence.image;
+  } else if (imageSize) {
     const area = { x: 0.72, y: 1.53, w: 7.95, h: 5.18 },
       scale = Math.min(area.w / imageSize.width, area.h / imageSize.height),
       w = imageSize.width * scale,

@@ -46,6 +46,7 @@ export interface Source {
   imageWidth?: number;
   imageHeight?: number;
   imageRegion?: import("./image-region.ts").ImageRegion;
+  imagePanels?: import("./image-region.ts").FigurePanel[];
   attachmentId?: string;
   paperId?: string;
   paperVersion?: string;

@@ -1,6 +1,7 @@
 import { OPS, Util, type PDFPageProxy } from "pdfjs-dist/legacy/build/pdf.mjs";
 import { createCanvas } from "@napi-rs/canvas";
 import type { Source } from "../shared/types.ts";
+import { figurePanels, clearPanelBoundaries } from "./figure-panels.ts";
 import type { ImageRegion } from "../shared/image-region.ts";
 
 type Box = { left: number; top: number; right: number; bottom: number };
@@ -21,6 +22,7 @@ export async function pageFigures(
       const h = Math.hypot(m[2], m[3]);
       return {
         text: i.str,
+        font: i.fontName ?? "",
         left: m[4],
         top: m[5] - h,
         right: m[4] + i.width,
@@ -29,12 +31,42 @@ export async function pageFigures(
       };
     });
   const captions = texts
-    .filter(
-      (t) =>
-        /^(?:Fig(?:ure)?\.?|图)\s*\d+\s*(?:[|:：.]|\s)/i.test(t.text.trim()) &&
+    .filter((t) => {
+      const label = t.text.trim();
+      const wholeAnchor = /^(?:Fig(?:ure)?\.?|图)\s*\d+\s*(?:[|:：.]|\s)/i.test(
+        label,
+      );
+      // Some PDFs put the bold figure number and normal punctuation in separate runs.
+      // Require adjacent punctuation on the same baseline; bare in-text references do not qualify.
+      const splitAnchor =
+        /^(?:Fig(?:ure)?\.?|图)\s*\d+$/i.test(label) &&
+        texts.some(
+          (next) =>
+            /^[|:：.](?:\s|$)/.test(next.text.trim()) &&
+            Math.abs(next.bottom - t.bottom) <=
+              Math.max(t.height, next.height) * 0.35 &&
+            next.left >= t.right - 1 &&
+            next.left <= t.right + Math.max(t.height, next.height) * 1.5,
+        );
+      // Font changes can split a body sentence just before "Fig 2.". A caption
+      // must start its local line, not borrow a plot from a preceding caption.
+      // Check only adjacent runs so independent columns remain valid anchors.
+      const inlineReference = texts.some(
+        (previous) =>
+          previous !== t &&
+          Math.abs(previous.bottom - t.bottom) <=
+            Math.max(previous.height, t.height) * 0.35 &&
+          previous.left < t.left &&
+          previous.right <= t.left + 1 &&
+          previous.right >= t.left - Math.max(previous.height, t.height) * 1.5,
+      );
+      return (
+        (wholeAnchor || splitAnchor) &&
+        !inlineReference &&
         t.top > H * 0.06 &&
-        t.top < H * 0.95,
-    )
+        t.top < H * 0.95
+      );
+    })
     .sort((a, b) => a.top - b.top);
   if (!captions.length) return [];
   const ops = await page.getOperatorList(),
@@ -144,19 +176,58 @@ export async function pageFigures(
     top = Math.max(topLimit, top - 7);
     bottom = Math.min(cap.top - 2, bottom + 7);
     if (right - left < 60 || bottom - top < 35) continue;
-    const caption = texts
+    // A short caption title can sit above full-width explanatory lines. When
+    // the first continuation line starts at the caption margin, use its real
+    // width instead of the title or plot width; this keeps long captions while
+    // retaining the column guard for unrelated body text.
+    const captionRight = Math.max(
+      column.right,
+      right,
+      ...texts
+        .filter(
+          (t) =>
+            t.top > cap.top + cap.height * 0.8 &&
+            t.top <= cap.top + cap.height * 2.2 &&
+            t.left >= cap.left - 2 &&
+            t.left <= cap.left + cap.height * 1.2 &&
+            t.height <= cap.height * 1.1,
+        )
+        .map((t) => t.right),
+    );
+    const nextCaption = captions.find(
+      (c) =>
+        c.top > cap.top + cap.height &&
+        c.left < captionRight &&
+        c.right > cap.left,
+    );
+    const captionBottom = Math.min(
+      H * 0.95,
+      cap.top + H * 0.25,
+      nextCaption?.top ?? H,
+    );
+    const candidates = texts
       .filter(
         (t) =>
           t.top >= cap.top - 1 &&
-          t.top < cap.top + Math.min(110, H * 0.15) &&
+          t.top < captionBottom &&
           t.left >= cap.left - 2 &&
-          t.right <= column.right + 2 &&
-          t.height <= cap.height * 1.25,
+          t.right <= captionRight + 2 &&
+          t.height <= cap.height * 1.1,
       )
       .sort(
         (a, b) =>
           Math.round(a.top / 3) - Math.round(b.top / 3) || a.left - b.left,
-      )
+      );
+    const captionRuns: typeof texts = [];
+    let lastCaptionTop = cap.top;
+    for (const t of candidates) {
+      // A vertical break marks body text or a footer, even if its font matches.
+      if (t.top - lastCaptionTop > cap.height * 1.8) break;
+      captionRuns.push(t);
+      lastCaptionTop = Math.max(lastCaptionTop, t.top);
+      if (/^doi\s*:/i.test(t.text.trim())) break;
+    }
+    const caption = captionRuns
       .map((t) => t.text)
       .join(" ")
       .slice(0, 7000);
@@ -197,7 +268,26 @@ export async function pageFigures(
         w,
         h,
       );
+    const panels = figurePanels(
+      {
+        left: region.left * W,
+        top: region.top * H,
+        right: (region.left + region.width) * W,
+        bottom: (region.top + region.height) * H,
+      },
+      caption,
+      texts,
+    );
+    const imagePanels = clearPanelBoundaries(
+      crop.getContext("2d"),
+      w,
+      h,
+      panels,
+    )
+      ? panels
+      : undefined;
     return {
+      ...(imagePanels?.length ? { imagePanels } : {}),
       id: `${id}-p${page.pageNumber}-fig${number}-${index + 1}`,
       title: `Figure ${number}`,
       kind: "paper",

@@ -17,6 +17,7 @@ import { parsePdf } from "../server/pdf.ts";
 import {
   selectEvidence,
   materialPacket,
+  revisionMaterialPacket,
   defaultPaperSources,
 } from "../server/materials.ts";
 import { DeckVersions } from "../server/deck-versions.ts";
@@ -126,6 +127,143 @@ test("long ordinary paper includes late methods and explicit exact excerpt range
     );
 });
 
+test("missing-data questions preserve the MAR/MICE method paragraph in compressed page evidence", () => {
+  const p7 = {
+    id: "missing-page",
+    title: "PDF 第 7 页",
+    page: 7,
+    kind: "paper" as const,
+    locator: "PDF 7",
+    verified: false,
+    text:
+      "Sample size and statistical analysis. " +
+      "Background details. ".repeat(175) +
+      "Missing data. Presence and patterns of missing data were explored. " +
+      "Although missing not at random (MNAR) cannot be ruled out, we assume a missing at random (MAR) mechanism conditional on observed covariates. " +
+      "We used multiple imputation by chained equations (MICE), generated multiple datasets, and pooled estimates using Rubin's rules. " +
+      "Closing details. ".repeat(160),
+  };
+  const sources = [
+    p7,
+    ...Array.from({ length: 5 }, (_, i) => ({
+      ...p7,
+      id: `other-${i}`,
+      page: i + 1,
+      title: `PDF 第 ${i + 1} 页`,
+      text: `Page ${i + 1}. ` + "Unrelated narrative. ".repeat(240),
+    })),
+  ];
+  const packet = materialPacket(sources, "解释缺失值处理、失访和插补假设");
+  const ref = packet.references.find((r) => r.id === "missing-page")!;
+  const block = packet.blocks.find((b) => b.hash === ref.blockHash)!.text;
+  assert.match(block, /MNAR/);
+  assert.match(block, /MAR/);
+  assert.match(block, /MICE/);
+});
+test("Chinese trial questions retain endpoint, margin and safety definitions within the evidence budget", () => {
+  const page = {
+    id: "trial-methods",
+    title: "PDF 第 6 页",
+    page: 6,
+    kind: "paper" as const,
+    locator: "PDF 6",
+    verified: false,
+    text:
+      "Methods and statistical analysis. " +
+      "Background details. ".repeat(80) +
+      "The primary outcome was recovery assessed per person. " +
+      "Background details. ".repeat(90) +
+      "The non-inferiority margin of 0.75 units was fixed before analysis; confidence intervals determine the comparison. " +
+      "Background details. ".repeat(90) +
+      "Serious adverse events included complications; safety observations were weekly. " +
+      "Closing details. ".repeat(170),
+  };
+  const sources = [
+    page,
+    ...Array.from({ length: 5 }, (_, i) => ({
+      ...page,
+      id: `trial-other-${i}`,
+      title: `PDF 第 ${i + 1} 页`,
+      text: `Page ${i + 1}. ` + "Unrelated narrative. ".repeat(250),
+    })),
+  ];
+  const packet = materialPacket(
+    sources,
+    "带读这项非劣效随机试验，解释主要终点、界值、置信区间和安全性",
+  );
+  const ref = packet.references.find((r) => r.id === page.id)!;
+  const block = packet.blocks.find((b) => b.hash === ref.blockHash)!.text;
+  assert.ok(block.includes("margin of 0.75 units"));
+  assert.ok(block.includes("primary outcome was recovery"));
+  assert.ok(block.includes("Serious adverse events included complications"));
+  assert.ok("visibleRanges" in ref && ref.fullText === false);
+  assert.ok(packet.blocks.reduce((n, b) => n + b.text.length, 0) <= 22_000);
+  if ("visibleRanges" in ref)
+    for (const range of ref.visibleRanges!)
+      assert.ok(block.includes(page.text.slice(range.start, range.end)));
+});
+
+test("Chinese clinical-validation requests retain population and outcome anchors in bounded excerpts", () => {
+  const pages = [
+    {
+      id: "validation-population",
+      title: "PDF 第 4 页",
+      page: 4,
+      kind: "paper" as const,
+      locator: "PDF 4",
+      verified: false,
+      text:
+        "Results and methods. " +
+        "Background details. ".repeat(180) +
+        "Patients were screened for eligibility; 142 participants met inclusion criteria. Observations with unavailable labels were excluded from analysis. " +
+        "Closing details. ".repeat(170),
+    },
+    {
+      id: "validation-endpoint",
+      title: "PDF 第 5 页",
+      page: 5,
+      kind: "paper" as const,
+      locator: "PDF 5",
+      verified: false,
+      text:
+        "Methods and statistical analysis. " +
+        "Background details. ".repeat(180) +
+        "The outcome was hospital admission for more than 48 hours. Calibration compared observed and predicted probabilities before and after recalibration. " +
+        "Closing details. ".repeat(170),
+    },
+  ];
+  const sources = [
+    ...pages,
+    ...Array.from({ length: 6 }, (_, i) => ({
+      ...pages[0],
+      id: `validation-other-${i}`,
+      title: `PDF 第 ${i + 6} 页`,
+      text: `Page ${i + 6}. ` + "Unrelated narrative. ".repeat(260),
+    })),
+  ];
+  const packet = materialPacket(
+    sources,
+    "汇报预测模型外部验证：研究对象、入组和分析人群、研究结局与校准前后比较",
+  );
+  const texts = pages.map((page) => {
+    const ref = packet.references.find((r) => r.id === page.id)!;
+    assert.ok("visibleRanges" in ref && ref.fullText === false);
+    const text = packet.blocks.find((b) => b.hash === ref.blockHash)!.text;
+    if ("visibleRanges" in ref)
+      for (const range of ref.visibleRanges!)
+        assert.ok(text.includes(page.text.slice(range.start, range.end)));
+    return text;
+  });
+  assert.match(texts[0], /142 participants met inclusion criteria/);
+  assert.match(texts[0], /excluded from analysis/);
+  assert.match(
+    texts[1],
+    /outcome was hospital admission for more than 48 hours/,
+  );
+  assert.match(texts[1], /before and after recalibration/);
+  assert.ok(packet.blocks.reduce((n, b) => n + b.text.length, 0) <= 20_000);
+});
+
 test("material requests restore complete selected evidence without exceeding the shared packet allowance", () => {
   const sources = Array.from({ length: 12 }, (_, i) => ({
     id: `p-${i}`,
@@ -155,6 +293,152 @@ test("material requests restore complete selected evidence without exceeding the
   const bounded = materialPacket(oversized, "complete presentation", ["p-0"]);
   assert.ok(bounded.blocks.reduce((n, b) => n + b.text.length, 0) <= 22000);
   assert.ok("visibleRanges" in bounded.references[0]);
+});
+
+const revisionPages = () =>
+  Array.from({ length: 8 }, (_, i) => ({
+    id: `revision-p${i + 1}`,
+    title: `PDF 第 ${i + 1} 页`,
+    page: i + 1,
+    kind: "paper" as const,
+    locator: `PDF ${i + 1}`,
+    verified: false,
+    text:
+      `Page ${i + 1}. ` +
+      "Generic evidence. ".repeat(128) +
+      (i === 5
+        ? "50% eligible, 60% initiate, 30% overall, design target 42.5%."
+        : "Other evidence.") +
+      " Remaining details. ".repeat(140),
+  }));
+function assertPriorExposure(
+  previous: ReturnType<typeof materialPacket>,
+  next: ReturnType<typeof materialPacket>,
+  sources: ReturnType<typeof revisionPages>,
+) {
+  for (const ref of previous.references) {
+    const source = sources.find((s) => s.id === ref.id)!;
+    const after = next.references.find((r) => r.id === ref.id)!;
+    assert.ok(after, "Previously delivered references must remain present");
+    const oldRanges =
+      "fullText" in ref && ref.fullText === false
+        ? ref.visibleRanges!
+        : [{ start: 0, end: source.text.length }];
+    const newRanges =
+      "fullText" in after && after.fullText === false
+        ? after.visibleRanges!
+        : [{ start: 0, end: source.text.length }];
+    for (const range of oldRanges)
+      assert.ok(
+        newRanges.some((r) => r.start <= range.start && r.end >= range.end),
+      );
+  }
+  assert.ok(next.blocks.reduce((n, b) => n + b.text.length, 0) <= 22_000);
+}
+
+test("revision supplementation preserves earlier sample-size assumptions within the same evidence bound", () => {
+  const sources = revisionPages();
+  const original = materialPacket(sources, "trial denominators");
+  const p6 = original.references.find((r) => r.id === "revision-p6")!;
+  assert.match(
+    original.blocks.find((b) => b.hash === p6.blockHash)!.text,
+    /30% overall/,
+  );
+  const independentlyCompressed = materialPacket(
+    sources,
+    "trial denominators",
+    ["revision-p8"],
+  );
+  assert.doesNotMatch(
+    independentlyCompressed.blocks.find((b) => b.hash === p6.blockHash)!.text,
+    /30% overall/,
+  );
+  const revised = revisionMaterialPacket(
+    original,
+    sources,
+    "trial denominators",
+    ["revision-p8"],
+  );
+  assertPriorExposure(original, revised, sources);
+  assert.match(
+    revised.blocks.find((b) => b.hash === p6.blockHash)!.text,
+    /30% overall/,
+  );
+  const again = revisionMaterialPacket(revised, sources, "trial denominators", [
+    "revision-p8",
+  ]);
+  assertPriorExposure(revised, again, sources);
+  assert.deepEqual(again, revised);
+});
+
+test("revision evidence stays partial when requested pages cannot fit and new foundations remain pending", () => {
+  const sources = revisionPages(),
+    original = materialPacket(sources, "trial denominators");
+  const foundation = {
+    ...sources[0],
+    id: "new-foundation",
+    title: "New foundation",
+    kind: "foundation" as const,
+    text: "Foundation definition. ".repeat(400),
+  };
+  const revised = revisionMaterialPacket(
+    original,
+    [...sources, foundation],
+    "trial denominators",
+    sources.map((s) => s.id),
+  );
+  assertPriorExposure(original, revised, sources);
+  assert.ok(
+    revised.references.some((r) => "fullText" in r && r.fullText === false),
+  );
+  assert.ok(!revised.references.some((r) => r.id === foundation.id));
+  assert.match(revised.coverage!, /不代表全文/);
+  const aliasFoundation = {
+    ...sources[7],
+    id: "alias-foundation",
+    kind: "foundation" as const,
+  };
+  const aliasPacket = revisionMaterialPacket(
+    original,
+    [...sources, aliasFoundation],
+    "trial denominators",
+    sources.map((s) => s.id),
+  );
+  assert.ok(
+    !aliasPacket.references.some((r) => r.id === aliasFoundation.id),
+    "A partial shared block must not report a whole new foundation as delivered",
+  );
+});
+
+test("revision evidence deduplicates shared text and rejects changed or ambiguous prior exposure", () => {
+  const sources = revisionPages();
+  sources.push({ ...sources[0], id: "alias" });
+  const original = materialPacket(sources, "trial denominators");
+  const revised = revisionMaterialPacket(
+    original,
+    sources,
+    "trial denominators",
+    ["alias"],
+  );
+  assertPriorExposure(original, revised, sources);
+  assert.equal(revised.blocks.length, 8);
+  assert.equal(revised.references.length, 9);
+  const duplicate = structuredClone(original);
+  duplicate.blocks.push({ ...duplicate.blocks[0] });
+  assert.throws(() => revisionMaterialPacket(duplicate, sources), /重复/);
+  const badText = structuredClone(original);
+  badText.blocks[0].text += " fabricated";
+  assert.throws(
+    () => revisionMaterialPacket(badText, sources),
+    /可见范围不一致/,
+  );
+  const changed = sources.map((s, i) =>
+    i ? s : { ...s, text: s.text + " changed" },
+  );
+  assert.throws(() => revisionMaterialPacket(original, changed), /来源改变/);
+  const orphan = structuredClone(original);
+  orphan.blocks.push({ hash: "orphan", text: "unbound" });
+  assert.throws(() => revisionMaterialPacket(orphan, sources), /未绑定/);
 });
 
 test("valid JSON with invalid nested shape is quarantined before startup consumers; workspace restores its backup", async () => {
@@ -673,4 +957,228 @@ test("scientific slide emphasis preserves labels, values and every source bullet
       );
     }
   }
+});
+
+test("mixed Latin and Chinese lines fit the actual export font width", () => {
+  const context = createCanvas(1, 1).getContext("2d");
+  context.font = "18pt Microsoft YaHei";
+  for (const text of [
+    "ABC阴性后DEF、ABC阳性后DEF",
+    "五个选项：无检测、ABC、DEF、",
+  ]) {
+    for (const line of wrapSlideText(text, 3.5, 18)) {
+      assert.ok(
+        context.measureText(line).width <= 3.5 * 96,
+        "The estimated line must fit the real export font: " + line,
+      );
+    }
+  }
+});
+
+test("slide wrapping keeps digit-leading scientific identifiers intact without changing scientific text", () => {
+  const context = createCanvas(1, 1).getContext("2d");
+  context.font = "19pt Microsoft YaHei";
+  for (const token of ["53BP1", "4EBP1", "5hmC", "3D"]) {
+    const text = "抗ATM反向捕获：检出" + token + "，未检出SUZ12";
+    const lines = wrapSlideText(text, 3.5, 19);
+    assert.equal(lines.join(""), text);
+    assert.ok(
+      lines.some((line) => line.includes(token)),
+      "Identifier must stay in one line: " + token,
+    );
+    for (const line of lines)
+      assert.ok(
+        context.measureText(line).width <= 3.5 * 96,
+        "Actual font width overflow: " + line,
+      );
+  }
+});
+
+test("slide wrapping preserves compound pressure units at real column widths", () => {
+  const context = createCanvas(1, 1).getContext("2d");
+  for (const [text, unit] of [
+    ["舒张压≥90或收缩压≥140 mm Hg：告知高血压并鼓励就医", "mm Hg"],
+    ["呼吸机压力记录为20 cm H2O，按相同时间窗比较", "cm H2O"],
+  ]) {
+    for (const [width, fontSize] of [
+      [5.18, 26],
+      [3.5, 19],
+    ]) {
+      const lines = wrapSlideText(text, width, fontSize);
+      assert.equal(lines.join("").replace(/\s/g, ""), text.replace(/\s/g, ""));
+      assert.ok(
+        lines.some((line) => line.includes(unit)),
+        "Pressure unit split: " + lines.join(" | "),
+      );
+      context.font = fontSize + "pt Microsoft YaHei";
+      for (const line of lines)
+        assert.ok(
+          context.measureText(line).width <= width * 96,
+          "Actual font width overflow: " + line,
+        );
+    }
+  }
+});
+
+test("slide wrapping keeps Chinese words and allocation ratios together at real column widths", () => {
+  const context = createCanvas(1, 1).getContext("2d");
+  for (const [text, tokens] of [
+    [
+      "按初始选择重分后结果相近，但偏好进入比较，不能替代随机分析",
+      ["比较", "随机", "分析"],
+    ],
+    [
+      "1∶1∶1分配至不同策略，按随机分配进行比较",
+      ["1∶1∶1", "随机", "分配", "比较"],
+    ],
+    [
+      "按2:1:1比例随机分配，分别报告完成情况",
+      ["2:1:1", "随机", "分配", "完成"],
+    ],
+  ] as const) {
+    for (const [width, fontSize] of [
+      [2.45, 26],
+      [3.5, 20],
+      [5.1, 24],
+    ]) {
+      const lines = wrapSlideText(text, width, fontSize);
+      assert.equal(lines.join(""), text);
+      for (const token of tokens)
+        assert.ok(
+          lines.some((line) => line.includes(token)),
+          "Word split: " + token + " in " + lines.join(" | "),
+        );
+      context.font = fontSize + "pt Microsoft YaHei";
+      for (const line of lines) {
+        assert.ok(
+          context.measureText(line).width <= width * 96,
+          "Actual font width overflow: " + line,
+        );
+        assert.doesNotMatch(line, /^[，。；：！？、）》」』】”’]/);
+        assert.doesNotMatch(line, /[（(《「『【“‘]$/);
+      }
+    }
+  }
+});
+
+test("slide wrapping keeps signed estimates and interval bounds intact", () => {
+  const context = createCanvas(1, 1).getContext("2d");
+  for (const [text, tokens] of [
+    [
+      "召回相对差−2.5%（95%CI −6.5%～+1.7%），区间跨零",
+      ["−2.5%", "−6.5%", "+1.7%"],
+    ],
+    [
+      "推演召回−15.0%（−18.6%～−11.2%）；共识会议−19.4%",
+      ["−15.0%", "−18.6%", "−11.2%", "−19.4%"],
+    ],
+    [
+      "变化 -2.5% 至 +1.7%，均值±0.5；阈值− 10%",
+      ["-2.5%", "+1.7%", "±0.5", "− 10%"],
+    ],
+  ] as const) {
+    for (const [width, fontSize] of [
+      [2.45, 25],
+      [3.5, 20],
+      [5.1, 24],
+    ]) {
+      const lines = wrapSlideText(text, width, fontSize);
+      assert.equal(
+        lines.join("").replace(/\s+/g, ""),
+        text.replace(/\s+/g, ""),
+      );
+      for (const token of tokens)
+        assert.ok(
+          lines.some((line) => line.includes(token)),
+          "Signed number split: " + token + " in " + lines.join(" | "),
+        );
+      context.font = fontSize + "pt Microsoft YaHei";
+      for (const line of lines)
+        assert.ok(
+          context.measureText(line).width <= width * 96,
+          "Actual font width overflow: " + line,
+        );
+    }
+  }
+});
+
+test("slide wrapping can break a word wider than the whole column without losing content", () => {
+  const text = "中华人民共和国：分析与比较";
+  const lines = wrapSlideText(text, 1.1, 20);
+  assert.equal(lines.join(""), text);
+  const context = createCanvas(1, 1).getContext("2d");
+  context.font = "20pt Microsoft YaHei";
+  assert.ok(lines.length > 1);
+  for (const line of lines)
+    assert.ok(
+      context.measureText(line).width <= 1.1 * 96,
+      "Narrow column overflow: " + line,
+    );
+});
+
+test("compressed clinical evidence retains a complete requested endpoint beside calibration and eligibility", () => {
+  const definition =
+    "Primary outcome\n" +
+    "The primary outcome was defined as a composite of admission longer than 36 hours, death within 12 hours, or transfer within 60 hours. " +
+    "Outcomes were established by telephone follow-up on day eight. " +
+    "A transfer counted only after independent clinician review, and repeat contacts without a new event did not count as outcomes. " +
+    "The definition preserved the separate observation windows rather than treating every participant as having eight days of continuous follow-up.\n";
+  const page = {
+    id: "clinical-methods",
+    title: "PDF 第 4 页",
+    page: 4,
+    kind: "paper" as const,
+    locator: "PDF 4",
+    verified: false,
+    text:
+      "Methods\n" +
+      "Data were recorded on encrypted devices. ".repeat(24) +
+      "\n" +
+      definition +
+      "Calibration validation evaluated calibration slope, recalibration intercept and observed outcome rates in participants. ".repeat(
+        32,
+      ) +
+      "\nInclusion criteria\nThe population included paediatric patients attending the two hospitals; participants outside the age limit were excluded.\n",
+  };
+  const sources = [
+    page,
+    ...Array.from({ length: 9 }, (_, i) => ({
+      ...page,
+      id: "clinical-other-" + i,
+      title: "PDF 第 " + (i + 5) + " 页",
+      page: i + 5,
+      text:
+        "Page " + (i + 5) + ". " + "Unrelated background details. ".repeat(210),
+    })),
+  ];
+  const packet = materialPacket(
+    sources,
+    "为老师汇报该预测研究，说明研究对象、外部验证、复合结局与校准表现",
+  );
+  const reference = packet.references.find((r) => r.id === page.id)!;
+  const block = packet.blocks.find((b) => b.hash === reference.blockHash)!.text;
+  assert.ok(
+    block.includes(definition),
+    "The full endpoint definition and its unequal windows must remain together",
+  );
+  assert.match(block, /Inclusion criteria/);
+  assert.match(block, /Calibration validation/);
+  assert.ok("visibleRanges" in reference && reference.fullText === false);
+  if ("visibleRanges" in reference) {
+    const ranges = reference.visibleRanges!;
+    const start = page.text.indexOf(definition);
+    assert.ok(
+      ranges.some(
+        (r) => r.start <= start && r.end >= start + definition.length,
+      ),
+    );
+    for (const range of ranges)
+      assert.ok(block.includes(page.text.slice(range.start, range.end)));
+    assert.ok(
+      ranges.reduce((n, r) => n + r.end - r.start, 0) <= 1900,
+      "Keep the existing per-page allowance",
+    );
+  }
+  assert.ok(packet.blocks.reduce((n, b) => n + b.text.length, 0) <= 22000);
+  assert.match(packet.coverage!, /不代表全文/);
 });

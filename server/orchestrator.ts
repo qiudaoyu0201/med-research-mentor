@@ -11,7 +11,13 @@ import type {
   Source,
 } from "../shared/types.ts";
 import { profiles, exampleUnits, defaultDeck } from "../examples/bundle.ts";
-import { pptImagePacket } from "./ppt-image-packet.ts";
+import { applyDeckPanels } from "./figure-panels.ts";
+import { pptImagePacket, pptDeckImagePacket } from "./ppt-image-packet.ts";
+import {
+  assertPptLayout,
+  withPptLayoutReview,
+  pptLayoutContractVersion,
+} from "./ppt-layout-review.ts";
 import {
   teachingSchema,
   noviceSchema,
@@ -27,7 +33,12 @@ import type { Provider } from "./provider.ts";
 import { save } from "./storage.ts";
 import { BudgetLedger } from "./budget.ts";
 import { taskTiming } from "./task-timing.ts";
-import { materialPacket, digest, selectionVersion } from "./materials.ts";
+import {
+  materialPacket,
+  revisionMaterialPacket,
+  digest,
+  selectionVersion,
+} from "./materials.ts";
 import { foundationCatalog } from "./foundations.ts";
 import type { ResultCache } from "./cache.ts";
 import { legacyPreferences } from "../shared/learning-intent.ts";
@@ -41,6 +52,13 @@ import {
   tracingSchema,
   validateExplanationLinks,
 } from "./explanation-links.ts";
+
+const simulatedFeedbackContext = {
+  origin: "simulated-novice",
+  isActualUserStatement: false,
+  usage:
+    "feedback 是内部模型模拟的理解与断点，只用于发现解释缺口，不是实际用户的作答、掌握情况或原始证据。把有效缺口融入科学解释；不得据此在正文、术语、后续问题、PPT 页面、备注或讲稿中评价或引用用户回答。只有真实用户问题或明确的真实对话上下文包含对应作答时，才能回应该作答；正常第二人称教学可以保留。审核同样遵守此来源边界。",
+};
 
 export function visibleInput(
   input: TaskInput,
@@ -134,12 +152,22 @@ export function validateTeachingSurface(
 ) {
   const visible = [
     unit.title,
+    unit.question,
     unit.nextQuestion,
     ...unit.sections.flatMap((s) => [s.title, s.text]),
     ...unit.terms.flatMap((t) => [t.name, t.explanation]),
     ...(deck?.slides.flatMap((s) => [s.title, ...s.bullets, s.notes]) ?? []),
     deck?.speechScript ?? "",
   ].join("\n");
+  // Match workflow declarations, not scientific uncertainty or validation terminology.
+  const sourceWorkflowStatus = [
+    /(?:未|不|尚未)(?:作为|经过|通过)(?:正式)?(?:基础)?来源(?:的)?(?:核验|验证)/,
+    /内部(?:的)?(?:来源|资料)(?:核验|验证|访问|检索)(?:状态|记录)/,
+    /官方(?:发布说明已读|说明已核对)|DOI访问(?:受限|状态)/,
+    /\b(?:internal|source)\s+(?:verification|access)\s+status\b/i,
+  ];
+  if (sourceWorkflowStatus.some((pattern) => pattern.test(visible)))
+    throw new Error("讲解或讲稿包含内部来源状态，未保存为完成结果。");
   for (const id of new Set(internalIds)) {
     if (
       id.length < 2 ||
@@ -237,6 +265,10 @@ export function cacheKey(
         selector: selectionVersion,
         foundations: foundationCatalog.version,
         groundingContract: groundingContractVersion,
+        pptLayoutContract: (input.modules ?? [input.module]).includes("ppt")
+          ? pptLayoutContractVersion
+          : undefined,
+        feedbackContext: simulatedFeedbackContext,
         versions,
         profile: profiles.find((p) => p.id === input.profileId),
         model,
@@ -517,6 +549,12 @@ export class TaskManager {
       run.events.push({ status, time: new Date().toISOString() });
       await this.persist("runs", run.id, run);
     };
+    // Keep binary images out of text packets and saved material snapshots, but
+    // restore them when selecting panels or rendering the actual review picture.
+    const images = new Map(paper.sources.map((s) => [s.id, s.image]));
+    const illustratedSources = () =>
+      sources.map((s) => ({ ...s, image: images.get(s.id) }));
+    let reviewImage: string | undefined;
     const call = async <T>(
       role: string,
       instructions: string,
@@ -531,6 +569,9 @@ export class TaskManager {
         durationMs: 0,
       } as TaskRun["roles"][number];
       const started = Date.now();
+      const image = /^(?:novice|grounding)/.test(role)
+        ? (reviewImage ?? run.input.visibleImage)
+        : run.input.visibleImage;
       try {
         const result = await ledger.call(
           this.provider,
@@ -542,8 +583,8 @@ export class TaskManager {
           {
             recoverTransport: this.deliveryPolicy === "online",
             groupId: run.input.groupId ?? run.id,
-            image: run.input.visibleImage,
-            sourceHash: digest({ sources, image: run.input.visibleImage }),
+            image,
+            sourceHash: digest({ sources, image }),
             skillHash: digest(skills.versions),
             onReserved: async (attempt) => {
               if (record.attemptId) {
@@ -578,6 +619,7 @@ export class TaskManager {
     try {
       const profile = profiles.find((p) => p.id === run.input.profileId)!;
       if (run.cacheHit) {
+        assertPptLayout(run.deck, sources);
         validateCitations(
           run.result!,
           run.review!,
@@ -691,6 +733,7 @@ export class TaskManager {
           "\n若 deck 含 speechScript，联合核对完整稿与页面的事实、术语、页序、转场和结尾；仅提供逐页备注不能当作完整稿。";
         const scopedChecking =
           checking +
+          "\n图件绑定已由程序执行：当前deck的imageCrop是按提供的面板ID解析得到的坐标，临时imagePanel已移除；不得仅因看到imageCrop或未看到imagePanel便声称模型猜测坐标。检查实际核验画面是否与页面讲解一致，必要的轴、单位、组别、图例和比例尺是否完整；当前画面未展示的其他读数不得声称图中可见。同一完整图片没有不同裁剪或可见强调而多页原样复用，属于影响汇报的实质图件问题，应列为blocking并要求修订；已有不同面板裁剪不能因来源ID相同而判重复。" +
           "\n图像事实核对：显著性括号必须按该面板横向组别逐个定位两条竖线端点，再用图例核对两端点的颜色、形状和组名；不要按星号居中位置、最近的散点或其他面板推测比较组。提出改组建议时在suggestion写明这条定位依据。原稿、前次审核和用户的说法均不是原始证据；重新核对图像后才能采纳，读不清时限定到可确认的结果，不编造精确比较。" +
           (this.deliveryPolicy === "online" ? onlineReviewInstructions : "") +
           (run.input.diagnosticScope
@@ -725,8 +768,9 @@ export class TaskManager {
         // never a second copy of its notes. Normal product schemas stay intact.
         const scopedSchema = () => {
           const baseSchema = groundedTeachingSchema(
-            sources,
+            illustratedSources(),
             run.input.speechScript,
+            { compactUnit: run.input.module === "ppt" },
           );
           return run.input.diagnosticScope && run.input.module === "ppt"
             ? baseSchema.extend({
@@ -758,6 +802,10 @@ export class TaskManager {
           run.input.modules ?? [run.input.module]
         ).includes("ppt");
         if (!requestedDeck) generated = { ...generated, deck: null };
+        applyDeckPanels(generated.deck, illustratedSources());
+        reviewImage = requestedDeck
+          ? await pptDeckImagePacket(generated.deck, illustratedSources())
+          : undefined;
         run.draft = generated.unit;
         run.explanationTrace = explanationTrace(
           generated,
@@ -797,16 +845,18 @@ export class TaskManager {
           scopedChecking,
           {
             question: run.input.question,
-            sources: materialPacket(sources, run.input.question),
+            sources: task.sources,
             draft: generated.unit,
             previous: run.input.previous ?? null,
             previousIsContextOnly: true,
             deck: generated.deck,
             feedback,
+            feedbackContext: simulatedFeedbackContext,
             learningIntent: run.input.learningIntent ?? null,
           },
           groundedReviewSchema(sources),
         );
+        review = withPptLayoutReview(review, generated.deck, sources);
         validateCitations(
           generated.unit,
           review,
@@ -863,7 +913,8 @@ export class TaskManager {
           )
           .flatMap((i) => i.evidence)
           .filter((id) => sources.some((s) => s.id === id && !s.image));
-        const focusedPacket = materialPacket(
+        const focusedPacket = revisionMaterialPacket(
+          task.sources,
           sources,
           run.input.question,
           focusIds,
@@ -918,9 +969,31 @@ export class TaskManager {
             provided = true;
           if (added.length) {
             try {
-              materialPacket([...sources, ...added]);
-              sources.push(...added);
-              supplemented = true;
+              const extended = revisionMaterialPacket(
+                task.sources,
+                [...sources, ...added],
+                run.input.question,
+                focusIds,
+              );
+              const delivered = added.filter((source) =>
+                extended.references.some(
+                  (ref) =>
+                    ref.id === source.id &&
+                    !("fullText" in ref && ref.fullText === false),
+                ),
+              );
+              if (delivered.length) {
+                sources.push(...delivered);
+                task.sources = extended;
+                supplemented = true;
+              }
+              provided = matches.every((source) =>
+                task.sources.references.some(
+                  (ref) =>
+                    ref.id === source.id &&
+                    !("fullText" in ref && ref.fullText === false),
+                ),
+              );
             } catch {
               provided = false;
             }
@@ -953,7 +1026,12 @@ export class TaskManager {
               .filter((s) => !run.input.sourceIds.includes(s.id))
               .map((s) => s.id),
           });
-          task.sources = materialPacket(sources, run.input.question, focusIds);
+          task.sources = revisionMaterialPacket(
+            task.sources,
+            sources,
+            run.input.question,
+            focusIds,
+          );
           await this.persist("runs", run.id, run);
         }
         if (
@@ -978,6 +1056,7 @@ export class TaskManager {
               draft: generated.unit,
               deck: generated.deck,
               feedback,
+              feedbackContext: simulatedFeedbackContext,
               review,
               materialRequests: run.materialRequests,
               revisionEvidence: {
@@ -994,7 +1073,17 @@ export class TaskManager {
                 verifiedSourceIds: firstReview.checkedSources,
               },
               instruction:
-                "只修订一次。逐项审计当前问题的位置、来源和理解缺口后融入正文。审核建议也可能误读图像，不得直接把suggestion当作事实：修改比较组前重新从原图的图例、组别顺序和括号两端核实；原稿正确时保留，不为迎合审核改错。已核实的对象、比较组、参照、单位、方向与证据边界依来源保留；首稿若有错误，给实际依据再纠正，不凭图注词义填造公式。核对所有新增或改变的事实。内部编号留在工作记录。",
+                `只修订一次。unit.sections 最多 ${
+                  run.input.module === "ppt"
+                    ? run.input.diagnosticScope
+                      ? 1
+                      : 3
+                    : 10
+                } 节。把新增解释融入对应的已有章节，合并重复内容；不按反馈问题逐条另起章节。精练不能删除决定判断的事实、比较或证据边界。` +
+                (run.input.module === "ppt"
+                  ? "PPT的解释优先放入相关页面和简洁讲述提示，辅助unit只概括主线。"
+                  : "") +
+                "遵守 feedbackContext 的来源边界：模拟反馈不能冒充真实用户发言或学习结果；补足解释，不评价虚构的用户作答。逐项审计当前问题的位置、来源和理解缺口后融入正文。审核建议也可能误读图像，不得直接把suggestion当作事实：修改比较组前重新从原图的图例、组别顺序和括号两端核实；原稿正确时保留，不为迎合审核改错。已核实的对象、比较组、参照、单位、方向与证据边界依来源保留；首稿若有错误，给实际依据再纠正，不凭图注词义填造公式。核对所有新增或改变的事实。内部编号留在工作记录。",
             },
             skills.explanationTracing
               ? scopedSchema().extend({
@@ -1003,6 +1092,10 @@ export class TaskManager {
               : scopedSchema(),
           );
           if (!requestedDeck) generated = { ...generated, deck: null };
+          applyDeckPanels(generated.deck, illustratedSources());
+          reviewImage = requestedDeck
+            ? await pptDeckImagePacket(generated.deck, illustratedSources())
+            : undefined;
           if (skills.explanationTracing)
             run.explanationTrace = {
               evidence: explanationTrace(
@@ -1057,11 +1150,18 @@ export class TaskManager {
               draft: generated.unit,
               deck: generated.deck,
               feedback,
+              feedbackContext: simulatedFeedbackContext,
               previousIssues: review.issues,
               revisionAudit: revisionAuditInput(trace),
               learningIntent: run.input.learningIntent ?? null,
             },
             groundedReviewSchema(sources),
+          );
+          review = withPptLayoutReview(
+            review,
+            generated.deck,
+            sources,
+            firstReview,
           );
         }
         validateCitations(
@@ -1083,6 +1183,7 @@ export class TaskManager {
           )
             request.status = "resolved";
         }
+        assertPptLayout(generated.deck, sources);
         validateRunSurface(
           run,
           generated.unit,

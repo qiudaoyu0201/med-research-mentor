@@ -8,6 +8,7 @@ import {
   assertContinuation,
   reserveUnit,
   validateReview,
+  reviewArtifact,
   type TrainingBatch,
   candidateRules,
   factualCriterion,
@@ -120,6 +121,60 @@ test("independent evaluator rejects bogus locations, missing, duplicate and unkn
     assert.equal(result.valid, false);
     assert.ok(result.findings.some((f) => /无效|缺少|重复|未知/.test(f)));
   }
+});
+test("independent review request binds the fixed criteria verbatim and keeps invalid judgments invalid", async () => {
+  const criteria = ["比较 A 与 B", "保留 生存边界"];
+  const check = {
+    criterion: criteria[0],
+    passed: true,
+    location: "真实句子",
+    sourceIds: ["s"],
+    explanation: "与提供的来源相符",
+  };
+  const checks = [check, { ...check, criterion: criteria[1] }];
+  let calls = 0;
+  const provider: Provider = {
+    model: "fixture",
+    async generate(_instructions, _input, schema) {
+      calls += 1;
+      const parse = (value: unknown) => schema.safeParse(value).success;
+      assert.equal(parse({ evaluations: checks }), false);
+      assert.equal(
+        parse({ checks: [{ ...check, criterion: "比较A与B" }, checks[1]] }),
+        false,
+      );
+      assert.equal(parse({ checks: [check] }), false);
+      assert.equal(parse({ checks: [...checks, check] }), false);
+      return { output: schema.parse({ checks }) };
+    },
+  };
+  const result = await reviewArtifact(
+    provider,
+    {
+      question: "比较设计与边界",
+      conditions: "只用当前材料",
+      criteria,
+      artifact: { text: "真实句子" },
+      sources: [{ id: "s", text: "真实证据", locator: "原文" }],
+    },
+    new AbortController().signal,
+  );
+  assert.equal(calls, 1);
+  assert.equal(result.valid, true);
+  assert.equal(result.passed, true);
+  assert.deepEqual(
+    result.review.checks.map((c) => c.criterion),
+    criteria,
+  );
+  const invalid = validateReview(criteria, { text: "真实句子" }, ["s"], {
+    checks: [{ ...check, criterion: "比较A与B" }, checks[1]],
+  });
+  assert.equal(invalid.valid, false);
+  assert.equal(invalid.passed, false);
+  const duplicated = validateReview(criteria, { text: "真实句子" }, ["s"], {
+    checks: [check, check],
+  });
+  assert.equal(duplicated.valid, false);
 });
 test("evaluator location accepts presentation quotes while retaining substantive artifact binding", () => {
   const check = {
@@ -257,4 +312,126 @@ test("research-plan service freezes the scoped candidate into actual generation 
   assert.equal(calls[1].includes("PLAN_SKILL_CANDIDATE_MARKER"), false);
   assert.equal((await freezeRules()).entries["medical-research-plan"].text.includes("PLAN_SKILL_CANDIDATE_MARKER"), false);
   assert.equal((await sharedRules()).includes(feedbackCandidate), false);
+});
+
+test("visible-text evaluation rejects metadata locations while preserving actual body errors and legacy scope", () => {
+  const artifact = {
+    unit: {
+      sections: [
+        {
+          title: "研究方法",
+          text: "正文里错误地写入issue-9。",
+          citations: ["source-1"],
+        },
+      ],
+      sources: [{ text: "这是引用副本", id: "source-1" }],
+    },
+    deck: {
+      slides: [
+        {
+          title: "结果",
+          notes: "这是实际讲稿。",
+          imageSource: "figure-source",
+          imageCrop: { label: "panel-metadata" },
+        },
+      ],
+    },
+  };
+  const review = (location: string) => ({
+    checks: [
+      {
+        criterion: "body",
+        passed: false,
+        location,
+        sourceIds: ["source-1"],
+        explanation: "须修正",
+      },
+    ],
+  });
+  for (const location of [
+    "source-1",
+    "figure-source",
+    "panel-metadata",
+    "这是引用副本",
+  ]) {
+    assert.equal(
+      validateReview(
+        ["body"],
+        artifact,
+        ["source-1"],
+        review(location),
+        "visible-text",
+      ).valid,
+      false,
+    );
+    assert.equal(
+      validateReview(["body"], artifact, ["source-1"], review(location)).valid,
+      true,
+    );
+  }
+  for (const location of ["研究方法", "issue-9", "这是实际讲稿。"]) {
+    const result = validateReview(
+      ["body"],
+      artifact,
+      ["source-1"],
+      review(location),
+      "visible-text",
+    );
+    assert.equal(result.valid, true);
+    assert.equal(result.passed, false);
+  }
+});
+
+test("reading review receives the original image and source binding; absent or mismatched evidence never dispatches", async () => {
+  const image = "data:image/png;base64,source-image";
+  let calls = 0;
+  let receivedImage: string | undefined;
+  let receivedInput: any;
+  let receivedInstructions = "";
+  const provider: Provider = {
+    model: "fixture",
+    async generate(_instructions, input, schema, _signal, visibleImage) {
+      calls++;
+      receivedInstructions = _instructions;
+      receivedImage = visibleImage;
+      receivedInput = input;
+      return { output: schema.parse({ checks: [{
+        criterion: "核对图中读数", passed: true,
+        location: "可见曲线", sourceIds: ["figure"],
+        explanation: "本测试只核对原图输入是否送达，不评定科学正确性。",
+      }] }) };
+    },
+  };
+  const input = {
+    question: "解释曲线", conditions: "仅所给原图",
+    criteria: ["核对图中读数"], artifact: { title: "可见曲线" },
+    sources: [{ id: "figure", text: "图注未逐一抄录数值", locator: "Figure 2" }],
+    evaluatorVersion: "explanation-and-original-image-v1-visible-text" as const,
+    imageSourceId: "figure",
+    sourceExposure: "actual-generation-packets-v1" as const,
+  };
+  const signal = new AbortController().signal;
+  const reviewed = await reviewArtifact(provider, input, signal, image);
+  assert.equal(reviewed.valid, true);
+  assert.equal(receivedImage, image);
+  assert.equal(receivedInput.imageSourceId, "figure");
+  assert.equal(receivedInput.sourceExposure, "actual-generation-packets-v1");
+  assert.match(receivedInstructions, /不把未提供的文字判为漏读/);
+  assert.deepEqual(receivedInput.sources, input.sources);
+  for (const bad of [
+    { value: input, image: undefined },
+    { value: { ...input, imageSourceId: undefined }, image },
+    { value: { ...input, imageSourceId: "other" }, image },
+  ]) {
+    await assert.rejects(
+      reviewArtifact(provider, bad.value, signal, bad.image), /未派发/,
+    );
+  }
+  assert.equal(calls, 1);
+  await reviewArtifact(provider, {
+    ...input, evaluatorVersion: "explanation-v2-visible-text",
+    imageSourceId: undefined,
+  }, signal);
+  assert.equal(calls, 2);
+  assert.equal(receivedImage, undefined);
 });

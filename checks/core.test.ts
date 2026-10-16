@@ -142,6 +142,88 @@ test("online peripheral advice does not force another model call, internal revie
     true,
   );
 });
+test("grounded PPT schema keeps generated slide text within the renderable budget", () => {
+  const schema = groundedTeachingSchema(sample.sources);
+  const base = structuredClone(defaultDeck);
+  assert.equal(schema.safeParse({ unit, deck: base }).success, true);
+  assert.equal(
+    schema.safeParse({
+      unit,
+      deck: {
+        ...base,
+        slides: [{ ...base.slides[0], bullets: ["a", "b", "c", "d", "e"] }],
+      },
+    }).success,
+    false,
+  );
+  assert.equal(
+    schema.safeParse({
+      unit,
+      deck: {
+        ...base,
+        slides: [{ ...base.slides[0], bullets: ["x".repeat(121)] }],
+      },
+    }).success,
+    false,
+  );
+  assert.equal(
+    schema.safeParse({
+      unit,
+      deck: {
+        ...base,
+        slides: [
+          {
+            ...base.slides[0],
+            imageSource: "xu-fig1",
+            bullets: ["a", "b", "c", "d"],
+          },
+        ],
+      },
+    }).success,
+    false,
+  );
+  const compact = groundedTeachingSchema(sample.sources, false, {
+    compactUnit: true,
+  });
+  const shortSections = Array.from({ length: 3 }, (_, index) => ({
+    ...unit.sections[0],
+    title: `导读${index + 1}`,
+  }));
+  assert.equal(
+    compact.safeParse({
+      unit: { ...unit, sections: shortSections },
+      deck: base,
+    }).success,
+    true,
+  );
+  assert.equal(
+    compact.safeParse({
+      unit: {
+        ...unit,
+        sections: [
+          ...shortSections,
+          { ...unit.sections[0], title: "导读4" },
+        ],
+      },
+      deck: base,
+    }).success,
+    false,
+  );
+  assert.equal(
+    compact.safeParse({
+      unit: {
+        ...unit,
+        terms: Array.from({ length: 6 }, (_, index) => ({
+          name: `术语${index + 1}`,
+          explanation: "简短解释",
+        })),
+      },
+      deck: base,
+    }).success,
+    false,
+  );
+});
+
 test("full speech is explicit, required when selected, and isolated in cache; generic PPT includes methods", () => {
   const ordinary = { unit, deck: defaultDeck };
   assert.throws(() =>
@@ -419,6 +501,10 @@ test("PPTX keeps editable text and separate notes, and rejects lost referenced i
   const notes = Object.keys(zip).filter((k) =>
     /^ppt\/notesSlides\/notesSlide\d+\.xml$/.test(k),
   );
+  for (const match of strFromU8(zip["[Content_Types].xml"]).matchAll(
+    /<Override\b[^>]*PartName="([^"]+)"/g,
+  ))
+    assert.ok(zip[match[1].slice(1)], "declared part exists: " + match[1]);
   assert.equal(slides.length, 8);
   assert.equal(notes.length, 8);
   for (const file of notes) {
@@ -431,6 +517,37 @@ test("PPTX keeps editable text and separate notes, and rejects lost referenced i
   assert.ok(slides.every((s) => !strFromU8(zip[s]).includes("原图未提供")));
   assert.ok(defaultDeck.slides.some((s) => s.notes.length > 0));
 });
+test("PPTX uses point line spacing so dense multiline text matches the layout height", async () => {
+  const deck = {
+    slides: [
+      {
+        title: "比较结果与不确定性",
+        bullets: [
+          "主要比较：结果量级及相应区间支持当前判断",
+          "补充分析：分析对象改变时，不能替代原比较",
+          "边界：保留影响解释的条件，不重复图中已有读数",
+        ],
+        notes: "只补充关键推理。",
+        citations: [sample.sources[0].id],
+        imageSource: "",
+      },
+    ],
+  };
+  const path = await exportDeck(deck, sample, "test-fixed-line-spacing");
+  const zip = unzipSync(new Uint8Array(await readFile(path)));
+  const xml = strFromU8(zip["ppt/slides/slide1.xml"]);
+  assert.match(
+    xml,
+    /<a:lnSpc><a:spcPts val="2950"\/>/,
+    "25pt body uses 29.5pt advances, independent of the font's native line metric",
+  );
+  assert.doesNotMatch(
+    xml,
+    /<a:lnSpc><a:spcPct/,
+    "Relative line spacing can exceed the precomputed height in PowerPoint",
+  );
+});
+
 test("PDF importer extracts actual pages and rejects malformed files", async () => {
   await mkdir("runs", { recursive: true });
   const body =
@@ -445,5 +562,41 @@ test("PDF importer extracts actual pages and rejects malformed files", async () 
   await assert.rejects(
     () => parsePdf("runs/invalid.pdf", "invalid", "Invalid"),
     /有效 PDF/,
+  );
+});
+
+test("generation cannot label paper-only evidence as an unavailable foundation", () => {
+  const paperSources = sample.sources.filter((s) => s.kind === "paper");
+  const output = {
+    unit: {
+      ...unit,
+      sections: [
+        {
+          title: "原理",
+          text: "测量的解释。",
+          kind: "foundation",
+          citations: ["xu-design"],
+        },
+      ],
+    },
+    deck: null,
+  };
+  assert.throws(() => groundedTeachingSchema(paperSources).parse(output));
+  const foundation = {
+    ...sample.sources[0],
+    id: "foundation",
+    kind: "foundation" as const,
+  };
+  output.unit.sections[0].citations = ["foundation"];
+  assert.equal(
+    groundedTeachingSchema([...paperSources, foundation]).parse(output).unit
+      .sections[0].kind,
+    "foundation",
+  );
+  output.unit.sections[0].kind = "background";
+  output.unit.sections[0].citations = [];
+  assert.equal(
+    groundedTeachingSchema(paperSources).parse(output).unit.sections[0].kind,
+    "background",
   );
 });

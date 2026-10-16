@@ -1,9 +1,13 @@
+import {
+  containsEvidenceTerm,
+  evidenceExcerptRanges,
+} from "./evidence-excerpts.ts";
 import { createHash } from "node:crypto";
 import type { Source, PaperBundle } from "../shared/types.ts";
 import { preferredSources } from "../shared/image-region.ts";
 export const digest = (value: unknown) =>
   createHash("sha256").update(JSON.stringify(value)).digest("hex");
-export const selectionVersion = "generic-evidence-v6-report-coverage";
+export const selectionVersion = "generic-evidence-v14-trial-strategy-analysis";
 export function figureNumber(text: string) {
   const match = /(?:Figure|Fig\.?|图)\s*([\d一二两三四五六七八九十]+)/i.exec(
     text,
@@ -146,12 +150,45 @@ export function selectEvidence(
 }
 const targetFigure = (question: string) => figureNumber(question);
 function evidenceTerms(question: string) {
-  return [
-    ...new Set(
-      question.toLowerCase().match(/[a-z][a-z0-9-]{2,}|[\u4e00-\u9fff]{2,}/g) ??
-        [],
-    ),
-  ];
+  const normalized = question.toLowerCase();
+  const terms: string[] =
+    normalized.match(/[a-z][a-z0-9-]{2,}|[\u4e00-\u9fff]{2,}/g) ?? [];
+  // Page text is usually English while the user may ask in Chinese. Keep
+  // method-specific anchors together so excerpting does not leave only a
+  // section heading and its final sentence. These aliases are selection hints,
+  // not claims about what the paper used.
+  if (/缺失|失访|插补|不完整/.test(normalized))
+    terms.push("missing", "imputation", "mice", "mar", "mnar");
+  if (/中期|停止|提前结束|alpha|显著性/.test(normalized))
+    terms.push("interim", "stopping", "alpha-spending");
+  if (/随机|分组|随访|流程/.test(normalized))
+    terms.push("randomized", "allocation", "follow-up");
+  if (/研究对象|研究人群|人群|入组|纳排|队列|外部验证/.test(normalized))
+    terms.push(
+      "population",
+      "patients",
+      "participants",
+      "eligibility",
+      "inclusion",
+      "excluded",
+    );
+  if (/结局/.test(normalized)) terms.push("outcome", "endpoint");
+  if (/校准/.test(normalized)) terms.push("calibration", "recalibration");
+  if (/主要终点|主要结局/.test(normalized))
+    terms.push("primary", "outcome", "endpoint");
+  if (/安全性|不良事件/.test(normalized))
+    terms.push("adverse", "serious", "complications", "safety");
+  if (/非劣|等效|non[ -]?inferior|equivalence/.test(normalized))
+    terms.push(
+      "non-inferiority",
+      "noninferiority",
+      "equivalence",
+      "margin",
+      "confidence",
+      "intention-to-treat",
+      "per-protocol",
+    );
+  return [...new Set(terms)];
 }
 function pageScore(s: Source, terms: string[], modules: string[]) {
   const t = s.text.toLowerCase();
@@ -165,7 +202,7 @@ function pageScore(s: Source, terms: string[], modules: string[]) {
       : 0) +
     (/results|结果/i.test(t) ? 45 : 0) +
     (s.section === "methods" ? 60 : 0) +
-    terms.reduce((n, w) => n + (t.includes(w) ? 15 : 0), 0)
+    terms.reduce((n, w) => n + (containsEvidenceTerm(t, w) ? 15 : 0), 0)
   );
 }
 export function materialPacket(
@@ -211,34 +248,7 @@ export function materialPacket(
       blocks.set(hash, { hash, text });
       return { ...source, blockHash: hash };
     }
-    const chunks: { start: number; end: number; score: number }[] = [];
-    for (let start = 0; start < text.length; start += 600) {
-      const end = Math.min(text.length, start + 600),
-        part = text.slice(start, end).toLowerCase();
-      chunks.push({
-        start,
-        end,
-        score:
-          (start === 0 ? 8 : 0) +
-          (/methods|materials|statistical analysis|研究方法|统计分析/i.test(
-            part,
-          )
-            ? 12
-            : 0) +
-          (/results|结果/i.test(part) ? 5 : 0) +
-          terms.reduce((n, w) => n + (part.includes(w) ? 10 : 0), 0),
-      });
-    }
-    let remaining = quota;
-    const slices = chunks
-      .sort((a, b) => b.score - a.score || a.start - b.start)
-      .flatMap((c) => {
-        if (remaining < 100) return [];
-        const end = Math.min(c.end, c.start + remaining);
-        remaining -= end - c.start;
-        return [{ start: c.start, end }];
-      })
-      .sort((a, b) => a.start - b.start);
+    const slices = evidenceExcerptRanges(text, quota, terms, question);
     const excerpt = slices
       .map(
         (c) => `[提取字符 ${c.start}–${c.end}]\n${text.slice(c.start, c.end)}`,
@@ -266,6 +276,197 @@ export function materialPacket(
       : {}),
   };
 }
+
+type EvidenceRange = { start: number; end: number };
+function mergedRanges(ranges: EvidenceRange[]) {
+  const merged: EvidenceRange[] = [];
+  for (const range of [...ranges].sort((a, b) => a.start - b.start)) {
+    const last = merged.at(-1);
+    if (last && range.start <= last.end)
+      last.end = Math.max(last.end, range.end);
+    else merged.push({ ...range });
+  }
+  return merged;
+}
+function excerptText(text: string, ranges: EvidenceRange[]) {
+  return ranges
+    .map((r) => `[提取字符 ${r.start}–${r.end}]\n${text.slice(r.start, r.end)}`)
+    .join("\n\n");
+}
+
+// Revision extends the actual prior exposure, never a newly compressed substitute.
+// Additions share the existing 22,000-character excerpt allowance. Unavailable
+// additions remain partial/pending rather than displacing already supplied facts.
+export function revisionMaterialPacket(
+  previous: ReturnType<typeof materialPacket>,
+  sources: Source[],
+  question = "",
+  focusIds: string[] = [],
+): ReturnType<typeof materialPacket> {
+  const candidate = materialPacket(sources, question, focusIds);
+  const sourceById = new Map(sources.map((s) => [s.id, s]));
+  const oldBlocks = new Map(previous.blocks.map((b) => [b.hash, b.text]));
+  if (
+    sourceById.size !== sources.length ||
+    oldBlocks.size !== previous.blocks.length
+  )
+    throw new Error("修订证据绑定重复，不能确认先前提供范围。");
+  const selected = new Map<string, EvidenceRange[]>();
+  const priorById = new Map(previous.references.map((r) => [r.id, r]));
+  if (priorById.size !== previous.references.length)
+    throw new Error("修订证据引用重复。");
+  for (const ref of previous.references) {
+    const source = sourceById.get(ref.id);
+    if (
+      !source ||
+      digest(source.text) !== ref.blockHash ||
+      source.kind !== ref.kind ||
+      source.paperId !== ref.paperId ||
+      source.paperVersion !== ref.paperVersion
+    )
+      throw new Error("修订证据来源改变，不能确认先前提供范围。");
+    const partial = "fullText" in ref && ref.fullText === false;
+    const ranges = partial
+      ? ref.visibleRanges
+      : [{ start: 0, end: source.text.length }];
+    if (
+      !ranges?.length ||
+      ranges.some(
+        (r, i) =>
+          !Number.isInteger(r.start) ||
+          !Number.isInteger(r.end) ||
+          r.start < 0 ||
+          r.end <= r.start ||
+          r.end > source.text.length ||
+          (i > 0 && r.start < ranges[i - 1].end),
+      ) ||
+      oldBlocks.get(ref.blockHash) !==
+        (partial ? excerptText(source.text, ranges) : source.text)
+    )
+      throw new Error("修订证据文字与可见范围不一致。");
+    selected.set(
+      ref.blockHash,
+      mergedRanges([...(selected.get(ref.blockHash) ?? []), ...ranges]),
+    );
+  }
+  if ([...oldBlocks.keys()].some((hash) => !selected.has(hash)))
+    throw new Error("修订证据含未绑定文字块。");
+  const textByHash = new Map(sources.map((s) => [digest(s.text), s.text]));
+  const visibleText = (hash: string, ranges: EvidenceRange[]) => {
+    const text = textByHash.get(hash)!;
+    return ranges.length === 1 &&
+      ranges[0].start === 0 &&
+      ranges[0].end === text.length
+      ? text
+      : excerptText(text, ranges);
+  };
+  let length = [...selected].reduce(
+    (n, [h, r]) => n + visibleText(h, r).length,
+    0,
+  );
+  if (length > 22_000) throw new Error("先前修订证据超过材料额度。");
+  const allowedReferences = new Set(previous.references.map((r) => r.id));
+  let extended = false;
+  const tryAdd = (hash: string, range: EvidenceRange) => {
+    const old = selected.get(hash) ?? [];
+    const next = mergedRanges([...old, range]);
+    const delta =
+      visibleText(hash, next).length -
+      (old.length ? visibleText(hash, old).length : 0);
+    if (length + delta > 22_000) return false;
+    if (
+      next.reduce((n, r) => n + r.end - r.start, 0) >
+      old.reduce((n, r) => n + r.end - r.start, 0)
+    )
+      extended = true;
+    selected.set(hash, next);
+    length += delta;
+    return true;
+  };
+  // Requested pages first, then new sources, then other useful candidate ranges.
+  const priority = (id: string) =>
+    focusIds.includes(id) ? 0 : priorById.has(id) ? 2 : 1;
+  for (const ref of [...candidate.references].sort(
+    (a, b) => priority(a.id) - priority(b.id),
+  )) {
+    const source = sourceById.get(ref.id)!;
+    const hash = ref.blockHash;
+    if (source.kind === "foundation" && !priorById.has(ref.id)) {
+      if (tryAdd(hash, { start: 0, end: source.text.length }))
+        allowedReferences.add(ref.id);
+      continue;
+    }
+    const ranges =
+      "fullText" in ref && ref.fullText === false
+        ? ref.visibleRanges!
+        : [{ start: 0, end: source.text.length }];
+    for (const range of ranges) {
+      if (tryAdd(hash, range)) continue;
+      // Preserve a bounded additional excerpt when the whole requested range
+      // cannot fit. Coverage remains explicit; it is never reported as full.
+      let low = range.start,
+        high = range.end;
+      while (low < high) {
+        const mid = Math.ceil((low + high) / 2);
+        const old = selected.get(hash) ?? [];
+        const next = mergedRanges([...old, { start: range.start, end: mid }]);
+        const delta =
+          visibleText(hash, next).length -
+          (old.length ? visibleText(hash, old).length : 0);
+        if (length + delta <= 22_000) low = mid;
+        else high = mid - 1;
+      }
+      if (low - range.start >= 100)
+        tryAdd(hash, { start: range.start, end: low });
+    }
+    if (selected.has(hash)) allowedReferences.add(ref.id);
+  }
+  if (
+    !extended &&
+    !candidate.references.some(
+      (ref) => !priorById.has(ref.id) && allowedReferences.has(ref.id),
+    )
+  )
+    return previous;
+  const references = candidate.references.flatMap((ref) => {
+    const ranges = selected.get(ref.blockHash);
+    if (!ranges || !allowedReferences.has(ref.id)) return [];
+    const metadata: Omit<Source, "text" | "image"> & {
+      blockHash: string;
+      fullText?: false;
+      visibleRanges?: EvidenceRange[];
+    } = { ...(priorById.get(ref.id) ?? ref) };
+    delete metadata.fullText;
+    delete metadata.visibleRanges;
+    const text = textByHash.get(ref.blockHash)!;
+    const complete =
+      ranges.length === 1 &&
+      ranges[0].start === 0 &&
+      ranges[0].end === text.length;
+    return [
+      {
+        ...metadata,
+        ...(complete
+          ? {}
+          : { fullText: false as const, visibleRanges: ranges }),
+      },
+    ];
+  });
+  return {
+    blocks: [...selected].map(([hash, ranges]) => ({
+      hash,
+      text: visibleText(hash, ranges),
+    })),
+    references,
+    ...(references.some((r) => "fullText" in r && r.fullText === false)
+      ? {
+          coverage:
+            "保留先前实际提供范围并在额度内补充；visibleRanges 为本次实际提供范围，不代表全文阅读。",
+        }
+      : {}),
+  };
+}
+
 // Fixed local Figure 1 evidence: retain exact extracted text and locations rather than summaries.
 export function figureOneEvidence(sources: Source[]) {
   const page = (number: number) =>

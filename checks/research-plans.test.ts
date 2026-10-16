@@ -1,5 +1,6 @@
 import test from "node:test";
 import assert from "node:assert/strict";
+import { z } from "zod";
 import { ResearchPlans } from "../server/research-plans.ts";
 import { ProviderFailure, type Provider } from "../server/provider.ts";
 import { TaskScheduler } from "../server/scheduler.ts";
@@ -819,4 +820,173 @@ test("online plan never retries ambiguous failures or spends a two-call budget o
     assert.equal(done.budget.attempts.length, 1);
     assert.equal(done.budget.transportRecoveryOf, undefined);
   }
+});
+
+test("plan checker schema accepts full current identifiers and rejects truncated or unrelated references", async () => {
+  let checked = false;
+  const h = harness([], async (_instructions, value: any, schema) => {
+    if (!value.artifactVersion) return { output: schema.parse(content) };
+    const ref = value.sources[0].id;
+    const valid = { ...review, checkedSourceRefs: [ref] };
+    assert.equal(schema.safeParse(valid).success, true);
+    for (const wrong of [ref.slice(0, -8), "duplicate", "other-source"]) {
+      assert.equal(
+        schema.safeParse({ ...valid, checkedSourceRefs: [wrong] }).success,
+        false,
+      );
+    }
+    const issue = {
+      id: "range-check",
+      sectionId: "controls",
+      severity: "warning",
+      message: "核对当前可见来源范围。",
+      evidence: [ref],
+    };
+    assert.equal(schema.safeParse({ ...valid, issues: [issue] }).success, true);
+    assert.equal(
+      schema.safeParse({
+        ...valid,
+        issues: [{ ...issue, sectionId: "missing" }],
+      }).success,
+      false,
+    );
+    assert.equal(
+      schema.safeParse({
+        ...valid,
+        issues: [{ ...issue, evidence: [ref.slice(0, -8)] }],
+      }).success,
+      false,
+    );
+    checked = true;
+    return { output: schema.parse(valid) };
+  });
+  const p = await h.store.create({
+    ...topic,
+    sources: [{ paperId: "a", sourceVersion: "1", sourceId: "duplicate" }],
+  });
+  const j = await h.store.start(p.id, input(p));
+  assert.equal((await h.store.wait(j.id)).status, "completed");
+  assert.equal(checked, true);
+  const result = h.store.get(p.id);
+  assert.deepEqual(result.versions[0].review?.checkedSourceRefs, [
+    p.topic.sources[0].id,
+  ]);
+});
+
+test("plan checker with no supplied source permits empty evidence without permitting invented IDs", async () => {
+  const h = harness([], async (_instructions, value: any, schema) => {
+    if (!value.artifactVersion) return { output: schema.parse(content) };
+    assert.deepEqual(value.sources, []);
+    const outputSchema = z.toJSONSchema(schema);
+    const sourceSchema = outputSchema.properties?.checkedSourceRefs;
+    assert.ok(sourceSchema && typeof sourceSchema === "object");
+    assert.equal(sourceSchema.maxItems, 0);
+    assert.equal(
+      JSON.stringify(outputSchema).includes('"enum":[]'),
+      false,
+      "source-free checker must emit a usable JSON Schema without an empty enum",
+    );
+    const valid = {
+      ...review,
+      issues: [
+        {
+          id: "design-check",
+          sectionId: "controls",
+          severity: "warning",
+          message: "条件待核实。",
+          evidence: [],
+        },
+      ],
+    };
+    assert.equal(schema.safeParse(valid).success, true);
+    assert.equal(
+      schema.safeParse({ ...valid, checkedSourceRefs: ["invented"] }).success,
+      false,
+    );
+    assert.equal(
+      schema.safeParse({
+        ...valid,
+        issues: [{ ...valid.issues[0], evidence: ["invented"] }],
+      }).success,
+      false,
+    );
+    return { output: schema.parse(review) };
+  });
+  const p = await h.store.create(topic);
+  const j = await h.store.start(p.id, input(p));
+  assert.equal((await h.store.wait(j.id)).status, "completed");
+});
+
+test("plan generator restricts section citations to full current source IDs and keeps unique section IDs", async () => {
+  let generated = false;
+  const h = harness([], async (_instructions, value: any, schema) => {
+    if (value.artifactVersion) return { output: schema.parse(review) };
+    const ref = value.sources[0].id;
+    const valid = {
+      ...content,
+      sections: content.sections.map((section) => ({
+        ...section,
+        sourceRefs: [ref],
+      })),
+    };
+    assert.equal(schema.safeParse(valid).success, true);
+    for (const wrong of [ref.slice(0, -8), "duplicate", "unrelated-source"]) {
+      assert.equal(
+        schema.safeParse({
+          ...valid,
+          sections: [{ ...valid.sections[0], sourceRefs: [wrong] }],
+        }).success,
+        false,
+      );
+    }
+    assert.equal(
+      schema.safeParse({
+        ...valid,
+        sections: [valid.sections[0], valid.sections[0]],
+      }).success,
+      false,
+      "grounding must retain the duplicate-section guard",
+    );
+    const outputSchema = z.toJSONSchema(schema);
+    assert.ok(JSON.stringify(outputSchema).includes(JSON.stringify(ref)));
+    generated = true;
+    return { output: schema.parse(valid) };
+  });
+  const p = await h.store.create({
+    ...topic,
+    sources: [{ paperId: "a", sourceVersion: "1", sourceId: "duplicate" }],
+  });
+  const j = await h.store.start(p.id, input(p));
+  assert.equal((await h.store.wait(j.id)).status, "completed");
+  assert.equal(generated, true);
+  assert.deepEqual(
+    h.store.get(p.id).versions[0].content.sections[0].sourceRefs,
+    [p.topic.sources[0].id],
+  );
+});
+
+test("source-free plan generation allows empty citations without an empty enum or invented IDs", async () => {
+  let generated = false;
+  const h = harness([], async (_instructions, value: any, schema) => {
+    if (value.artifactVersion) return { output: schema.parse(review) };
+    assert.deepEqual(value.sources, []);
+    assert.equal(schema.safeParse(content).success, true);
+    assert.equal(
+      schema.safeParse({
+        ...content,
+        sections: [{ ...content.sections[0], sourceRefs: ["invented"] }],
+      }).success,
+      false,
+    );
+    const outputSchema = z.toJSONSchema(schema);
+    assert.equal(JSON.stringify(outputSchema).includes('"enum":[]'), false);
+    const sections = outputSchema.properties?.sections as any;
+    assert.equal(sections.items.properties.sourceRefs.maxItems, 0);
+    generated = true;
+    return { output: schema.parse(content) };
+  });
+  const p = await h.store.create(topic);
+  const j = await h.store.start(p.id, input(p));
+  assert.equal((await h.store.wait(j.id)).status, "completed");
+  assert.equal(generated, true);
 });

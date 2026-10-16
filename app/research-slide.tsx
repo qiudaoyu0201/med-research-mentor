@@ -1,6 +1,10 @@
 import { useEffect, useState } from "react";
 import type { PaperBundle, Slide } from "../shared/types.ts";
-import { slideLayout, slideSize } from "../shared/slide-layout.ts";
+import {
+  slideLayout,
+  slideSize,
+  slideLineHeight,
+} from "../shared/slide-layout.ts";
 import type { ImageRegion } from "../shared/image-region.ts";
 import { cropPixels } from "../shared/image-region.ts";
 export function useCropImage(url: string | undefined, crop?: ImageRegion) {
@@ -129,7 +133,7 @@ export function ResearchSlide({
             <tspan
               key={j}
               x={b.x * 100}
-              y={(b.y + ((j + 0.88) * b.fontSize * 1.18) / 72) * 100}
+              y={(b.y + ((j + 0.88) * b.fontSize * slideLineHeight) / 72) * 100}
             >
               {line}
             </tspan>
@@ -144,7 +148,7 @@ export function ResearchSlide({
             x={(b.markerAbove ? b.x : b.x - 0.42) * 100}
             y={
               ((b.markerAbove ? b.y - 0.36 : b.y + 0.02) +
-                ((10 * 1.18) / 72) * 0.88) *
+                ((10 * slideLineHeight) / 72) * 0.88) *
               100
             }
             fill="#007AFF"

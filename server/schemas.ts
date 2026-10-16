@@ -1,5 +1,6 @@
 import { z } from "zod";
 import type { Source } from "../shared/types.ts";
+import { panelSelectionIds } from "./figure-panels.ts";
 import { validRegion } from "../shared/image-region.ts";
 export const imageRegionSchema = z
   .object({
@@ -110,15 +111,40 @@ export const teachingSchema = z.object({
   unit: unitSchema,
   deck: deckSchema.nullable(),
 });
-export const groundingContractVersion = "grounded-output-v3-background";
+export const groundingContractVersion = "grounded-output-v4-source-kinds";
 export function groundedTeachingSchema(
   sources: Source[],
   speechScript = false,
+  options: { compactUnit?: boolean } = {},
 ) {
   const ids = z.array(z.enum(sources.map((s) => s.id))).max(20);
-  const sections = unitSchema.shape.sections.element.extend({ citations: ids });
-  const slides = slideSchema.omit({ imageCrop: true }).extend({
+  const kinds = [
+    "interpretation",
+    "background",
+    ...(sources.some((s) => s.kind === "paper") ? ["paper" as const] : []),
+    ...(sources.some((s) => s.kind === "foundation")
+      ? ["foundation" as const]
+      : []),
+  ] as const;
+  const sections = unitSchema.shape.sections.element.extend({
     citations: ids,
+    kind: z
+      .enum(kinds)
+      .describe(
+        "证据性质：paper为本文事实，interpretation为基于来源的解释，background为通用背景解释，foundation仅在提供对应基础来源时可用；kind仅为结构化分类，不得写入用户正文或讲述提示中的来源状态。",
+      ),
+  });
+  const slides = slideSchema.omit({ imageCrop: true }).extend({
+    // The rendered evidence layout reserves a narrow text column. Keep generated
+    // bullets compact enough to survive the actual PowerPoint export.
+    bullets: z.array(z.string().trim().min(1).max(120)).min(1).max(4),
+    citations: ids,
+    imagePanel: z
+      .enum(["", ...panelSelectionIds(sources)])
+      .optional()
+      .describe(
+        "可选当前imageSource已有的面板ID；空字符串表示全图。不能猜坐标。",
+      ),
     imageSource: z
       .enum([
         "",
@@ -129,15 +155,39 @@ export function groundedTeachingSchema(
       .optional()
       .describe("仅写原图来源 ID；无图写空字符串，不能附说明。"),
   });
+  const groundedSlides = z
+    .array(slides)
+    .min(1)
+    .max(16)
+    .superRefine((items, ctx) => {
+      for (const [index, slide] of items.entries()) {
+        if (slide.imageSource && slide.bullets.length > 3)
+          ctx.addIssue({
+            code: "too_big",
+            origin: "array",
+            maximum: 3,
+            inclusive: true,
+            path: [index, "bullets"],
+            message: "带图页面最多保留三条正文要点。",
+          });
+      }
+    });
+  const unitSections = z
+    .array(sections)
+    .min(1)
+    .max(options.compactUnit ? 3 : 10);
+  const unitTerms = options.compactUnit
+    ? unitSchema.shape.terms.max(5)
+    : unitSchema.shape.terms;
   return teachingSchema.extend({
-    unit: unitSchema.extend({ sections: z.array(sections).min(1).max(10) }),
+    unit: unitSchema.extend({ sections: unitSections, terms: unitTerms }),
     deck: (speechScript
       ? deckSchema.extend({
           speechScript: deckSchema.shape.speechScript.unwrap(),
         })
       : deckSchema.omit({ speechScript: true })
     )
-      .extend({ slides: z.array(slides).min(1).max(16) })
+      .extend({ slides: groundedSlides })
       .nullable(),
   });
 }

@@ -76,6 +76,17 @@ export const planContentSchema = z
     (x) => new Set(x.sections.map((s) => s.id)).size === x.sections.length,
     { message: "章节 ID 重复" },
   );
+export function groundedPlanContentSchema(sourceIds: string[]) {
+  const refs = z
+    .array(sourceIds.length ? z.enum(sourceIds) : researchId)
+    .max(sourceIds.length ? 12 : 0, "章节引用了未提供的来源。");
+  return planContentSchema.safeExtend({
+    sections: z
+      .array(sectionSchema.extend({ sourceRefs: refs }))
+      .min(1)
+      .max(12),
+  });
+}
 export const planReviewSchema = z
   .object({
     issues: z
@@ -95,6 +106,25 @@ export const planReviewSchema = z
     limitations: z.array(text(1000)).min(1).max(20),
   })
   .strict();
+export function groundedPlanReviewSchema(
+  sectionIds: string[],
+  sourceIds: string[],
+) {
+  const refs = z
+    .array(sourceIds.length ? z.enum(sourceIds) : researchId)
+    .max(sourceIds.length ? 12 : 0);
+  return planReviewSchema.extend({
+    issues: z
+      .array(
+        planReviewSchema.shape.issues.element.extend({
+          sectionId: z.enum(sectionIds),
+          evidence: refs,
+        }),
+      )
+      .max(30),
+    checkedSourceRefs: refs,
+  });
+}
 export const planJobInputSchema = z
   .object({
     retrieveLiterature: z.boolean().default(false),

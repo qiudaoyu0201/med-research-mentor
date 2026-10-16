@@ -30,7 +30,8 @@
     "training:m2": "tsx scripts/internal-training-batches.ts",
     "training:closures": "tsx scripts/learning-closures.ts",
     "training:m3": "tsx scripts/internal-learning.ts",
-    "training:learning-calibrate": "tsx scripts/internal-learning.ts calibrate"
+    "training:learning-calibrate": "tsx scripts/internal-learning.ts calibrate",
+    "training:diagnostic": "tsx scripts/model-diagnostic.ts"
   },
   "dependencies": {
     "@napi-rs/canvas": "^1.0.10",

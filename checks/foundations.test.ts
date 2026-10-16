@@ -802,3 +802,223 @@ test("evaluation has its own deadline and preserves the expired product ledger",
   assert.deepEqual(run.budget, original);
   assert.equal(generationAttempts(run).length, 4);
 });
+
+test("teaching, revision and recheck retain previously delivered trial assumptions after a page request", async () => {
+  const p = bindPaperEvidence({
+    id: "retained-trial",
+    title: "Trial",
+    version: "v1",
+    scope: "test",
+    sources: Array.from({ length: 8 }, (_, i) => ({
+      id: `trial-p${i + 1}`,
+      title: `PDF 第 ${i + 1} 页`,
+      page: i + 1,
+      kind: "paper" as const,
+      locator: `PDF ${i + 1}`,
+      verified: false,
+      text:
+        `Page ${i + 1}. ` +
+        "Generic evidence. ".repeat(128) +
+        (i === 5
+          ? "50% eligible, 60% initiate, 30% overall, design target 42.5%."
+          : "Other evidence.") +
+        " Remaining details. ".repeat(140),
+    })),
+  });
+  const audit = {
+    ...review,
+    issues: [
+      {
+        id: "sample-size",
+        type: "material",
+        severity: "blocking",
+        location: "正文",
+        suggestion: "补充第八页方法原文",
+        evidence: ["trial-p8"],
+        resolved: false,
+      },
+    ],
+  };
+  const outputs = [
+    lesson("trial-p6", "paper"),
+    feedback,
+    audit,
+    lesson("trial-p6", "paper"),
+    feedback,
+    review,
+  ];
+  const inputs: any[] = [];
+  const manager = new TaskManager(
+    {
+      model: "test",
+      async generate(_i, input, schema) {
+        inputs.push(structuredClone(input));
+        return { output: schema.parse(outputs.shift()) };
+      },
+    },
+    discard,
+  );
+  const run = await manager.start(
+    {
+      paperId: p.id,
+      module: "paper",
+      mode: "live",
+      question: "trial denominators",
+      profileId: "beginner",
+      sourceIds: p.sources.map((s) => s.id),
+      taughtConcepts: [],
+    },
+    p,
+  );
+  await manager.wait(run.id);
+  assert.equal(run.status, "completed", run.error);
+  assert.equal(run.calls, 6);
+  for (const index of [0, 2, 3, 5]) {
+    const packet = inputs[index].sources;
+    const ref = packet.references.find((r: any) => r.id === "trial-p6");
+    assert.match(
+      packet.blocks.find((b: any) => b.hash === ref.blockHash).text,
+      /30% overall/,
+    );
+    assert.ok(
+      packet.blocks.reduce((n: number, b: any) => n + b.text.length, 0) <=
+        22_000,
+    );
+  }
+  assert.deepEqual(inputs[3].sources, inputs[5].sources);
+});
+
+test("simulated understanding is labelled through revision without replacing the actual user's question", async () => {
+  const p = paper("feedback-origin");
+  const actualQuestion = "我认为 OR 不是风险比，请解释条件比较与边际比较。";
+  const simulated = {
+    understood: ["我已理解调整后的 OR 可以当作风险比"],
+    breakpoints: [],
+  };
+  const audit = {
+    ...review,
+    issues: [
+      {
+        id: "clarify-comparison",
+        type: "teaching",
+        severity: "blocking",
+        location: "正文",
+        suggestion: "解释条件与边际比较",
+        evidence: ["feedback-origin-result"],
+        resolved: false,
+      },
+    ],
+  };
+  const outputs = [
+    lesson("feedback-origin-result", "paper"),
+    simulated,
+    audit,
+    lesson("feedback-origin-result", "paper"),
+    feedback,
+    review,
+  ];
+  const inputs: any[] = [];
+  const manager = new TaskManager(
+    {
+      model: "test",
+      async generate(_instructions, input, schema) {
+        inputs.push(structuredClone(input));
+        return { output: schema.parse(outputs.shift()) };
+      },
+    },
+    discard,
+  );
+  const run = await manager.start(
+    {
+      paperId: p.id,
+      module: "paper",
+      mode: "live",
+      question: actualQuestion,
+      profileId: "beginner",
+      sourceIds: ["feedback-origin-result"],
+      taughtConcepts: [],
+    },
+    p,
+  );
+  await manager.wait(run.id);
+  assert.equal(run.status, "completed", run.error);
+  assert.equal(run.calls, 6);
+  for (const index of [2, 3, 5]) {
+    assert.equal(inputs[index].feedbackContext.origin, "simulated-novice");
+    assert.equal(inputs[index].feedbackContext.isActualUserStatement, false);
+  }
+  assert.equal(inputs[0].question, actualQuestion);
+  assert.equal(inputs[3].question, actualQuestion);
+  assert.deepEqual(inputs[3].feedback, simulated);
+  assert.notEqual(inputs[3].question, simulated.understood[0]);
+});
+
+test("teaching surface isolates workflow metadata while retaining medical evidence limits", () => {
+  const p = paper("metadata-surface");
+  const output = {
+    ...lesson("metadata-surface-result", "paper"),
+    unit: {
+      ...lesson("metadata-surface-result", "paper").unit,
+      terms: [{ name: "Verification bias", explanation: "验证偏倚" }],
+    },
+    deck: {
+      slides: [
+        {
+          title: "医学AI的判别与校准",
+          bullets: ["当前材料未提供逐日校准结果"],
+          notes: "随访测量未用于训练，但仍来自同批患者，不等于独立外部验证。",
+          citations: ["metadata-surface-result"],
+        },
+      ],
+      speechScript: "以下是教学示意，不是本文实测结果。",
+    },
+  };
+  output.unit.sections[0].text =
+    "verification bias（验证偏倚）涉及确诊机会随检测结果变化。所给资料已提供测量范围，但不能证明已改善临床结局。";
+  assert.doesNotThrow(() =>
+    validateTeachingSurface(output.unit, output.deck, [], p.sources),
+  );
+  const hiddenReview = {
+    issues: [],
+    checkedSources: ["metadata-surface-result"],
+    limitations: ["来源核验状态保存在内部审核记录。"],
+  };
+  assert.doesNotThrow(() =>
+    validateCitations(output.unit, hiddenReview, p.sources, output.deck),
+  );
+  const workflowText = "这段通用背景未作为正式基础来源核验。";
+  const surfaces = [
+    (value: typeof output) => {
+      value.unit.title = workflowText;
+    },
+    (value: typeof output) => {
+      value.unit.question = workflowText;
+    },
+    (value: typeof output) => {
+      value.unit.nextQuestion = workflowText;
+    },
+    (value: typeof output) => {
+      value.unit.sections[0].text = workflowText;
+    },
+    (value: typeof output) => {
+      value.unit.terms[0].explanation = workflowText;
+    },
+    (value: typeof output) => {
+      value.deck.slides[0].bullets[0] = workflowText;
+    },
+    (value: typeof output) => {
+      value.deck.slides[0].notes = workflowText;
+    },
+    (value: typeof output) => {
+      value.deck.speechScript = workflowText;
+    },
+  ];
+  for (const replaceSurface of surfaces) {
+    const leaked = structuredClone(output);
+    replaceSurface(leaked);
+    assert.throws(
+      () => validateTeachingSurface(leaked.unit, leaked.deck, [], p.sources),
+      /内部来源状态/,
+    );
+  }
+});

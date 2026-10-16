@@ -1,5 +1,10 @@
 import { z } from "zod";
-import { unitSchema, reviewSchema, deckSchema } from "./schemas.ts";
+import {
+  unitSchema,
+  reviewSchema,
+  deckSchema,
+  imageRegionSchema,
+} from "./schemas.ts";
 // Read-time shape checks protect consumers before any nested access. Keep unknown
 // fields for backward compatibility; do not fill in missing content or discard it.
 const str = z.string(),
@@ -17,6 +22,15 @@ const source = object({
   verified: bool,
   page: num.optional(),
   image: str.optional(),
+  imagePanels: z
+    .array(
+      object({ label: z.string().regex(/^[a-p]$/), region: imageRegionSchema }),
+    )
+    .max(16)
+    .refine(
+      (panels) => new Set(panels.map((p) => p.label)).size === panels.length,
+    )
+    .optional(),
   relatedFigures: strings.optional(),
 });
 const review = reviewSchema;
@@ -421,7 +435,12 @@ shapes.sessions = object({
   progress: arrayObjects,
 });
 export function validRecordShape(group: string, value: unknown, id?: string) {
-  if (group === "material-cache" && /-pdf-figures-v[23]$/.test(id ?? ""))
+  if (
+    group === "material-cache" &&
+    /-pdf-figures-v(?:2|3|4-panels|5-caption-anchors|6-caption-width|7-panel-labels|8-caption-line-start)$/.test(
+      id ?? "",
+    )
+  )
     return object({
       pages: strings,
       parseStatus: str,

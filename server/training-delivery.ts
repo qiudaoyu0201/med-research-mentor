@@ -108,13 +108,21 @@ export async function verifyTrainingDeliveryFiles(
       ? paper.sources.find((s) => s.id === slide.imageSource)
       : undefined;
     if (slide.imageSource && !source) throw new Error("PPT 原图来源不存在。");
+    const original = source?.image ? await loadImage(source.image) : undefined;
+    const bounds = original
+      ? slide.imageCrop
+        ? cropPixels(slide.imageCrop, original.width, original.height)
+        : { left: 0, top: 0, width: original.width, height: original.height }
+      : undefined;
     const layout = slideLayout(
       slide,
       sources as PaperBundle["sources"],
-      slide.imageSource ? { width: 1600, height: 1000 } : undefined,
+      bounds ?? (slide.imageSource ? { width: 1, height: 1 } : undefined),
     );
     const expectedText =
-      layout.text.flatMap((box) => box.lines).join("") +
+      layout.text
+        .flatMap((box) => [...(box.marker ? [box.marker] : []), ...box.lines])
+        .join("") +
       (slide.imageSource && !source?.image ? "原图未提供" : "") +
       `${i + 1} / ${deck.slides.length}`;
     if (compact(xmlText(xml)) !== compact(expectedText))
@@ -135,11 +143,33 @@ export async function verifyTrainingDeliveryFiles(
       throw new Error("PPT 图件关系无效。");
     const bytes = zip[posix.normalize(posix.join("ppt/slides", target))];
     if (!bytes) throw new Error("PPT 图件文件缺失。");
-    const original = await loadImage(source.image),
-      actual = await loadImage(Buffer.from(bytes));
-    const bounds = slide.imageCrop
-      ? cropPixels(slide.imageCrop, original.width, original.height)
-      : { left: 0, top: 0, width: original.width, height: original.height };
+    if (!bounds || !original || !layout.image)
+      throw new Error("PPT 原图尺寸缺失。");
+    const transform =
+      /<a:xfrm\b[^>]*>[\s\S]*?<\/a:xfrm>/.exec(pictures[0][0])?.[0] ?? "";
+    const offset = /<a:off\b[^>]*\bx="(-?\d+)"[^>]*\by="(-?\d+)"/.exec(
+      transform,
+    );
+    const extent = /<a:ext\b[^>]*\bcx="(\d+)"[^>]*\bcy="(\d+)"/.exec(transform);
+    const expectedPlacement = [
+      layout.image.x,
+      layout.image.y,
+      layout.image.w,
+      layout.image.h,
+    ];
+    const placement =
+      offset && extent
+        ? [...offset.slice(1), ...extent.slice(1)].map(Number)
+        : [];
+    if (
+      placement.length !== 4 ||
+      placement.some(
+        (value, i) =>
+          Math.abs(value - Math.round(expectedPlacement[i] * 914400)) > 2,
+      )
+    )
+      throw new Error("PPT 图件位置或显示尺寸与冻结排版不一致。");
+    const actual = await loadImage(Buffer.from(bytes));
     if (actual.width !== bounds.width || actual.height !== bounds.height)
       throw new Error("PPT 原图或裁剪尺寸不一致。");
     const expected = createCanvas(bounds.width, bounds.height),
