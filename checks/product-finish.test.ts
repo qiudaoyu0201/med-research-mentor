@@ -1020,6 +1020,61 @@ test("slide wrapping preserves compound pressure units at real column widths", (
   }
 });
 
+test("slide wrapping keeps Chinese words and allocation ratios together at real column widths", () => {
+  const context = createCanvas(1, 1).getContext("2d");
+  for (const [text, tokens] of [
+    [
+      "按初始选择重分后结果相近，但偏好进入比较，不能替代随机分析",
+      ["比较", "随机", "分析"],
+    ],
+    [
+      "1∶1∶1分配至不同策略，按随机分配进行比较",
+      ["1∶1∶1", "随机", "分配", "比较"],
+    ],
+    [
+      "按2:1:1比例随机分配，分别报告完成情况",
+      ["2:1:1", "随机", "分配", "完成"],
+    ],
+  ] as const) {
+    for (const [width, fontSize] of [
+      [2.45, 26],
+      [3.5, 20],
+      [5.1, 24],
+    ]) {
+      const lines = wrapSlideText(text, width, fontSize);
+      assert.equal(lines.join(""), text);
+      for (const token of tokens)
+        assert.ok(
+          lines.some((line) => line.includes(token)),
+          "Word split: " + token + " in " + lines.join(" | "),
+        );
+      context.font = fontSize + "pt Microsoft YaHei";
+      for (const line of lines) {
+        assert.ok(
+          context.measureText(line).width <= width * 96,
+          "Actual font width overflow: " + line,
+        );
+        assert.doesNotMatch(line, /^[，。；：！？、）》」』】”’]/);
+        assert.doesNotMatch(line, /[（(《「『【“‘]$/);
+      }
+    }
+  }
+});
+
+test("slide wrapping can break a word wider than the whole column without losing content", () => {
+  const text = "中华人民共和国：分析与比较";
+  const lines = wrapSlideText(text, 1.1, 20);
+  assert.equal(lines.join(""), text);
+  const context = createCanvas(1, 1).getContext("2d");
+  context.font = "20pt Microsoft YaHei";
+  assert.ok(lines.length > 1);
+  for (const line of lines)
+    assert.ok(
+      context.measureText(line).width <= 1.1 * 96,
+      "Narrow column overflow: " + line,
+    );
+});
+
 test("compressed clinical evidence retains a complete requested endpoint beside calibration and eligibility", () => {
   const definition =
     "Primary outcome\n" +

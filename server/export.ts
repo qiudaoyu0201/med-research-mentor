@@ -3,7 +3,7 @@ import { mkdir, writeFile } from "node:fs/promises";
 import { resolve } from "node:path";
 import { createCanvas, loadImage } from "@napi-rs/canvas";
 import { deckSchema } from "./schemas.ts";
-import { slideLayout } from "../shared/slide-layout.ts";
+import { slideLayout, slideLineHeight } from "../shared/slide-layout.ts";
 import type { DeckOutline, PaperBundle, TaskRun } from "../shared/types.ts";
 import { safeId } from "./storage.ts";
 import { completePptxPackage } from "./pptx-package.ts";
@@ -98,7 +98,8 @@ export async function exportDeck(
         color: b.color,
         margin: 0,
         breakLine: false,
-        lineSpacingMultiple: 1.18,
+        // Relative spacing uses Office font metrics and can overflow fitted boxes.
+        lineSpacing: b.fontSize * slideLineHeight,
         valign: "top",
         fontFace: "Microsoft YaHei",
       });

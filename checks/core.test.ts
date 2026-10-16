@@ -517,6 +517,37 @@ test("PPTX keeps editable text and separate notes, and rejects lost referenced i
   assert.ok(slides.every((s) => !strFromU8(zip[s]).includes("原图未提供")));
   assert.ok(defaultDeck.slides.some((s) => s.notes.length > 0));
 });
+test("PPTX uses point line spacing so dense multiline text matches the layout height", async () => {
+  const deck = {
+    slides: [
+      {
+        title: "比较结果与不确定性",
+        bullets: [
+          "主要比较：结果量级及相应区间支持当前判断",
+          "补充分析：分析对象改变时，不能替代原比较",
+          "边界：保留影响解释的条件，不重复图中已有读数",
+        ],
+        notes: "只补充关键推理。",
+        citations: [sample.sources[0].id],
+        imageSource: "",
+      },
+    ],
+  };
+  const path = await exportDeck(deck, sample, "test-fixed-line-spacing");
+  const zip = unzipSync(new Uint8Array(await readFile(path)));
+  const xml = strFromU8(zip["ppt/slides/slide1.xml"]);
+  assert.match(
+    xml,
+    /<a:lnSpc><a:spcPts val="2950"\/>/,
+    "25pt body uses 29.5pt advances, independent of the font's native line metric",
+  );
+  assert.doesNotMatch(
+    xml,
+    /<a:lnSpc><a:spcPct/,
+    "Relative line spacing can exceed the precomputed height in PowerPoint",
+  );
+});
+
 test("PDF importer extracts actual pages and rejects malformed files", async () => {
   await mkdir("runs", { recursive: true });
   const body =

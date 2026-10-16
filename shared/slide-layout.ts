@@ -21,6 +21,11 @@ export type SlideShape = {
   fill: string;
 };
 export const slideSize = { width: 13.333333, height: 7.5 };
+// Explicit point advances keep SVG, capacity checks, and PowerPoint in sync.
+export const slideLineHeight = 1.18;
+
+const slideWordSegmenter = new Intl.Segmenter("zh", { granularity: "word" });
+
 export function wrapSlideText(text: string, width: number, fontSize: number) {
   // Reserve room for Office glyph placement. Mixed Latin/CJK labels such as
   // repeated acronyms overflowed the former 0.52-em Latin estimate in PowerPoint.
@@ -30,10 +35,18 @@ export function wrapSlideText(text: string, width: number, fontSize: number) {
     let line = "",
       length = 0;
     // Keep compound pressure units and digit-leading scientific identifiers intact.
-    const tokens =
+    const tokens = (
       paragraph.match(
-        /(?:mm|cm)[ \t\u00a0]+(?:Hg|H2O)\b|[0-9]+[A-Za-z\u0370-\u03ff][A-Za-z0-9\u0370-\u03ff_./+-]*|\d[\d,.]*(?:[–—−-]\d[\d,.]*)?(?:%|％)?|[A-Za-z\u0370-\u03ff][A-Za-z0-9\u0370-\u03ff_./+-]*|[^\x00-\x7f]|\s+|./gu,
-      ) ?? [];
+        /\d+(?:[∶:]\d+)+|(?:mm|cm)[ \t\u00a0]+(?:Hg|H2O)\b|[0-9]+[A-Za-z\u0370-\u03ff][A-Za-z0-9\u0370-\u03ff_./+-]*|\d[\d,.]*(?:[–—−-]\d[\d,.]*)?(?:%|％)?|[A-Za-z\u0370-\u03ff][A-Za-z0-9\u0370-\u03ff_./+-]*|\p{Script=Han}+|[^\x00-\x7f]|\s+|./gu,
+      ) ?? []
+    ).flatMap((token) =>
+      /^\p{Script=Han}+$/u.test(token)
+        ? Array.from(
+            slideWordSegmenter.segment(token),
+            ({ segment }) => segment,
+          )
+        : [token],
+    );
     const words: string[] = [];
     // Keep closing punctuation with the preceding token before wrapping;
     // appending it after wrapping would overflow an already full line.
@@ -116,11 +129,14 @@ export function slideLayout(
   let composition = "standard";
   let titleSize = 32,
     titleLines = wrapSlideText(slide.title, 11.8, titleSize);
-  while ((titleLines.length * titleSize * 1.18) / 72 > 0.9 && titleSize > 22) {
+  while (
+    (titleLines.length * titleSize * slideLineHeight) / 72 > 0.9 &&
+    titleSize > 22
+  ) {
     titleSize--;
     titleLines = wrapSlideText(slide.title, 11.8, titleSize);
   }
-  if ((titleLines.length * titleSize * 1.18) / 72 > 0.9)
+  if ((titleLines.length * titleSize * slideLineHeight) / 72 > 0.9)
     throw new Error("幻灯片标题太长，请精简后再导出。");
   text.push({
     x: 0.75,
@@ -163,11 +179,15 @@ export function slideLayout(
   ) => {
     let fontSize = preferred;
     let lines = wrapSlideText(value, w, fontSize);
-    while ((lines.length * fontSize * 1.18) / 72 + 0.09 > h && fontSize > 18) {
+    while (
+      (lines.length * fontSize * slideLineHeight) / 72 + 0.09 > h &&
+      fontSize > 18
+    ) {
       fontSize--;
       lines = wrapSlideText(value, w, fontSize);
     }
-    if ((lines.length * fontSize * 1.18) / 72 + 0.09 > h) return false;
+    if ((lines.length * fontSize * slideLineHeight) / 72 + 0.09 > h)
+      return false;
     customText.push({
       x,
       y,
@@ -196,7 +216,7 @@ export function slideLayout(
     const width = (11.9 - (count - 1) * 0.38) / count;
     const blocks = slide.bullets.map((value) => {
       const lines = wrapSlideText(value, width, 20);
-      return { lines, h: (lines.length * 20 * 1.18) / 72 + 0.09 };
+      return { lines, h: (lines.length * 20 * slideLineHeight) / 72 + 0.09 };
     });
     const bandHeight = Math.max(...blocks.map((b) => b.h));
     const area = {
@@ -448,7 +468,9 @@ export function slideLayout(
         const lines = wrapSlideText(b, bulletW, fontSize);
         return {
           lines,
-          h: (Math.max(1, lines.length) * fontSize * 1.18) / 72 + 0.09,
+          h:
+            (Math.max(1, lines.length) * fontSize * slideLineHeight) / 72 +
+            0.09,
         };
       });
     let blocks = measure();

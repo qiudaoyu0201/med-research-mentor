@@ -1,7 +1,7 @@
 import { slideLayout } from "../shared/slide-layout.ts";
 import type { DeckOutline, ReviewResult, Source } from "../shared/types.ts";
 
-export const pptLayoutContractVersion = "ppt-layout-v2-wide-evidence";
+export const pptLayoutContractVersion = "ppt-layout-v3-word-wrap-fixed-lines";
 
 const layoutId = (index: number) => `ppt-layout-${index + 1}`;
 
