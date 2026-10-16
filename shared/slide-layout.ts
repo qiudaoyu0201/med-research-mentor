@@ -34,10 +34,10 @@ export function wrapSlideText(text: string, width: number, fontSize: number) {
   for (const paragraph of text.split("\n")) {
     let line = "",
       length = 0;
-    // Keep compound pressure units and digit-leading scientific identifiers intact.
+    // Keep signed estimates, compound pressure units, and scientific identifiers intact.
     const tokens = (
       paragraph.match(
-        /\d+(?:[∶:]\d+)+|(?:mm|cm)[ \t\u00a0]+(?:Hg|H2O)\b|[0-9]+[A-Za-z\u0370-\u03ff][A-Za-z0-9\u0370-\u03ff_./+-]*|\d[\d,.]*(?:[–—−-]\d[\d,.]*)?(?:%|％)?|[A-Za-z\u0370-\u03ff][A-Za-z0-9\u0370-\u03ff_./+-]*|\p{Script=Han}+|[^\x00-\x7f]|\s+|./gu,
+        /\d+(?:[∶:]\d+)+|(?:mm|cm)[ \t\u00a0]+(?:Hg|H2O)\b|[0-9]+[A-Za-z\u0370-\u03ff][A-Za-z0-9\u0370-\u03ff_./+-]*|(?:[+−±-][ \t\u00a0]*)?\d[\d,.]*(?:[–—−-][+−-]?\d[\d,.]*)?(?:%|％|‰)?|[A-Za-z\u0370-\u03ff][A-Za-z0-9\u0370-\u03ff_./+-]*|\p{Script=Han}+|[^\x00-\x7f]|\s+|./gu,
       ) ?? []
     ).flatMap((token) =>
       /^\p{Script=Han}+$/u.test(token)

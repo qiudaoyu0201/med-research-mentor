@@ -1061,6 +1061,47 @@ test("slide wrapping keeps Chinese words and allocation ratios together at real 
   }
 });
 
+test("slide wrapping keeps signed estimates and interval bounds intact", () => {
+  const context = createCanvas(1, 1).getContext("2d");
+  for (const [text, tokens] of [
+    [
+      "召回相对差−2.5%（95%CI −6.5%～+1.7%），区间跨零",
+      ["−2.5%", "−6.5%", "+1.7%"],
+    ],
+    [
+      "推演召回−15.0%（−18.6%～−11.2%）；共识会议−19.4%",
+      ["−15.0%", "−18.6%", "−11.2%", "−19.4%"],
+    ],
+    [
+      "变化 -2.5% 至 +1.7%，均值±0.5；阈值− 10%",
+      ["-2.5%", "+1.7%", "±0.5", "− 10%"],
+    ],
+  ] as const) {
+    for (const [width, fontSize] of [
+      [2.45, 25],
+      [3.5, 20],
+      [5.1, 24],
+    ]) {
+      const lines = wrapSlideText(text, width, fontSize);
+      assert.equal(
+        lines.join("").replace(/\s+/g, ""),
+        text.replace(/\s+/g, ""),
+      );
+      for (const token of tokens)
+        assert.ok(
+          lines.some((line) => line.includes(token)),
+          "Signed number split: " + token + " in " + lines.join(" | "),
+        );
+      context.font = fontSize + "pt Microsoft YaHei";
+      for (const line of lines)
+        assert.ok(
+          context.measureText(line).width <= width * 96,
+          "Actual font width overflow: " + line,
+        );
+    }
+  }
+});
+
 test("slide wrapping can break a word wider than the whole column without losing content", () => {
   const text = "中华人民共和国：分析与比较";
   const lines = wrapSlideText(text, 1.1, 20);
