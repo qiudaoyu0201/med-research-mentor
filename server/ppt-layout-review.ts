@@ -1,7 +1,7 @@
 import { slideLayout } from "../shared/slide-layout.ts";
 import type { DeckOutline, ReviewResult, Source } from "../shared/types.ts";
 
-export const pptLayoutContractVersion = "ppt-layout-v4-signed-estimates";
+export const pptLayoutContractVersion = "ppt-layout-v7-readable-figure-captions";
 
 const layoutId = (index: number) => `ppt-layout-${index + 1}`;
 

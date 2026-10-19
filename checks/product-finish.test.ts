@@ -1020,6 +1020,47 @@ test("slide wrapping preserves compound pressure units at real column widths", (
   }
 });
 
+test("slide wrapping keeps clinical values with their units at real column widths", () => {
+  const context = createCanvas(1, 1).getContext("2d");
+  for (const [text, measurements] of [
+    [
+      "缓解从急诊就诊起算：血糖<200 mg/dL，且以下任两项达标——碳酸氢根≥15 mEq/L、静脉pH>7.3、阴离子间隙≤12 mEq/L。",
+      ["200 mg/dL", "15 mEq/L", "12 mEq/L"],
+    ],
+    ["压力≥140 mm Hg：使用同一时间窗比较", ["140 mm Hg"]],
+    ["记录− 10 mEq/L变化及2.5mmol/L浓度", ["− 10 mEq/L", "2.5mmol/L"]],
+    ["检验值为2\u00a0µmol/L，保留原始单位", ["2\u00a0µmol/L"]],
+  ] as const) {
+    for (const [width, fontSize] of [
+      [5.18, 26],
+      [3.5, 19],
+      [2.45, 25],
+    ]) {
+      const lines = wrapSlideText(text, width, fontSize);
+      assert.equal(lines.join("").replace(/\s/g, ""), text.replace(/\s/g, ""));
+      for (const measurement of measurements)
+        assert.ok(
+          lines.some((line) => line.includes(measurement)),
+          "Value/unit split: " + lines.join(" | "),
+        );
+      context.font = fontSize + "pt Microsoft YaHei";
+      for (const line of lines)
+        assert.ok(
+          context.measureText(line).width <= width * 96,
+          "Actual font width overflow: " + line,
+        );
+    }
+  }
+  const narrow = wrapSlideText("2000000000 mg/dL", 0.75, 20);
+  assert.equal(narrow.join("").replace(/\s/g, ""), "2000000000mg/dL");
+  context.font = "20pt Microsoft YaHei";
+  for (const line of narrow)
+    assert.ok(
+      context.measureText(line).width <= 0.75 * 96,
+      "Oversized measurement must still wrap: " + line,
+    );
+});
+
 test("slide wrapping keeps Chinese words and allocation ratios together at real column widths", () => {
   const context = createCanvas(1, 1).getContext("2d");
   for (const [text, tokens] of [
@@ -1181,4 +1222,35 @@ test("compressed clinical evidence retains a complete requested endpoint beside 
   }
   assert.ok(packet.blocks.reduce((n, b) => n + b.text.length, 0) <= 22000);
   assert.match(packet.coverage!, /不代表全文/);
+});
+
+test("long clinical conclusions stay readable when the title mentions a workflow", () => {
+  const slide = {
+    title: "迁移价值在于流程验证思路，而非直接复制检出增益",
+    bullets: [
+      "新增检出性质不同：导管原位癌相对差+67.6%（95%置信区间：+29.6%至+116.8%）；浸润癌+7.8%（−4.3%至+21.3%）。",
+      "长期价值待随访：观察间期癌、后续轮次癌与分期变化，评估过度诊断；检出增加不等于死亡减少。",
+      "迁移须补本地前瞻性证据：验证人群与设备适配、软件互通及使用选择，同时测量漏诊、召回和实际总工作量。",
+    ],
+    notes: "",
+    citations: [],
+    imageSource: "",
+  };
+  const boxes = slideLayout(slide, []).text.filter(
+    (box) => box.role === "bullet",
+  );
+  assert.equal(boxes.length, slide.bullets.length);
+  for (const [index, box] of boxes.entries()) {
+    assert.ok(box.w >= 10 && box.fontSize >= 24);
+    assert.ok(
+      box.lines.length <= 3,
+      "Long conclusions should use horizontal space",
+    );
+    assert.equal(
+      box.lines.join("").replace(/\s/g, ""),
+      slide.bullets[index].replace(/\s/g, ""),
+    );
+    assert.ok(box.y + box.h < 6.8);
+    if (index) assert.ok(box.y >= boxes[index - 1].y + boxes[index - 1].h);
+  }
 });

@@ -34,10 +34,11 @@ export function wrapSlideText(text: string, width: number, fontSize: number) {
   for (const paragraph of text.split("\n")) {
     let line = "",
       length = 0;
-    // Keep signed estimates, compound pressure units, and scientific identifiers intact.
+    // Keep clinical measurements, signed estimates, and scientific identifiers intact.
+    // Match known units before identifiers; an arbitrary English word is not a unit.
     const tokens = (
       paragraph.match(
-        /\d+(?:[∶:]\d+)+|(?:mm|cm)[ \t\u00a0]+(?:Hg|H2O)\b|[0-9]+[A-Za-z\u0370-\u03ff][A-Za-z0-9\u0370-\u03ff_./+-]*|(?:[+−±-][ \t\u00a0]*)?\d[\d,.]*(?:[–—−-][+−-]?\d[\d,.]*)?(?:%|％|‰)?|[A-Za-z\u0370-\u03ff][A-Za-z0-9\u0370-\u03ff_./+-]*|\p{Script=Han}+|[^\x00-\x7f]|\s+|./gu,
+        /\d+(?:[∶:]\d+)+|(?:[+−±-][ \t\u00a0]*)?\d[\d,.]*(?:[–—−-][+−-]?\d[\d,.]*)?[ \t\u00a0]*(?:(?:mEq|[mµμ]?mol|[mµμ]?g)\/(?:dL|mL|L|kg)|(?:mm|cm)[ \t\u00a0]*(?:Hg|H2O))(?![A-Za-z0-9_./+-])|(?:mm|cm)[ \t\u00a0]+(?:Hg|H2O)\b|[0-9]+[A-Za-z\u0370-\u03ff][A-Za-z0-9\u0370-\u03ff_./+-]*|(?:[+−±-][ \t\u00a0]*)?\d[\d,.]*(?:[–—−-][+−-]?\d[\d,.]*)?(?:%|％|‰)?|[A-Za-z\u0370-\u03ff][A-Za-z0-9\u0370-\u03ff_./+-]*|\p{Script=Han}+|[^\x00-\x7f]|\s+|./gu,
       ) ?? []
     ).flatMap((token) =>
       /^\p{Script=Han}+$/u.test(token)
@@ -230,7 +231,10 @@ export function slideLayout(
       7.95 / imageSize.width,
       5.18 / imageSize.height,
     );
-    if (bandHeight <= 1.2 && scale >= previousScale * 1.12) {
+    if (
+      blocks.every((block) => block.lines.length <= 4) &&
+      scale >= previousScale * 1.12
+    ) {
       const w = imageSize.width * scale,
         h = imageSize.height * scale;
       wideEvidence = {
@@ -448,7 +452,12 @@ export function slideLayout(
     shapes.length = 0;
     composition = hasImage ? "evidence" : "standard";
     const steps =
-      !hasImage && count === 3 && /路径|步骤|流程|路线/.test(slide.title);
+      !hasImage &&
+      count === 3 &&
+      /路径|步骤|流程|路线/.test(slide.title) &&
+      slide.bullets.every(
+        (bullet) => wrapSlideText(bullet, 3.35, 24).length <= 4,
+      );
     const columns = hasImage ? 1 : steps ? 3 : count >= 4 ? 2 : 1;
     const bulletW = hasImage
         ? 3.5
