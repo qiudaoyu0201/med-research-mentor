@@ -1152,7 +1152,11 @@ export class ResearchPlans {
       throw new ResearchConflict(
         "方案尚未成功完成核对，不能导出。请修改后重新生成或核对。",
       );
-    const refs = v.topic.sources;
+    const refs = v.topic.sources.filter((source) =>
+      v.content.sections.some((section) =>
+        section.sourceRefs.includes(source.id),
+      ),
+    );
     const citation = (ids: string[]) =>
       ids
         .map((id) => {
@@ -1164,16 +1168,16 @@ export class ResearchPlans {
           return `[${n + 1}]`;
         })
         .join(" ");
-    const status = "当前内容核对完成（限所列范围，待确认条件保留在正文）";
     return [
       `# ${v.content.title}`,
       `保存日期：${v.createdAt.slice(0, 10)}`,
-      `课题：${v.topic.question}`,
       `条件（用户陈述）：${v.topic.conditions || "未提供"}`,
-      `核对：${status}${v.topic.version !== plan.topic.version ? "；当前课题条件已变化，本导出仍为选定历史版本" : ""}`,
+      ...(v.topic.version !== plan.topic.version
+        ? ["当前课题条件已变化，本导出仍为选定历史版本。"]
+        : []),
       ...v.content.sections.flatMap((s) => [
         `## ${s.title}`,
-        `${s.kind === "hypothesis" ? "待验证假设：" : s.kind === "possible-result" ? "可能出现的结果（尚未观察到）：" : ""}${s.text} ${citation(s.sourceRefs)}`,
+        `${s.kind === "hypothesis" ? "待验证假设：" : s.kind === "possible-result" ? "可能出现的结果（尚未观察到）：" : ""}${s.text}${s.sourceRefs.length ? `${s.text.trimEnd().endsWith("|") ? "\n\n" : " "}${citation(s.sourceRefs)}` : ""}`,
         `设计理由：${s.rationale}`,
         ...(s.unknowns.length ? [`待确认：${s.unknowns.join("；")}`] : []),
       ]),
@@ -1187,8 +1191,12 @@ export class ResearchPlans {
             `[${i + 1}] ${r.title} · ${r.locator}`,
             ...(r.url ? [`链接：${r.url}`] : []),
           ])
-        : ["本版本未提供文献；设计建议与假设仍待核对。"]),
-      "本文件记录方案草稿及其依据，不代表实验已实施、伦理已获批或学习迁移已验证。",
+        : [
+            v.topic.sources.length
+              ? "本版本正文未引用所提供资料；设计建议与假设仍待核对。"
+              : "本版本未提供文献；设计建议与假设仍待核对。",
+          ]),
+      "本文件为研究方案草案；拟议方法和假设尚需按实际资源及伦理要求确认。",
     ].join("\n\n");
   }
   exportDocx(id: string, versionId: string) {

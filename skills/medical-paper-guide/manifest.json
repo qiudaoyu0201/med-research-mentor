@@ -1,7 +1,7 @@
 {
   "id": "medical-paper-guide",
   "title": "论文带读",
-  "version": "1.2.4",
+  "version": "1.2.6",
   "dependencies": [
     "shared"
   ],

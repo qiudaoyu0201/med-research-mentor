@@ -53,7 +53,11 @@ export function planDocx(
   historical = false,
 ): Buffer {
   const v = version,
-    refs = v.topic.sources;
+    refs = v.topic.sources.filter((source) =>
+      v.content.sections.some((section) =>
+        section.sourceRefs.includes(source.id),
+      ),
+    );
   const cite = (ids: string[]) =>
     ids
       .map((id) => {
@@ -89,17 +93,16 @@ export function planDocx(
   const text = [
     paragraph(v.content.title, "Title"),
     paragraph("医学研究方案草案"),
-    paragraph(`保存版本 ${v.id} · ${v.createdAt.slice(0, 10)}`),
-    paragraph(`课题：${v.topic.question}`),
+    paragraph(`保存日期：${v.createdAt.slice(0, 10)}`),
     paragraph(`条件（用户陈述）：${v.topic.conditions || "未提供"}`),
-    paragraph(
-      `已完成当前保存版核对，范围与待确认项见正文。${historical ? "当前课题条件已经变化，本文件对应选定历史版本。" : ""}`,
-    ),
+    ...(historical
+      ? [paragraph("当前课题条件已经变化，本文件对应选定历史版本。")]
+      : []),
     ...v.content.sections.map(
       (s) =>
         paragraph(s.title, "Heading1") +
         body(
-          `${s.kind === "hypothesis" ? "待验证假设：" : s.kind === "possible-result" ? "可能结果（尚未观察到）：" : ""}${s.text}\n${cite(s.sourceRefs)}`,
+          `${s.kind === "hypothesis" ? "待验证假设：" : s.kind === "possible-result" ? "可能结果（尚未观察到）：" : ""}${s.text}${s.sourceRefs.length ? `${s.text.trimEnd().endsWith("|") ? "\n" : " "}${cite(s.sourceRefs)}` : ""}`,
         ) +
         paragraph(`设计理由：${s.rationale}`) +
         (s.unknowns.length
@@ -113,9 +116,14 @@ export function planDocx(
     paragraph("研究局限", "Heading1"),
     ...[...new Set(v.content.limitations)].map((s) => paragraph(s)),
     paragraph("参考文献", "Heading1"),
-    source || paragraph("本版本没有提供文献依据，设计建议与假设仍待核实。"),
+    source ||
+      paragraph(
+        v.topic.sources.length
+          ? "本版本正文未引用所提供资料，设计建议与假设仍待核实。"
+          : "本版本没有提供文献依据，设计建议与假设仍待核实。",
+      ),
     paragraph(
-      "本文件是可编辑方案草案，不代表实验已经实施、伦理获批或学习迁移已验证。外部修改不自动回传或保留系统核对资格。",
+      "本文件为研究方案草案；拟议方法和假设尚需按实际资源及伦理要求确认。",
     ),
   ].join("");
   const header = '<?xml version="1.0" encoding="UTF-8" standalone="yes"?>';

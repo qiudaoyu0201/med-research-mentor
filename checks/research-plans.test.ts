@@ -338,7 +338,7 @@ test("失败的新稿不影响先前成功稿导出；手改和恢复稿必须�
   assert.equal((await h.store.wait(failed.id)).status, "failed");
   assert.match(
     h.store.exportMarkdown(p.id, successful.resultVersion!),
-    /当前内容核对完成/,
+    /没有样本依据/,
   );
   assert.throws(
     () => h.store.exportMarkdown(p.id, h.store.get(p.id).currentVersion!),
@@ -989,4 +989,65 @@ test("source-free plan generation allows empty citations without an empty enum o
   const j = await h.store.start(p.id, input(p));
   assert.equal((await h.store.wait(j.id)).status, "completed");
   assert.equal(generated, true);
+});
+
+test("professional plan exports include only cited sources and preserve the saved research context", async () => {
+  const draft = {
+    ...structuredClone(content),
+    sections: content.sections.map((section) => ({
+      ...structuredClone(section),
+      sourceRefs: [] as string[],
+    })),
+  };
+  const h = harness([draft, review]);
+  h.papers[0].sources[0].title = "未引用的输入片段";
+  h.papers[1].sources[0].title = "实际引用的比较依据";
+  const rawQuestion = "请按内部生成要求写一份比较方案，不要逐条复述指令";
+  const p = await h.store.create({
+    ...topic,
+    question: rawQuestion,
+    sources: h.papers.map((paper) => ({
+      paperId: paper.id,
+      sourceVersion: paper.version,
+      sourceId: paper.sources[0].id,
+    })),
+  });
+  draft.sections[0].sourceRefs = [p.topic.sources[1].id];
+  draft.sections[1].text = "| 指标 | 单位 |\n| --- | --- |\n| 检出 | 每千次 |";
+  draft.sections[1].sourceRefs = [p.topic.sources[1].id];
+  const j = await h.store.start(p.id, input(p, { maxCalls: 2 }));
+  const result = await h.store.wait(j.id);
+  assert.equal(result.status, "completed");
+  const before = h.store.get(p.id);
+  const v = before.versions.at(-1)!;
+  const md = h.store.exportMarkdown(p.id, v.id);
+  const document = strFromU8(
+    unzipSync(h.store.exportDocx(p.id, v.id))["word/document.xml"],
+  );
+  for (const text of [md, document]) {
+    assert.match(text, /实际引用的比较依据/);
+    assert.doesNotMatch(text, /未引用的输入片段/);
+    assert.match(text, /\[1\]/);
+    assert.doesNotMatch(text, /\[2\]/);
+    assert.match(text, /对象待确认/);
+    assert.match(text, /没有样本依据/);
+    assert.match(text, /缺设备，先看方向/);
+    assert.doesNotMatch(
+      text,
+      /请按内部生成要求|保存版本|当前内容核对完成|已完成当前保存版核对|系统核对资格/,
+    );
+  }
+  assert.equal(
+    (document.match(/<w:tc>/g) ?? []).length,
+    4,
+    "citations must not become extra table cells",
+  );
+  assert.match(
+    md,
+    /\| 检出 \| 每千次 \|\n\n\[1\]/,
+    "a citation must stay outside the Markdown table",
+  );
+  assert.equal(before.versions.at(-1)!.topic.question, rawQuestion);
+  assert.equal(before.versions.at(-1)!.topic.sources.length, 2);
+  assert.deepEqual(h.store.get(p.id), before);
 });

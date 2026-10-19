@@ -448,7 +448,12 @@ export function slideLayout(
     shapes.length = 0;
     composition = hasImage ? "evidence" : "standard";
     const steps =
-      !hasImage && count === 3 && /路径|步骤|流程|路线/.test(slide.title);
+      !hasImage &&
+      count === 3 &&
+      /路径|步骤|流程|路线/.test(slide.title) &&
+      slide.bullets.every(
+        (bullet) => wrapSlideText(bullet, 3.35, 24).length <= 4,
+      );
     const columns = hasImage ? 1 : steps ? 3 : count >= 4 ? 2 : 1;
     const bulletW = hasImage
         ? 3.5
