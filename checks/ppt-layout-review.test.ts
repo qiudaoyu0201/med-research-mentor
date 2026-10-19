@@ -247,6 +247,53 @@ test("wide evidence gets more image area while preserving every claim and the fu
   );
 });
 
+test("four-line figure captions keep a wider original when it still gains usable image area", () => {
+  const bullets = [
+    "A｜登记起点→事件完成：中位数12.0 vs 15.0小时；调整后风险比（aHR）1.50（95% CI，1.10–2.10），干预组 vs 对照组。",
+    "B｜干预启动→事件完成：中位数8.0 vs 11.0小时；aHR 1.30（95% CI，1.01–1.70），干预组 vs 对照组。",
+  ];
+  const slide = { ...compact.slides[0], bullets };
+  const layout = slideLayout(slide, paper.sources, {
+    width: 2700,
+    height: 1000,
+  });
+  assert.equal(layout.composition, "evidence-wide");
+  assert.ok(layout.image!.w >= 7.95 * 1.12);
+  assert.ok(Math.abs(layout.image!.w / layout.image!.h - 2.7) < 1e-9);
+  const boxes = layout.text.filter((box) => box.role === "bullet");
+  assert.equal(Math.max(...boxes.map((box) => box.lines.length)), 4);
+  assert.deepEqual(
+    boxes.map((box) => box.lines.join("").replace(/\s/g, "")),
+    bullets.map((text) => text.replace(/\s/g, "")),
+  );
+  assert.ok(
+    boxes.every(
+      (box) =>
+        box.fontSize === 20 &&
+        box.y >= layout.image!.y + layout.image!.h + 0.2 &&
+        box.y + box.h <= 6.68 + 1e-9,
+    ),
+  );
+  const noGain = slideLayout(slide, paper.sources, {
+    width: 1800,
+    height: 1000,
+  });
+  assert.equal(noGain.composition, "evidence");
+  assert.equal(noGain.image!.w, 7.95);
+  const tooLong = slideLayout(
+    {
+      ...slide,
+      bullets: [
+        bullets[0] + "这项比较仍需较长的额外说明，不能继续压缩图件来容纳文字。",
+        bullets[1],
+      ],
+    },
+    paper.sources,
+    { width: 2700, height: 1000 },
+  );
+  assert.equal(tooLong.composition, "evidence");
+});
+
 test("actual PPT export preserves a selected crop and rejects changed image placement", async () => {
   const sourceImage = createCanvas(2100, 1400);
   const ctx = sourceImage.getContext("2d");

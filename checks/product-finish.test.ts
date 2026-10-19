@@ -1020,6 +1020,47 @@ test("slide wrapping preserves compound pressure units at real column widths", (
   }
 });
 
+test("slide wrapping keeps clinical values with their units at real column widths", () => {
+  const context = createCanvas(1, 1).getContext("2d");
+  for (const [text, measurements] of [
+    [
+      "缓解从急诊就诊起算：血糖<200 mg/dL，且以下任两项达标——碳酸氢根≥15 mEq/L、静脉pH>7.3、阴离子间隙≤12 mEq/L。",
+      ["200 mg/dL", "15 mEq/L", "12 mEq/L"],
+    ],
+    ["压力≥140 mm Hg：使用同一时间窗比较", ["140 mm Hg"]],
+    ["记录− 10 mEq/L变化及2.5mmol/L浓度", ["− 10 mEq/L", "2.5mmol/L"]],
+    ["检验值为2\u00a0µmol/L，保留原始单位", ["2\u00a0µmol/L"]],
+  ] as const) {
+    for (const [width, fontSize] of [
+      [5.18, 26],
+      [3.5, 19],
+      [2.45, 25],
+    ]) {
+      const lines = wrapSlideText(text, width, fontSize);
+      assert.equal(lines.join("").replace(/\s/g, ""), text.replace(/\s/g, ""));
+      for (const measurement of measurements)
+        assert.ok(
+          lines.some((line) => line.includes(measurement)),
+          "Value/unit split: " + lines.join(" | "),
+        );
+      context.font = fontSize + "pt Microsoft YaHei";
+      for (const line of lines)
+        assert.ok(
+          context.measureText(line).width <= width * 96,
+          "Actual font width overflow: " + line,
+        );
+    }
+  }
+  const narrow = wrapSlideText("2000000000 mg/dL", 0.75, 20);
+  assert.equal(narrow.join("").replace(/\s/g, ""), "2000000000mg/dL");
+  context.font = "20pt Microsoft YaHei";
+  for (const line of narrow)
+    assert.ok(
+      context.measureText(line).width <= 0.75 * 96,
+      "Oversized measurement must still wrap: " + line,
+    );
+});
+
 test("slide wrapping keeps Chinese words and allocation ratios together at real column widths", () => {
   const context = createCanvas(1, 1).getContext("2d");
   for (const [text, tokens] of [
