@@ -368,3 +368,147 @@ test("actual PPT export preserves a selected crop and rejects changed image plac
     await Promise.all([unlink(path), unlink(guidancePath)]);
   }
 });
+
+test("semantic diagrams preserve scientific text and keep process arrows separate from comparisons", async () => {
+  const { deckSchema } = await import("../server/schemas.ts");
+  const { unzipSync, strFromU8 } = await import("fflate");
+  const bullets = [
+    "急诊入组：记录基线检验与液体分配",
+    "重复检测：确认生化缓解条件",
+    "比较：估计缓解时间及95%区间",
+  ];
+  const slide = {
+    title: "从采样到组间比较",
+    bullets,
+    notes: "提示单独交付",
+    citations: [paper.sources[0].id],
+    layout: "flow" as const,
+  };
+  const parsed = deckSchema.parse({ slides: [slide] });
+  assert.equal(parsed.slides[0].layout, "flow");
+  const flow = slideLayout(slide, paper.sources);
+  assert.equal(flow.composition, "flow");
+  assert.equal(
+    flow.shapes.filter((shape) => shape.kind === "chevron").length,
+    2,
+  );
+  const boxes = flow.text.filter((box) => box.role === "bullet");
+  assert.deepEqual(
+    boxes.map((box) => box.lines.join("")),
+    bullets,
+  );
+  assert.ok(
+    boxes.every(
+      (box) => box.fontSize >= 20 && box.x + box.w < 13 && box.y + box.h < 6.7,
+    ),
+  );
+  const comparison = slideLayout(
+    { ...slide, layout: "comparison", bullets: bullets.slice(0, 2) },
+    paper.sources,
+  );
+  assert.equal(comparison.composition, "comparison");
+  assert.equal(
+    comparison.shapes.some((shape) => shape.kind === "chevron"),
+    false,
+  );
+  assert.throws(
+    () => slideLayout({ ...slide, bullets: ["只有一步"] }, paper.sources),
+    /二至四/,
+  );
+  assert.throws(
+    () => slideLayout({ ...slide, layout: "comparison" }, paper.sources),
+    /两项/,
+  );
+  assert.throws(
+    () => slideLayout(slide, paper.sources, { width: 800, height: 500 }),
+    /原图/,
+  );
+  const output = await exportDeck(
+    parsed,
+    paper,
+    "diagram-regression-" + randomUUID(),
+  );
+  try {
+    const zip = unzipSync(await readFile(output));
+    const xml = strFromU8(zip["ppt/slides/slide1.xml"]);
+    assert.equal((xml.match(/prst="chevron"/g) ?? []).length, 2);
+    assert.equal((xml.match(/prst="roundRect"/g) ?? []).length, 3);
+    for (const value of bullets)
+      assert.ok(
+        xml
+          .replace(/<[^>]+>/g, "")
+          .replace(/\s/g, "")
+          .includes(value.replace(/\s/g, "")),
+      );
+    assert.equal(xml.includes("提示单独交付"), false);
+  } finally {
+    await unlink(output);
+  }
+});
+
+test("spotlight keeps a research question and explanations visible without inventing a process", () => {
+  const slide = {
+    title: "为什么改变测量路径",
+    bullets: [
+      "研究目的：比较两种液体与DKA缓解时间的关联",
+      "关键缺口：常规检测无法提供连续事件时间",
+      "解释：测量规则影响跨医院复现",
+    ],
+    notes: "",
+    citations: [],
+    layout: "spotlight" as const,
+  };
+  const layout = slideLayout(slide, []);
+  assert.equal(layout.composition, "spotlight");
+  assert.deepEqual(
+    layout.text
+      .filter((box) => box.role === "bullet")
+      .map((box) => box.lines.join("")),
+    slide.bullets,
+  );
+  assert.equal(
+    layout.shapes.some((shape) => shape.kind === "chevron"),
+    false,
+  );
+  assert.throws(
+    () =>
+      slideLayout({ ...slide, bullets: [...slide.bullets, "额外论点"] }, []),
+    /至多两项/,
+  );
+});
+
+test("source footers keep table identifiers and visibly mark omitted long text", () => {
+  const sources = [
+    {
+      ...paper.sources[0],
+      id: "table",
+      page: undefined,
+      figure: undefined,
+      title:
+        "Table 2 Effect of tranexamic acid on bleeding death and complications",
+    },
+    ...Array.from({ length: 12 }, (_, i) => ({
+      ...paper.sources[0],
+      id: "long-" + i,
+      page: undefined,
+      figure: undefined,
+      title:
+        "Methods details " +
+        i +
+        " with a long descriptive source locator repeated",
+    })),
+  ];
+  const slide = {
+    title: "结果",
+    bullets: ["主比较及区间"],
+    notes: "",
+    citations: sources.map((s) => s.id),
+  };
+  const footer = slideLayout(slide, sources).text.find(
+    (box) => box.role === "footer",
+  )!;
+  assert.match(footer.lines[0], /^Table 2/);
+  assert.equal(footer.lines.length, 2);
+  assert.ok(footer.lines[1].endsWith("…"));
+  assert.ok(footer.y + footer.h <= 7.5);
+});

@@ -78,14 +78,15 @@ export function planDocx(
           ? url
           : undefined;
       const ref = `[${i + 1}] ${b?.authors.length ? `${b.authors.join(", ")}. ` : ""}${r.title}${b ? `. ${b.journal}, ${b.year}. PMID ${b.pmid}${b.doi ? `. DOI ${b.doi}` : ""}` : ` · ${r.locator}`}`;
-      let result = paragraph(ref, "Normal", Boolean(safe || b));
+      let result = paragraph(ref, "Reference", Boolean(safe || b));
       if (safe) {
         links.push(safe);
-        result += `<w:p>${b ? "<w:pPr><w:keepNext/></w:pPr>" : ""}<w:hyperlink r:id="link${links.length}"><w:r><w:rPr><w:rStyle w:val="Hyperlink"/></w:rPr><w:t>${xml(safe)}</w:t></w:r></w:hyperlink></w:p>`;
+        result += `<w:p><w:pPr><w:pStyle w:val="Reference"/>${b ? "<w:keepNext/>" : ""}</w:pPr><w:hyperlink r:id="link${links.length}"><w:r><w:rPr><w:rStyle w:val="Hyperlink"/></w:rPr><w:t>${xml(safe)}</w:t></w:r></w:hyperlink></w:p>`;
       }
       if (b)
         result += paragraph(
           `实际读取：${b.level === "abstract" ? "摘要" : "元数据"}；读取时间 ${b.fetchedAt}；Crossref ${b.crossref}${b.notices.length ? `；${b.notices.join("；")}` : ""}`,
+          "Reference",
         );
       return result;
     })
@@ -138,7 +139,7 @@ export function planDocx(
     )
     .join(
       "",
-    )}<w:style w:type="character" w:styleId="Hyperlink"><w:name w:val="Hyperlink"/><w:rPr><w:color w:val="0563C1"/><w:u w:val="single"/></w:rPr></w:style></w:styles>`;
+    )}<w:style w:type="paragraph" w:styleId="Reference"><w:name w:val="Reference"/><w:basedOn w:val="Normal"/><w:pPr><w:spacing w:after="80" w:line="264" w:lineRule="auto"/></w:pPr></w:style><w:style w:type="character" w:styleId="Hyperlink"><w:name w:val="Hyperlink"/><w:rPr><w:color w:val="0563C1"/><w:u w:val="single"/></w:rPr></w:style></w:styles>`;
   const files: Record<string, Uint8Array> = {};
   const add = (name: string, content: string) => {
     files[name] = strToU8(header + content);

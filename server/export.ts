@@ -66,11 +66,15 @@ export async function exportDeck(
       slide = pptx.addSlide();
     slide.background = { color: layout.background };
     for (const shape of layout.shapes)
-      slide.addShape(pptx.ShapeType.rect, {
+      slide.addShape(pptx.ShapeType[shape.kind ?? "rect"], {
         x: shape.x,
         y: shape.y,
         w: shape.w,
         h: shape.h,
+        rectRadius:
+          shape.kind === "roundRect"
+            ? Math.min(shape.w, shape.h) * 0.08
+            : undefined,
         fill: { color: shape.fill },
         line: { color: shape.fill, transparency: 100 },
       });
@@ -83,7 +87,7 @@ export async function exportDeck(
           h: 0.22,
           fontSize: 10,
           bold: true,
-          color: "007AFF",
+          color: "177E7D",
           margin: 0,
           fontFace: "Aptos",
         });

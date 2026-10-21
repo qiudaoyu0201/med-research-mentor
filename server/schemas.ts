@@ -102,6 +102,12 @@ export const slideSchema = z.object({
   citations,
   imageSource: z.string().optional(),
   imageCrop: imageRegionSchema.optional(),
+  layout: z
+    .enum(["auto", "flow", "comparison", "spotlight"])
+    .optional()
+    .describe(
+      "页面表达：auto常规图文；flow仅用于来源支持的2–4步有序流程；comparison用于2项并列比较，不暗示先后；spotlight突出研究问题或目的并补充至多2项解释。后三者不同时选择imageSource。",
+    ),
 });
 export const deckSchema = z.object({
   slides: z.array(slideSchema).min(1).max(16),

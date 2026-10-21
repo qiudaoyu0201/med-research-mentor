@@ -87,16 +87,51 @@ export function ResearchSlide({
       aria-label={`第 ${page} 页幻灯片：${slide.title}`}
     >
       <rect width="100%" height="100%" fill={`#${layout.background}`} />
-      {layout.shapes.map((shape, index) => (
-        <rect
-          key={`shape-${index}`}
-          x={shape.x * 100}
-          y={shape.y * 100}
-          width={shape.w * 100}
-          height={shape.h * 100}
-          fill={`#${shape.fill}`}
-        />
-      ))}
+      {layout.shapes.map((shape, index) => {
+        const x = shape.x * 100,
+          y = shape.y * 100;
+        const w = shape.w * 100,
+          h = shape.h * 100;
+        if (shape.kind === "chevron")
+          return (
+            <polygon
+              key={`shape-${index}`}
+              points={[
+                [x, y],
+                [x + w * 0.5, y],
+                [x + w, y + h / 2],
+                [x + w * 0.5, y + h],
+                [x, y + h],
+                [x + w * 0.5, y + h / 2],
+              ]
+                .map((point) => point.join(","))
+                .join(" ")}
+              fill={`#${shape.fill}`}
+            />
+          );
+        if (shape.kind === "ellipse")
+          return (
+            <ellipse
+              key={`shape-${index}`}
+              cx={x + w / 2}
+              cy={y + h / 2}
+              rx={w / 2}
+              ry={h / 2}
+              fill={`#${shape.fill}`}
+            />
+          );
+        return (
+          <rect
+            key={`shape-${index}`}
+            x={x}
+            y={y}
+            width={w}
+            height={h}
+            rx={shape.kind === "roundRect" ? Math.min(w, h) * 0.08 : undefined}
+            fill={`#${shape.fill}`}
+          />
+        );
+      })}
       {layout.image && img && !img.failed && (
         <image
           href={img.url}
@@ -151,7 +186,7 @@ export function ResearchSlide({
                 ((10 * slideLineHeight) / 72) * 0.88) *
               100
             }
-            fill="#007AFF"
+            fill="#177E7D"
             fontSize={(10 / 72) * 100}
             fontWeight="700"
             fontFamily="Aptos, sans-serif"

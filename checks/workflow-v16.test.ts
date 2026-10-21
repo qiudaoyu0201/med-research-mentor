@@ -184,10 +184,42 @@ test("带读中的局部总结、重点解释和方法问题不擅自跳到结�
     prepareReading(paper, undefined, "start", "开始"),
     "local-1",
   );
-  assert.equal(readingAction({ clientMessageId: "x", mode: "live", question: "重点解释这个结果为什么成立" }, state), "deepen");
-  assert.equal(readingAction({ clientMessageId: "x", mode: "live", question: "请总结这一个实验的结果" }, state), "deepen");
-  assert.equal(readingAction({ clientMessageId: "x", mode: "live", question: "总结目前所读内容" }, state), "summary");
-  assert.equal(readingAction({ clientMessageId: "x", mode: "live", question: "先看方法" }, state), "jump");
+  assert.equal(
+    readingAction(
+      {
+        clientMessageId: "x",
+        mode: "live",
+        question: "重点解释这个结果为什么成立",
+      },
+      state,
+    ),
+    "deepen",
+  );
+  assert.equal(
+    readingAction(
+      {
+        clientMessageId: "x",
+        mode: "live",
+        question: "请总结这一个实验的结果",
+      },
+      state,
+    ),
+    "deepen",
+  );
+  assert.equal(
+    readingAction(
+      { clientMessageId: "x", mode: "live", question: "总结目前所读内容" },
+      state,
+    ),
+    "summary",
+  );
+  assert.equal(
+    readingAction(
+      { clientMessageId: "x", mode: "live", question: "先看方法" },
+      state,
+    ),
+    "jump",
+  );
 });
 test("部分长页覆盖具有内容哈希和字符范围，专题回主线不丢位置", () => {
   const long = {
@@ -424,6 +456,13 @@ test("DOCX中文表格、转义、公开链接与保存版本确定一致", () =
     },
   } as unknown as ResearchPlanVersion;
   const parts = unzipSync(planDocx(version));
+  const styles = strFromU8(parts["word/styles.xml"]);
+  assert.match(styles, /w:styleId="Reference"/);
+  assert.match(styles, /w:line="264"/);
+  assert.match(
+    strFromU8(parts["word/document.xml"]),
+    /w:pStyle w:val="Reference"/,
+  );
   const text = strFromU8(parts["word/document.xml"]);
   assert.match(text, /<w:tbl>/);
   assert.match(text, /A &lt; B &amp; C/);

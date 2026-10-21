@@ -19,6 +19,7 @@ export type SlideShape = {
   w: number;
   h: number;
   fill: string;
+  kind?: "rect" | "roundRect" | "chevron" | "ellipse";
 };
 export const slideSize = { width: 13.333333, height: 7.5 };
 // Explicit point advances keep SVG, capacity checks, and PowerPoint in sync.
@@ -115,7 +116,10 @@ export function citationLabel(sources: Source[]) {
               ? `PDF p. ${s.page}`
               : s.kind === "foundation"
                 ? "方法参考"
-                : s.title.slice(0, 35),
+                : (/^(?:Table|表)\s*\d+[A-Za-z]?\b/i.exec(s.title)?.[0] ??
+                  (s.title.length > 35
+                    ? s.title.slice(0, 34).trimEnd() + "…"
+                    : s.title)),
         ),
     ),
   ].join("  ·  ");
@@ -259,7 +263,114 @@ export function slideLayout(
     }
   }
   let custom = false;
-  if (wideEvidence) {
+  const requested = slide.layout ?? "auto";
+  if (requested !== "auto" && hasImage)
+    throw new Error(
+      "流程、对照或重点版式与原图页应分开，请为本页保留一种主要表达。",
+    );
+  if (requested === "flow" || requested === "comparison") {
+    const flow = requested === "flow";
+    if ((flow && (count < 2 || count > 4)) || (!flow && count !== 2))
+      throw new Error(
+        flow ? "流程页需要二至四个有序步骤。" : "对照页需要两项并列内容。",
+      );
+    composition = requested;
+    const gap = flow ? 0.5 : 0.55;
+    const cardW = (11.9 - (count - 1) * gap) / count;
+    const innerW = cardW - 0.6;
+    let fontSize = flow ? 24 : 27;
+    const measure = () =>
+      slide.bullets.map((value) => {
+        const lines = wrapSlideText(value, innerW, fontSize);
+        return {
+          lines,
+          h: (lines.length * fontSize * slideLineHeight) / 72 + 0.09,
+        };
+      });
+    let blocks = measure();
+    while (blocks.some((block) => block.h > 2.9) && fontSize > 20) {
+      fontSize--;
+      blocks = measure();
+    }
+    if (blocks.some((block) => block.h > 2.9))
+      throw new Error("图解文字过密，请拆分步骤或比较，保留关键条件与判断。");
+    const cardH = Math.max(2.75, ...blocks.map((block) => block.h + 1.05));
+    const top = 2.05 + (3.9 - cardH) / 2;
+    blocks.forEach((block, i) => {
+      const x = 0.72 + i * (cardW + gap);
+      shapes.push({
+        x,
+        y: top,
+        w: cardW,
+        h: cardH,
+        fill: flow && i === 0 ? "12384A" : "EDF4F3",
+        kind: "roundRect",
+      });
+      shapes.push({
+        x: x + 0.3,
+        y: top + 0.35,
+        w: 0.42,
+        h: 0.05,
+        fill: flow && i === 0 ? "62C4B1" : "177E7D",
+      });
+      customText.push({
+        x: x + 0.3,
+        y: top + 0.66,
+        w: innerW,
+        h: block.h,
+        fontSize,
+        lines: block.lines,
+        color: flow && i === 0 ? "FFFFFF" : "26384A",
+        role: "bullet",
+        sourceIndex: i,
+      });
+      if (flow && i < count - 1)
+        shapes.push({
+          x: x + cardW + 0.13,
+          y: top + cardH / 2 - 0.11,
+          w: 0.24,
+          h: 0.22,
+          fill: "177E7D",
+          kind: "chevron",
+        });
+    });
+    custom = true;
+  } else if (requested === "spotlight") {
+    if (count > 3)
+      throw new Error(
+        "重点页保留一个核心问题及至多两项解释，较复杂的背景请展开。",
+      );
+    composition = "spotlight";
+    const panelW = count === 1 ? 11.9 : 7.1;
+    shapes.push({
+      x: 0.72,
+      y: 1.85,
+      w: panelW,
+      h: 4.65,
+      fill: "12384A",
+      kind: "roundRect",
+    });
+    shapes.push({ x: 1.08, y: 2.22, w: 0.56, h: 0.06, fill: "62C4B1" });
+    custom = put(
+      0,
+      slide.bullets[0],
+      1.08,
+      2.65,
+      panelW - 0.76,
+      3.1,
+      33,
+      "FFFFFF",
+      true,
+    );
+    slide.bullets.slice(1).forEach((value, i) => {
+      custom =
+        put(i + 1, value, 8.35, 2.08 + i * 2.22, 4.0, 1.88, 24) && custom;
+    });
+    if (!custom)
+      throw new Error(
+        "重点页文字过密，请将核心问题与必要解释展开，不能缩成小字。",
+      );
+  } else if (wideEvidence) {
     composition = "evidence-wide";
     customText.push(...wideEvidence.text);
     custom = true;
@@ -521,13 +632,19 @@ export function slideLayout(
         y += rowHeights()[Math.floor(i / columns)] + gap;
     }
   }
-  const footer = wrapSlideText(citationLabel(sources), 11.2, 11).slice(0, 1);
+  // Shared quiet page frame keeps preview and native export consistent.
+  shapes.push({ x: 0.75, y: 1.39, w: 0.56, h: 0.045, fill: "177E7D" });
+  shapes.push({ x: 0.9, y: 6.91, w: 11.75, h: 0.009, fill: "E2E9E8" });
+  const footerLines = wrapSlideText(citationLabel(sources), 11.2, 10);
+  const footer = footerLines.slice(0, 2);
+  if (footerLines.length > 2)
+    footer[1] = footer[1].slice(0, -1).trimEnd() + "…";
   text.push({
     x: 0.9,
-    y: 7.02,
+    y: 7.0,
     w: 11.2,
-    h: 0.22,
-    fontSize: 11,
+    h: 0.37,
+    fontSize: 10,
     lines: footer,
     color: "65656F",
     role: "footer",
