@@ -429,3 +429,109 @@ test("intervention-only topics do not crowd out an unrelated outcome question", 
   assert.ok(visible.includes("independent function at day 70"));
   assert.ok(!visible.includes("room temperature saline"));
 });
+
+test("population questions retain actual non-enrolment conditions beside a population heading", () => {
+  const exclusion =
+    "Patients requiring immediate stabilization were not enrolled because treatment took priority.";
+  const source = [
+    "Study population and design\nThis prospective cohort evaluated adults at two hospitals.",
+    "Study methods and model validation. ".repeat(100),
+    exclusion,
+    "Further model validation results. ".repeat(60),
+  ].join("\n");
+  const ranges = evidenceExcerptRanges(
+    source,
+    380,
+    ["model", "validation", "methods"],
+    "解释外部验证的研究人群和适用范围",
+  );
+  const visible = ranges.map((r) => source.slice(r.start, r.end)).join("\n");
+  assert.ok(visible.includes(exclusion));
+  assert.ok(ranges.reduce((n, r) => n + r.end - r.start, 0) <= 380);
+});
+
+test("population compression retains screening hours and urgent exclusions within the same fixed allowance", () => {
+  const design =
+    "Study population and design\nThis prospective cohort followed children in two regional hospitals.";
+  const setting =
+    "Both recruitment sites were chosen for existing collaborations and accessibility.";
+  const sampling =
+    "Sampling and eligibility\nChildren attending between 09:00 and 16:00 on weekdays were screened for eligibility; weekend and overnight attendance was outside recruitment.";
+  const exclusion =
+    "Children needing immediate stabilization were not enrolled because clinical care took priority.";
+  const source = [
+    design,
+    "Methods and validation. ".repeat(100),
+    setting,
+    sampling,
+    exclusion,
+  ].join("\n");
+  const ranges = evidenceExcerptRanges(
+    source,
+    440,
+    ["methods", "validation", "population"],
+    "解释外部验证人群与抽样条件",
+  );
+  const visible = ranges.map((r) => source.slice(r.start, r.end)).join("\n");
+  for (const block of [design, sampling, exclusion])
+    assert.ok(visible.includes(block), block);
+  assert.ok(ranges.reduce((n, r) => n + r.end - r.start, 0) <= 440);
+});
+
+test("prognostic cohort summaries keep study dates and event-time definitions within the original allowance", () => {
+  const design =
+    "Study population\nWe conducted a retrospective analysis of adults at one reference center.";
+  const period = "Tests were conducted between February 2011 and June 2022.";
+  const baseline =
+    "Lung function and outcome assessment\nOnly baseline pre-treatment data was included.";
+  const followup =
+    "Date of censoring was June 30th 2022 and time to event was time from the first accessible test to censoring or death.";
+  const text = [
+    design,
+    "Study methods and model classification. ".repeat(50),
+    period,
+    "This study did not have a prospectively written protocol.",
+    baseline,
+    "Model assessment and classification. ".repeat(50),
+    "Mortality data were obtained from a registry.",
+    followup,
+  ].join("\n");
+  for (const question of [
+    "讲清研究设计与死亡预后分析思路",
+    "Explain study design and mortality prognosis",
+  ]) {
+    const ranges = evidenceExcerptRanges(
+      text,
+      650,
+      ["methods", "model", "classification"],
+      question,
+    );
+    const visible = ranges.map((r) => text.slice(r.start, r.end)).join("\n");
+    for (const block of [design, period, baseline, followup])
+      assert.ok(visible.includes(block), question + " missing " + block);
+    assert.ok(ranges.reduce((n, r) => n + r.end - r.start, 0) <= 650);
+  }
+});
+
+test("a descriptive study-period heading cannot separate cohort counts and demographics from baseline evidence", () => {
+  const population =
+    "Baseline characteristics of the patients\nDuring the 12-year study period, over sixteen thousand patients were investigated in our laboratory. From these, we identified 7,240 patients with the target disorder. All participants were from the same regional population. For this study, diagnostic categories were determined using the latest recorded diagnosis. See the baseline table for the detailed patient characteristics and diagnosis groups.";
+  const methods =
+    "Statistical analyses\nThe Cox proportional hazards model included age, body mass index, sex and diagnosis. The purpose was predictive inference rather than causal inference.";
+  const text = [
+    "Methods and analysis. ".repeat(90),
+    methods,
+    population,
+    "Severity classification results. ".repeat(65),
+  ].join("\n");
+  const ranges = evidenceExcerptRanges(
+    text,
+    850,
+    ["methods", "analysis", "classification"],
+    "讲清研究设计与死亡预后分析思路",
+  );
+  const visible = ranges.map((r) => text.slice(r.start, r.end)).join("\n");
+  assert.ok(visible.includes("7,240 patients"));
+  assert.ok(visible.includes("same regional population"));
+  assert.ok(ranges.reduce((n, r) => n + r.end - r.start, 0) <= 850);
+});

@@ -7,7 +7,10 @@ import {
   applyDeckPanels,
 } from "../server/figure-panels.ts";
 import { groundedTeachingSchema } from "../server/schemas.ts";
-import { pptDeckImagePacket } from "../server/ppt-image-packet.ts";
+import {
+  pptDeckImagePacket,
+  pptSelectionImagePacket,
+} from "../server/ppt-image-packet.ts";
 import type { Source, DeckOutline } from "../shared/types.ts";
 const box = { left: 0, top: 0, right: 500, bottom: 400 };
 const point = (text: string, left: number, top: number, font = "labels") => ({
@@ -226,4 +229,47 @@ test("review image uses the actual selected crop instead of the whole original",
     [255, 0, 0, 255],
   );
   await assert.rejects(pptDeckImagePacket(d, []));
+});
+
+test("selection board shows the complete original and real candidate crop without changing saved evidence", async () => {
+  const s = source(),
+    before = structuredClone(s);
+  const rendered = await loadImage((await pptSelectionImagePacket([s]))!);
+  assert.equal(rendered.width, 1800);
+  assert.equal(rendered.height, 620);
+  const c = createCanvas(1800, 620),
+    ctx = c.getContext("2d");
+  ctx.drawImage(rendered, 0, 0);
+  const pixel = (x: number, y: number) => [
+    ...ctx.getImageData(x, y, 1, 1).data,
+  ];
+  assert.ok(pixel(200, 300)[0] > 240 && pixel(200, 300)[2] < 15);
+  assert.ok(pixel(700, 300)[2] > 240 && pixel(700, 300)[0] < 15);
+  assert.ok(pixel(1100, 300)[0] > 240 && pixel(1100, 300)[2] < 15);
+  assert.deepEqual(s, before);
+  assert.equal(
+    await pptSelectionImagePacket([{ ...s, imagePanels: undefined }]),
+    s.image,
+  );
+  // Review still receives only the actual selected crop, never the option board.
+  const d = deck({ imagePanel: "figure:a" });
+  applyDeckPanels(d, [s]);
+  const review = await loadImage((await pptDeckImagePacket(d, [s]))!);
+  assert.equal(review.width, 50);
+  assert.equal(review.height, 60);
+});
+test("candidate pictures do not displace whole originals and total board size stays bounded", async () => {
+  const s = source(),
+    many = Array.from({ length: 10 }, (_, i) => ({
+      ...s,
+      id: "figure-" + i,
+      imagePanels: Array.from({ length: 8 }, (_, j) => ({
+        ...s.imagePanels![0],
+        label: String.fromCharCode(97 + j),
+      })),
+    }));
+  const board = await loadImage((await pptSelectionImagePacket(many))!);
+  assert.equal(board.width, 1800);
+  assert.equal(board.height, 620 * 8);
+  assert.equal(await pptSelectionImagePacket([]), undefined);
 });

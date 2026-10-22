@@ -95,9 +95,24 @@ test("PPT generation and revision select panels after image redaction and review
       signal.throwIfAborted();
       const index = calls++;
       const decoded = await loadImage(image!);
-      assert.equal(decoded.height, 60);
-      assert.equal(decoded.width, [0, 3].includes(index) ? 100 : 50);
-      if (![0, 3].includes(index)) {
+      const selecting = [0, 3].includes(index);
+      assert.equal(decoded.height, selecting ? 1240 : 60);
+      assert.equal(decoded.width, selecting ? 1800 : 50);
+      if (selecting) {
+        const board = createCanvas(1800, 1240),
+          pixels = board.getContext("2d");
+        pixels.drawImage(decoded, 0, 0);
+        const pixel = (x: number, y: number) =>
+          pixels.getImageData(x, y, 1, 1).data;
+        for (const [x, y] of [[200, 300], [1100, 300]]) {
+          const p = pixel(x, y); // Original red half and actual candidate a.
+          assert.ok(p[0] > 240 && p[2] < 15);
+        }
+        for (const [x, y] of [[700, 300], [200, 900]]) {
+          const p = pixel(x, y); // Original blue half and actual candidate b.
+          assert.ok(p[2] > 240 && p[0] < 15);
+        }
+      } else {
         const check = createCanvas(50, 60),
           pixels = check.getContext("2d");
         pixels.drawImage(decoded, 0, 0);

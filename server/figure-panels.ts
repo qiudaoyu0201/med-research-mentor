@@ -179,8 +179,8 @@ export function panelSelectionIds(sources: Source[]) {
       .map((p) => s.id + ":" + p.label),
   );
 }
-// Model selects an existing panel ID. Coordinates are resolved from PDF geometry,
-// never inferred from model-generated fractions or copied from another source.
+// Model selects an existing region ID. Coordinates come from printed PDF labels
+// or clear raster gutters, never model-generated fractions or another source.
 export function applyDeckPanels(
   deck: DeckOutline | null | undefined,
   sources: Source[],

@@ -259,3 +259,19 @@ test("separate column captions on the same baseline remain independent anchors",
   const [left, right] = result.sources.map((source) => source.imageRegion!);
   assert.ok(left.left + left.width < right.left);
 });
+
+test("raster-style plots separated by clear horizontal gutters expose spatial bands without panel letters", async () => {
+  const result = await extract(
+    text("F1", 36, 100, "Figure 5. Paired plots with distributions."),
+    "90 450 400 240 re f\n90 170 400 240 re f",
+  );
+  assert.equal(result.sources.length, 1);
+  const bands = result.sources[0].imagePanels!;
+  assert.deepEqual(
+    bands.map((p) => p.label),
+    ["band-1", "band-2"],
+  );
+  assert.ok(bands.every((p) => p.region.left === 0 && p.region.width === 1));
+  assert.equal(bands[0].region.top, 0);
+  assert.equal(bands[1].region.top + bands[1].region.height, 1);
+});

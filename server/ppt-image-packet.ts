@@ -22,10 +22,60 @@ export async function pptImagePacket(sources: Source[], limit = 8) {
       y = Math.floor(i / cols) * cellH;
     ctx.fillStyle = "#1d1d1f";
     ctx.font = "18px sans-serif";
-    ctx.fillText(s.id, x + 12, y + 24);
+    ctx.fillText(s.id, x + 12, y + 24, cellW - 24);
     ctx.drawImage(img, x + 12, y + 42, img.width * scale, img.height * scale);
   }
   return canvas.toDataURL("image/jpeg", 0.88);
+}
+
+export const pptSelectionImageVersion = "ppt-selection-images-v1";
+// Show the actual available crops beside complete originals before selection.
+// Limits apply separately: no original is displaced by another figure's panels.
+export async function pptSelectionImagePacket(sources: Source[]) {
+  const originals = sources.filter((s) => s.image).slice(0, 8);
+  const pictures = originals.map((s) => ({ ...s, id: s.id + " | whole" }));
+  const panels = originals.map((s) =>
+    (s.imagePanels ?? []).filter((p) => validRegion(p.region)),
+  );
+  const decoded = new Map<string, Awaited<ReturnType<typeof loadImage>>>();
+  let added = 0;
+  for (let position = 0; added < 8; position++) {
+    let found = false;
+    for (const [index, source] of originals.entries()) {
+      const panel = panels[index][position];
+      if (!panel || added === 8) continue;
+      found = true;
+      let original = decoded.get(source.id);
+      if (!original) {
+        original = await loadImage(source.image!);
+        decoded.set(source.id, original);
+      }
+      const box = cropPixels(panel.region, original.width, original.height);
+      const canvas = createCanvas(box.width, box.height);
+      canvas
+        .getContext("2d")
+        .drawImage(
+          original,
+          box.left,
+          box.top,
+          box.width,
+          box.height,
+          0,
+          0,
+          box.width,
+          box.height,
+        );
+      pictures.push({
+        ...source,
+        id: source.id + ":" + panel.label,
+        image: canvas.toDataURL("image/png"),
+      });
+      added++;
+    }
+    if (!found) break;
+  }
+  // Existing single whole-image behavior remains exact when no crop is available.
+  return pptImagePacket(pictures, 16);
 }
 
 // Review the picture actually selected for each page, including its crop.

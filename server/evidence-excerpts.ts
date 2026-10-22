@@ -1,5 +1,10 @@
 export type EvidenceRange = { start: number; end: number };
-type Topic = { terms: string[]; anchor: RegExp; requireAnchor: boolean };
+type Topic = {
+  terms: string[];
+  anchor: RegExp;
+  requireAnchor: boolean;
+  sentenceLevel: boolean;
+};
 export function containsEvidenceTerm(text: string, term: string) {
   if (/^[a-z][a-z0-9-]*$/i.test(term)) {
     // The guard permits only letters, digits and literal hyphens.
@@ -14,8 +19,10 @@ function requestedTopics(question: string): Topic[] {
     terms: string[],
     anchor: RegExp,
     requireAnchor = false,
+    sentenceLevel = false,
   ) => {
-    if (request.test(question)) topics.push({ terms, anchor, requireAnchor });
+    if (request.test(question))
+      topics.push({ terms, anchor, requireAnchor, sentenceLevel });
   };
   add(
     /缺失|失访|插补|不完整|\bmissing\b|\bimputation\b/i,
@@ -38,6 +45,13 @@ function requestedTopics(question: string): Topic[] {
   );
   add(
     populationRequest,
+    ["conducted", "collected", "enrolled", "recruited", "between", "from"],
+    /(?:tests?|measurements?|data|records?|patients?|participants?)\s+(?:were\s+)?(?:conducted|collected|enrolled|recruited|included|obtained)\s+(?:between|from)|study\s+period\s+(?:(?:was|ran|ranged|extended|spanned)\s+)?(?:from|between)|研究期间|纳入时间|收集期间/i,
+    true,
+    true,
+  );
+  add(
+    populationRequest,
     ["baseline", "characteristics", "identified", "recruited", "enrolled"],
     /baseline\s+characteristics(?:\s+of\s+(?:the\s+)?(?:patients|participants|cohort))?|(?:identified|included|enrolled|recruited)\s+[\d,]+\s+(?:eligible\s+)?(?:patients|participants|adults|children)|(?:patients|participants)\s*\(\s*n\s*=|基线特征|共(?:纳入|入组)|纳入\s*[\d,]+/i,
     true,
@@ -53,6 +67,32 @@ function requestedTopics(question: string): Topic[] {
       "single-centre",
     ],
     /study\s+(?:design|setting)(?:\s+and\s+(?:setting|participants))?|(?:single|multi)[ -]cent(?:er|re)|(?:conducted|performed|undertook)\s+(?:a\s+)?(?:retrospective|prospective)|研究设计|单中心|多中心|回顾性|前瞻性/i,
+    true,
+  );
+  add(
+    populationRequest,
+    ["baseline", "data", "measurements", "tests", "assessment"],
+    /(?:only|used|included)[\s\S]{0,50}\bbaseline\b|\bbaseline\b[\s\S]{0,60}(?:data|measurements?|tests?)|基线(?:测量|数据)/i,
+    true,
+  );
+  add(
+    populationRequest,
+    ["screened", "eligibility", "sampling", "recruited", "enrolled"],
+    /(?:screened|recruited|enrolled)\s+(?:for\s+eligibility|only\s+(?:during|on))|(?:sampling|recruitment)\s+(?:and\s+eligibility|hours|schedule)|工作日|招募时段/i,
+    true,
+  );
+  add(
+    populationRequest,
+    [
+      "eligible",
+      "enrolled",
+      "enrollment",
+      "recruited",
+      "excluded",
+      "patients",
+      "participants",
+    ],
+    /(?:were|was|are|is)\s+not\s+(?:enrolled|recruited)|excluded\s+from\s+(?:enrol[l]?ment|recruitment)|未予?入组/i,
     true,
   );
   add(
@@ -177,9 +217,11 @@ function requestedTopics(question: string): Topic[] {
     /(?:serious\s+)?adverse\s+events|安全性|不良事件/i,
   );
   add(
-    /随访|生存|删失|\bfollow[ -]?up\b|\bsurvival\b|\bcensor(?:ing|ed)?\b/i,
+    /随访|生存|删失|死亡|预后|\bfollow[ -]?up\b|\bsurvival\b|\bmortality\b|\bprognos(?:is|tic)\b|\bcensor(?:ing|ed)?\b/i,
     ["follow-up", "followup", "survival", "censoring", "censored", "mortality"],
     /time\s+(?:to\s+event|from)|follow[ -]?up|date\s+of\s+censoring|随访|删失/i,
+    true,
+    true,
   );
   add(
     /(?=[\s\S]*(?:\bai\b|\bllms?\b|人工智能|语言模型|机器学习|深度学习))(?=[\s\S]*(?:治疗|临床|建议|生存|\btreatment\b|\brecommendations?\b|\bsurvival\b))/i,
@@ -291,6 +333,23 @@ export function evidenceExcerptRanges(
   const topics = requestedTopics(question);
   const tables = linkedTableSpans(text, quota, terms, topics);
   const spans = naturalSpans(text)
+    .flatMap((range) => {
+      const part = text.slice(range.start, range.end);
+      if (
+        part.length <= 300 ||
+        !topics.some((topic) => topic.sentenceLevel && topic.anchor.test(part))
+      )
+        return [range];
+      // Keep compact evidence intact. Split longer anchored spans without spending their limited share
+      // on adjacent procedural prose; offsets still refer to untouched text.
+      const ends = [...part.matchAll(/[.!?。！？]["')\]]*(?:\s+|$)/g)].map(
+        (m) => range.start + m.index! + m[0].length,
+      );
+      const cuts = [range.start, ...ends, range.end].filter(
+        (n, i, all) => !i || n !== all[i - 1],
+      );
+      return cuts.slice(0, -1).map((start, i) => ({ start, end: cuts[i + 1] }));
+    })
     .flatMap((range) =>
       tables.reduce<EvidenceRange[]>(
         (fragments, table) =>

@@ -16,7 +16,11 @@ import type {
 } from "../shared/types.ts";
 import { profiles, exampleUnits, defaultDeck } from "../examples/bundle.ts";
 import { applyDeckPanels } from "./figure-panels.ts";
-import { pptImagePacket, pptDeckImagePacket } from "./ppt-image-packet.ts";
+import {
+  pptSelectionImagePacket,
+  pptSelectionImageVersion,
+  pptDeckImagePacket,
+} from "./ppt-image-packet.ts";
 import {
   assertPptLayout,
   withPptLayoutReview,
@@ -390,8 +394,9 @@ export class TaskManager {
         this.deliveryPolicy +
         (this.deliveryPolicy === "online" ? "-v3" : "-v1");
       skills.versions["visual-evidence-protocol"] = "endpoint-audit-v1";
-      if (!(input.modules ?? [input.module]).includes("ppt"))
-        skills.versions["reading-image-packet"] = readingImagePacketVersion;
+      if ((input.modules ?? [input.module]).includes("ppt"))
+        skills.versions["ppt-selection-images"] = pptSelectionImageVersion;
+      else skills.versions["reading-image-packet"] = readingImagePacketVersion;
       if (input.workflow === "direct")
         skills.versions["medical-research-assistant"] = (
           await assistantRules()
@@ -410,7 +415,7 @@ export class TaskManager {
         visibleImage:
           input.visibleImage ||
           ((input.modules ?? [input.module]).includes("ppt")
-            ? await pptImagePacket(selected)
+            ? await pptSelectionImagePacket(selected)
             : readingImages?.image),
       };
       if (sources.length === 0 && input.workflow !== "direct")

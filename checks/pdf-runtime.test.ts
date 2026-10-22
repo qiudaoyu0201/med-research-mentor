@@ -18,7 +18,7 @@ test("PDF decoder resources resolve locally with PDF.js trailing slash semantics
   await access(pdfRuntime.wasmUrl + "openjpeg.wasm");
 });
 test("new decoder uses a fresh cache version while old cache records remain readable", () => {
-  assert.equal(pdfExtractionVersion, "pdf-figures-v8-caption-line-start");
+  assert.equal(pdfExtractionVersion, "pdf-figures-v9-raster-bands");
   const record = { pages: ["原文"], parseStatus: "ready", figures: [] };
   for (const version of [
     "pdf-figures-v2",
@@ -27,6 +27,7 @@ test("new decoder uses a fresh cache version while old cache records remain read
     "pdf-figures-v5-caption-anchors",
     "pdf-figures-v6-caption-width",
     "pdf-figures-v7-panel-labels",
+    "pdf-figures-v8-caption-line-start",
     pdfExtractionVersion,
   ]) {
     assert.ok(validRecordShape("material-cache", record, `hash-${version}`));
@@ -57,6 +58,13 @@ test("panel cache rejects corrupt and duplicate crop metadata while preserving o
     panel = { label: "a", region: { left: 0, top: 0, width: 0.5, height: 1 } };
   assert.ok(validRecordShape("material-cache", record(), key));
   assert.ok(validRecordShape("material-cache", record([panel]), key));
+  assert.ok(
+    validRecordShape(
+      "material-cache",
+      record([{ ...panel, label: "band-1" }]),
+      key,
+    ),
+  );
   for (const malformed of [
     null,
     { a: panel },

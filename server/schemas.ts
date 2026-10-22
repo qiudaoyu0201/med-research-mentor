@@ -149,7 +149,7 @@ export function groundedTeachingSchema(
       .enum(["", ...panelSelectionIds(sources)])
       .optional()
       .describe(
-        "可选当前imageSource已有的面板ID；空字符串表示全图。不能猜坐标。",
+        "可选当前imageSource已有的选区ID；资料板whole显示完整原图，带选区ID的画面显示对应真实裁剪；未展示的选区不据名称推断内容。band-N仅为从上到下沿完整留白分隔的整行图组，不代表识别了原图面板字母，可能含多个子图。只选择完整支持本页判断且保留必要轴与图例的选区；空字符串表示全图。不能猜坐标。",
       ),
     imageSource: z
       .enum([
