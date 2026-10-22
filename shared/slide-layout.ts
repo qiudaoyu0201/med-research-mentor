@@ -39,7 +39,7 @@ export function wrapSlideText(text: string, width: number, fontSize: number) {
     // Match known units before identifiers; an arbitrary English word is not a unit.
     const tokens = (
       paragraph.match(
-        /\d+(?:[∶:]\d+)+|(?:[+−±-][ \t\u00a0]*)?\d[\d,.]*(?:[–—−-][+−-]?\d[\d,.]*)?[ \t\u00a0]*(?:(?:mEq|[mµμ]?mol|[mµμ]?g)\/(?:dL|mL|L|kg)|(?:mm|cm)[ \t\u00a0]*(?:Hg|H2O))(?![A-Za-z0-9_./+-])|(?:mm|cm)[ \t\u00a0]+(?:Hg|H2O)\b|[0-9]+[A-Za-z\u0370-\u03ff][A-Za-z0-9\u0370-\u03ff_./+-]*|(?:[+−±-][ \t\u00a0]*)?\d[\d,.]*(?:[–—−-][+−-]?\d[\d,.]*)?(?:%|％|‰)?|[A-Za-z\u0370-\u03ff][A-Za-z0-9\u0370-\u03ff_./+-]*|\p{Script=Han}+|[^\x00-\x7f]|\s+|./gu,
+        /\d+(?:[∶:]\d+)+|(?:[+−±-][ \t\u00a0]*)?\d[\d,.]*(?:[–—−-][+−-]?\d[\d,.]*)?[ \t\u00a0]*(?:(?:mEq|[mµμ]?mol|[npµμm]?g)\/(?:dL|mL|L|kg)|[µμm]?L(?:\/(?:min|h))?|°[CF]|(?:mm|cm)[ \t\u00a0]*(?:Hg|H2O))(?![A-Za-z0-9_./+-])|(?:mm|cm)[ \t\u00a0]+(?:Hg|H2O)\b|[0-9]+[A-Za-z\u0370-\u03ff][A-Za-z0-9\u0370-\u03ff_./+-]*|(?:[+−±-][ \t\u00a0]*)?\d[\d,.]*(?:[–—−-][+−-]?\d[\d,.]*)?(?:%|％|‰)?|[A-Za-z\u0370-\u03ff][A-Za-z0-9\u0370-\u03ff_./+-]*|\p{Script=Han}+|[^\x00-\x7f]|\s+|./gu,
       ) ?? []
     ).flatMap((token) =>
       /^\p{Script=Han}+$/u.test(token)
@@ -292,48 +292,97 @@ export function slideLayout(
       fontSize--;
       blocks = measure();
     }
-    if (blocks.some((block) => block.h > 2.9))
-      throw new Error("图解文字过密，请拆分步骤或比较，保留关键条件与判断。");
-    const cardH = Math.max(2.75, ...blocks.map((block) => block.h + 1.05));
-    const top = 2.05 + (3.9 - cardH) / 2;
-    blocks.forEach((block, i) => {
-      const x = 0.72 + i * (cardW + gap);
-      shapes.push({
-        x,
-        y: top,
-        w: cardW,
-        h: cardH,
-        fill: flow && i === 0 ? "12384A" : "EDF4F3",
-        kind: "roundRect",
-      });
-      shapes.push({
-        x: x + 0.3,
-        y: top + 0.35,
-        w: 0.42,
-        h: 0.05,
-        fill: flow && i === 0 ? "62C4B1" : "177E7D",
-      });
-      customText.push({
-        x: x + 0.3,
-        y: top + 0.66,
-        w: innerW,
-        h: block.h,
-        fontSize,
-        lines: block.lines,
-        color: flow && i === 0 ? "FFFFFF" : "26384A",
-        role: "bullet",
-        sourceIndex: i,
-      });
-      if (flow && i < count - 1)
-        shapes.push({
-          x: x + cardW + 0.13,
-          y: top + cardH / 2 - 0.11,
-          w: 0.24,
-          h: 0.22,
-          fill: "177E7D",
-          kind: "chevron",
-        });
+    // Long procedures read as a sequence of wide rows rather than narrow cards.
+    // Use the original text and order; the layout never extracts or rewrites steps.
+    const rowW = 10.65;
+    const rows = slide.bullets.map((value) => {
+      const lines = wrapSlideText(value, rowW, 24);
+      return { lines, h: (lines.length * 24 * slideLineHeight) / 72 + 0.09 };
     });
+    const rowGap = 0.22;
+    const rowHeights = rows.map((row) => Math.max(0.8, row.h + 0.12));
+    const totalHeight =
+      rowHeights.reduce((sum, h) => sum + h, 0) + rowGap * (count - 1);
+    const vertical =
+      flow &&
+      blocks.some((block) => block.lines.length > 3) &&
+      totalHeight <= 4.9;
+    if (vertical) {
+      let y = 1.7 + (4.9 - totalHeight) / 2;
+      shapes.push({
+        x: 0.88,
+        y: y + 0.16,
+        w: 0.018,
+        h: totalHeight - rowHeights.at(-1)!,
+        fill: "B9D9D3",
+      });
+      rows.forEach((row, i) => {
+        shapes.push({
+          x: 0.82,
+          y: y + 0.1,
+          w: 0.14,
+          h: 0.14,
+          kind: "ellipse",
+          fill: i === 0 ? "12384A" : "177E7D",
+        });
+        customText.push({
+          x: 1.55,
+          y,
+          w: rowW,
+          h: row.h,
+          fontSize: 24,
+          lines: row.lines,
+          color: "26384A",
+          role: "bullet",
+          marker: String(i + 1).padStart(2, "0"),
+          sourceIndex: i,
+        });
+        y += rowHeights[i] + rowGap;
+      });
+    } else {
+      if (blocks.some((block) => block.h > 2.9))
+        throw new Error("图解文字过密，请拆分步骤或比较，保留关键条件与判断。");
+      const cardH = Math.max(2.75, ...blocks.map((block) => block.h + 1.05));
+      const top = 2.05 + (3.9 - cardH) / 2;
+      blocks.forEach((block, i) => {
+        const x = 0.72 + i * (cardW + gap);
+        shapes.push({
+          x,
+          y: top,
+          w: cardW,
+          h: cardH,
+          fill: flow && i === 0 ? "12384A" : "EDF4F3",
+          kind: "roundRect",
+        });
+        shapes.push({
+          x: x + 0.3,
+          y: top + 0.35,
+          w: 0.42,
+          h: 0.05,
+          fill: flow && i === 0 ? "62C4B1" : "177E7D",
+        });
+        customText.push({
+          x: x + 0.3,
+          y: top + 0.66,
+          w: innerW,
+          h: block.h,
+          fontSize,
+          lines: block.lines,
+          color: flow && i === 0 ? "FFFFFF" : "26384A",
+          role: "bullet",
+          sourceIndex: i,
+        });
+        if (flow && i < count - 1)
+          shapes.push({
+            x: x + cardW + 0.13,
+            y: top + cardH / 2 - 0.11,
+            w: 0.24,
+            h: 0.22,
+            fill: "177E7D",
+            kind: "chevron",
+          });
+      });
+    }
     custom = true;
   } else if (requested === "spotlight") {
     if (count > 3)

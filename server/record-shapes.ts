@@ -72,6 +72,7 @@ const sourceRef = z.union([
   object({
     ...referenceFields,
     sourceType: z.literal("local").optional(),
+    paperTitle: str.optional(),
     paperId: str,
     sourceVersion: str,
     sourceId: str,
@@ -323,6 +324,10 @@ const shapes: Record<string, z.ZodType> = {
     budget,
   }),
   runs: object({
+    readingImageEvidence: object({
+      sourceIds: strings,
+      imageHash: str,
+    }).optional(),
     id: str,
     input: object({
       paperId: str,

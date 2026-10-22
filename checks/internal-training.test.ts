@@ -435,3 +435,65 @@ test("reading review receives the original image and source binding; absent or m
   assert.equal(calls, 2);
   assert.equal(receivedImage, undefined);
 });
+
+test("reading multi-figure review requires all source bindings and forwards the actual packet", async () => {
+  let calls = 0;
+  const provider: Provider = {
+    model: "fixture",
+    async generate(rules, input: any, schema, _signal, image) {
+      calls++;
+      assert.match(rules, /多图资料板/);
+      assert.equal(image, "actual-reading-packet");
+      assert.deepEqual(input.imageSourceIds, ["figure-a", "figure-b"]);
+      return {
+        output: schema.parse({
+          checks: [
+            {
+              criterion: "compare",
+              passed: true,
+              location: "comparison",
+              sourceIds: ["figure-a", "figure-b"],
+              explanation: "source binding fixture",
+            },
+          ],
+        }),
+      };
+    },
+  };
+  const input = {
+    question: "compare",
+    conditions: "two figures",
+    criteria: ["compare"],
+    artifact: { title: "comparison" },
+    sources: [
+      { id: "figure-a", text: "a", locator: "a" },
+      { id: "figure-b", text: "b", locator: "b" },
+    ],
+    evaluatorVersion: "explanation-and-reading-images-v1-visible-text" as const,
+    imageSourceIds: ["figure-a", "figure-b"],
+  };
+  const signal = new AbortController().signal;
+  for (const bad of [
+    undefined,
+    [],
+    ["figure-a", "other"],
+    ["figure-a", "figure-a"],
+  ])
+    await assert.rejects(
+      reviewArtifact(
+        provider,
+        { ...input, imageSourceIds: bad },
+        signal,
+        "actual-reading-packet",
+      ),
+      /未派发/,
+    );
+  await assert.rejects(reviewArtifact(provider, input, signal), /未派发/);
+  assert.equal(calls, 0);
+  assert.equal(
+    (await reviewArtifact(provider, input, signal, "actual-reading-packet"))
+      .valid,
+    true,
+  );
+  assert.equal(calls, 1);
+});

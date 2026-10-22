@@ -1,3 +1,4 @@
+import { planReferences } from "./plan-references.ts";
 import { effectiveRuleSnapshot, loadSkill } from "./skills.ts";
 import { randomUUID } from "node:crypto";
 import { z } from "zod";
@@ -268,6 +269,7 @@ export class ResearchPlans {
         id: `src-${digest(identity).slice(0, 24)}`,
         hash: digest(identity),
         title: source.title,
+        ...(paper.title.trim() ? { paperTitle: paper.title } : {}),
         ...(source.url ? { url: source.url } : {}),
       });
     }
@@ -312,7 +314,14 @@ export class ResearchPlans {
       }),
       learningPreferences: { verbosity: "standard", focus: "balanced" },
     });
-    if (digest(current) !== digest(local))
+    // Legacy references predate parent-paper titles. Compare those in their
+    // original shape; new references still detect changed parent metadata.
+    const comparable = current.map((ref, index) => {
+      if (local[index]?.paperTitle !== undefined) return ref;
+      const { paperTitle: _title, ...legacy } = ref;
+      return legacy;
+    });
+    if (digest(comparable) !== digest(local))
       throw new ResearchConflict(
         "来源内容或许可状态已变化，请更新课题来源再继续。",
       );
@@ -1152,24 +1161,20 @@ export class ResearchPlans {
       throw new ResearchConflict(
         "方案尚未成功完成核对，不能导出。请修改后重新生成或核对。",
       );
-    const refs = v.topic.sources.filter((source) =>
-      v.content.sections.some((section) =>
-        section.sourceRefs.includes(source.id),
-      ),
-    );
+    const { groups: refs, citationNumbers } = planReferences(v);
     const citation = (ids: string[]) =>
-      ids
-        .map((id) => {
-          const n = refs.findIndex((s) => s.id === id);
-          if (n < 0)
+      citationNumbers(ids)
+        .map((n) => {
+          if (n === undefined)
             throw new ResearchConflict(
               "保存稿含未绑定的来源，需重新核对，不能导出。",
             );
-          return `[${n + 1}]`;
+          return `[${n}]`;
         })
         .join(" ");
     return [
       `# ${v.content.title}`,
+      "医学研究方案草案",
       `保存日期：${v.createdAt.slice(0, 10)}`,
       `条件（用户陈述）：${v.topic.conditions || "未提供"}`,
       ...(v.topic.version !== plan.topic.version
@@ -1187,8 +1192,8 @@ export class ResearchPlans {
       ...new Set(v.content.limitations),
       "## 来源",
       ...(refs.length
-        ? refs.flatMap((r, i) => [
-            `[${i + 1}] ${r.title} · ${r.locator}`,
+        ? refs.flatMap(({ source: r, location }, i) => [
+            `[${i + 1}] ${r.paperTitle ? `${r.paperTitle} · ` : ""}${location}`,
             ...(r.url ? [`链接：${r.url}`] : []),
           ])
         : [
@@ -1196,7 +1201,6 @@ export class ResearchPlans {
               ? "本版本正文未引用所提供资料；设计建议与假设仍待核对。"
               : "本版本未提供文献；设计建议与假设仍待核对。",
           ]),
-      "本文件为研究方案草案；拟议方法和假设尚需按实际资源及伦理要求确认。",
     ].join("\n\n");
   }
   exportDocx(id: string, versionId: string) {

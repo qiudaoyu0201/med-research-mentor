@@ -1,3 +1,7 @@
+import {
+  readingImagePacket,
+  readingImagePacketVersion,
+} from "./reading-image-packet.ts";
 import { figureFamiliarity } from "./figure-familiarity.ts";
 import { randomUUID, createHash } from "node:crypto";
 import type {
@@ -386,6 +390,8 @@ export class TaskManager {
         this.deliveryPolicy +
         (this.deliveryPolicy === "online" ? "-v3" : "-v1");
       skills.versions["visual-evidence-protocol"] = "endpoint-audit-v1";
+      if (!(input.modules ?? [input.module]).includes("ppt"))
+        skills.versions["reading-image-packet"] = readingImagePacketVersion;
       if (input.workflow === "direct")
         skills.versions["medical-research-assistant"] = (
           await assistantRules()
@@ -396,13 +402,16 @@ export class TaskManager {
         input.sourceIds.includes(s.id),
       );
       const sources = selected.map(({ image, ...source }) => source);
+      const readingImages = (input.modules ?? [input.module]).includes("ppt")
+        ? undefined
+        : await readingImagePacket(selected, input.visibleImage);
       input = {
         ...input,
         visibleImage:
           input.visibleImage ||
           ((input.modules ?? [input.module]).includes("ppt")
             ? await pptImagePacket(selected)
-            : selected.find((s) => s.image)?.image),
+            : readingImages?.image),
       };
       if (sources.length === 0 && input.workflow !== "direct")
         throw new Error("请先选择本任务的原文或基础资料。");
@@ -433,6 +442,14 @@ export class TaskManager {
             addedIds: [],
           },
         ],
+        ...(readingImages?.image && readingImages.sourceIds.length
+          ? {
+              readingImageEvidence: {
+                sourceIds: readingImages.sourceIds,
+                imageHash: digest(readingImages.image),
+              },
+            }
+          : {}),
         materialRequests: (input.missingFoundations ?? []).map((s) => ({
           id: `material-${s.id}`,
           concept: s.title,
@@ -562,6 +579,11 @@ export class TaskManager {
       schema: import("zod").z.ZodType<T>,
     ): Promise<T> => {
       signal.throwIfAborted();
+      if (run.readingImageEvidence?.sourceIds.length)
+        input = {
+          ...(input as object),
+          visibleImageSourceIds: run.readingImageEvidence.sourceIds,
+        };
       let record = {
         role,
         inputKeys: Object.keys(input as object),

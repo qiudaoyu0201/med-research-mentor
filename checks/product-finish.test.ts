@@ -1028,6 +1028,11 @@ test("slide wrapping keeps clinical values with their units at real column width
       ["200 mg/dL", "15 mEq/L", "12 mEq/L"],
     ],
     ["压力≥140 mm Hg：使用同一时间窗比较", ["140 mm Hg"]],
+    [
+      "先以8°C盐水75 mL，15 mL/min注入，再比较温度",
+      ["8°C", "75 mL", "15 mL/min"],
+    ],
+    ["阈值为350 pg/mL，泵速为2 µL/h", ["350 pg/mL", "2 µL/h"]],
     ["记录− 10 mEq/L变化及2.5mmol/L浓度", ["− 10 mEq/L", "2.5mmol/L"]],
     ["检验值为2\u00a0µmol/L，保留原始单位", ["2\u00a0µmol/L"]],
   ] as const) {

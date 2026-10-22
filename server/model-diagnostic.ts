@@ -210,8 +210,21 @@ export function finishedDiagnostic(previous: {
 export function diagnosticReadingImage(
   visibleImage: string | undefined,
   sources: Pick<Source, "id" | "image">[],
+  binding?: { sourceIds: string[]; imageHash: string },
 ) {
   if (!visibleImage) return undefined;
+  if (binding && binding.sourceIds.length > 1) {
+    if (
+      binding.imageHash !== digest(visibleImage) ||
+      binding.sourceIds.length > 8 ||
+      new Set(binding.sourceIds).size !== binding.sourceIds.length ||
+      binding.sourceIds.some(
+        (id) => !sources.some((s) => s.id === id && s.image),
+      )
+    )
+      throw new Error("带读多图评价的图片或来源绑定无效，未派发评价请求。");
+    return { image: visibleImage, imageSourceIds: binding.sourceIds };
+  }
   const source = sources.find((s) => s.image === visibleImage);
   if (!source) throw new Error("带读独立评价的原图无法绑定到本任务来源。");
   return { image: visibleImage, imageSourceId: source.id };

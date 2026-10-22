@@ -245,3 +245,187 @@ test("an outcome request does not reserve space for a secondary-outcome list whe
   assert.ok(!visible.includes(unrelated));
   assert.ok(ranges.reduce((sum, r) => sum + r.end - r.start, 0) <= 200);
 });
+
+test("cohort report selection preserves design, recruitment and baseline population beside repeated model methods", () => {
+  const design =
+    "Study setting and participants\nWe conducted a retrospective cohort study at a single tertiary center from 2008 to 2022.";
+  const cohort =
+    "Baseline characteristics of the patients\nDuring the study period, 4,216 eligible adults were identified. All participants belonged to the reported recruitment population.";
+  const followup =
+    "Time to event was measured from the first baseline measurement to death or censoring.";
+  const source = [
+    "Methods and statistical analysis of survival models. ".repeat(65),
+    design,
+    "Statistical methods for survival analysis were specified. ".repeat(65),
+    cohort,
+    followup,
+  ].join("\n");
+  const ranges = evidenceExcerptRanges(
+    source,
+    800,
+    ["methods", "analysis", "survival"],
+    "汇报研究设计与生存随访",
+  );
+  const visible = ranges.map((r) => source.slice(r.start, r.end)).join("\n");
+  for (const block of [design, cohort, followup])
+    assert.ok(visible.includes(block));
+  assert.ok(ranges.reduce((n, r) => n + r.end - r.start, 0) <= 800);
+});
+
+test("population selection retains recruited numbers without inventing numeric requirements", () => {
+  const cohort =
+    "We identified 832 eligible patients from the national registry. Baseline characteristics were summarized for the recruited cohort.";
+  const source = [
+    "Patient model methods and analysis. ".repeat(90),
+    cohort,
+    "Patient model results and analysis. ".repeat(90),
+  ].join("\n");
+  const ranges = evidenceExcerptRanges(
+    source,
+    420,
+    ["patients", "methods", "analysis"],
+    "Explain the study population and eligibility.",
+  );
+  assert.ok(
+    ranges
+      .map((r) => source.slice(r.start, r.end))
+      .join("\n")
+      .includes(cohort),
+  );
+  assert.ok(ranges.reduce((n, r) => n + r.end - r.start, 0) <= 420);
+});
+
+test("limitation requests retain verification mechanism and unmeasured context within the existing budget", () => {
+  const verification =
+    "Verification bias can arise when low test results receive fewer confirmatory examinations. False negatives may be underestimated and sensitivity overestimated.";
+  const unmeasured =
+    "We did not collect medication or renal function data. It was not possible to determine active arrhythmia at blood sampling.";
+  const source = [
+    "Methods and diagnostic results were summarized. ".repeat(75),
+    verification,
+    "Study results and subgroup analysis were reviewed. ".repeat(75),
+    unmeasured,
+  ].join("\n");
+  const ranges = evidenceExcerptRanges(
+    source,
+    650,
+    ["methods", "results", "analysis"],
+    "汇报诊断方法、结果及局限和外推",
+  );
+  const visible = ranges.map((r) => source.slice(r.start, r.end)).join("\n");
+  assert.ok(visible.includes(verification));
+  assert.ok(visible.includes(unmeasured));
+  assert.ok(ranges.reduce((n, r) => n + r.end - r.start, 0) <= 650);
+});
+
+test("unmeasured factors do not displace source evidence without a limitation question", () => {
+  const source = [
+    "Methods and outcomes were reported. ".repeat(90),
+    "We did not collect additional context data.",
+  ].join("\n");
+  const ranges = evidenceExcerptRanges(
+    source,
+    200,
+    ["methods", "outcomes"],
+    "Explain the outcome definition.",
+  );
+  assert.ok(
+    !ranges
+      .map((r) => source.slice(r.start, r.end))
+      .join("\n")
+      .includes("additional context"),
+  );
+});
+
+test("population requests preserve the linked-data sampling frame and limitation requests prefer bias consequences over generic labels", () => {
+  const setting =
+    "Patient records were linked to hospital records, which limited the analysis to the recorded jurisdiction.";
+  const design = "Study design\nThis was a retrospective primary care cohort.";
+  const population =
+    "Baseline characteristics of the patients\nWe identified 2,493 eligible adults.";
+  const generic =
+    "Methods and results were reported. Some selection bias may affect the results.";
+  const mechanism =
+    "This means false negative results are likely to be under-estimated and sensitivity over-estimated.";
+  const source = [
+    design,
+    "Methods and results. ".repeat(80),
+    population,
+    setting,
+    generic,
+    mechanism,
+  ].join("\n");
+  const ranges = evidenceExcerptRanges(
+    source,
+    650,
+    ["methods", "results"],
+    "说明研究人群与局限",
+  );
+  const visible = ranges.map((r) => source.slice(r.start, r.end)).join("\n");
+  for (const block of [design, population, setting, mechanism])
+    assert.ok(visible.includes(block), block);
+  assert.ok(ranges.reduce((n, r) => n + r.end - r.start, 0) <= 650);
+});
+
+test("intervention questions preserve delivery and the actual comparator beside generic rationale", () => {
+  const delivery =
+    "Procedures\nAfter catheter placement, 60 ml of 5 °C saline was infused at 12 ml/min, followed by the common procedure.";
+  const control =
+    "The control group underwent identical procedures with room temperature saline.";
+  const source = [
+    "Methods and treatment rationale. ".repeat(95),
+    delivery,
+    "Study design and methods. ".repeat(60),
+    control,
+  ].join("\n");
+  const ranges = evidenceExcerptRanges(
+    source,
+    520,
+    ["methods", "treatment", "design"],
+    "解释干预联用思路与设计",
+  );
+  const visible = ranges.map((r) => source.slice(r.start, r.end)).join("\n");
+  assert.ok(visible.includes(delivery));
+  assert.ok(visible.includes(control));
+  assert.ok(ranges.reduce((n, r) => n + r.end - r.start, 0) <= 520);
+});
+
+test("evidence interpretation preserves an explicit lack of multiplicity correction in a table footnote", () => {
+  const footnote =
+    "Every analysis used bilateral testing. No corrections were applied for repeated comparisons.";
+  const source = [
+    "Results and statistical methods. ".repeat(90),
+    footnote,
+    "Other outcome results. ".repeat(80),
+  ].join("\n");
+  const ranges = evidenceExcerptRanges(
+    source,
+    260,
+    ["results", "methods"],
+    "解释结果及结论支持多强的证据",
+  );
+  assert.ok(
+    ranges
+      .map((r) => source.slice(r.start, r.end))
+      .join("\n")
+      .includes(footnote),
+  );
+  assert.ok(ranges.reduce((n, r) => n + r.end - r.start, 0) <= 260);
+});
+
+test("intervention-only topics do not crowd out an unrelated outcome question", () => {
+  const source = [
+    "Primary outcome was defined as independent function at day 70.",
+    "Study outcome methods and results. ".repeat(70),
+    "The control group underwent identical procedures with room temperature saline.",
+  ].join("\n");
+  const ranges = evidenceExcerptRanges(
+    source,
+    220,
+    ["outcome", "methods"],
+    "Explain the primary outcome definition.",
+  );
+  const visible = ranges.map((r) => source.slice(r.start, r.end)).join("\n");
+  assert.ok(visible.includes("independent function at day 70"));
+  assert.ok(!visible.includes("room temperature saline"));
+});

@@ -271,6 +271,7 @@ export interface TaskRun {
   error?: string;
   budget?: BudgetState;
   cacheHit?: string;
+  readingImageEvidence?: { sourceIds: string[]; imageHash: string };
   materials?: MaterialSnapshot[];
   materialRequests?: MaterialRequest[];
   evaluationBudget?: BudgetState;

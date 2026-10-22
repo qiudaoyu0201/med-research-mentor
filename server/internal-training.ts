@@ -295,8 +295,10 @@ export async function reviewArtifact(
       | "explanation-v2-visible-text"
       | "explanation-and-deck-images-v2"
       | "explanation-and-deck-images-v3-visible-text"
-      | "explanation-and-original-image-v1-visible-text";
+      | "explanation-and-original-image-v1-visible-text"
+      | "explanation-and-reading-images-v1-visible-text";
     imageSourceId?: string;
+    imageSourceIds?: string[];
     sourceExposure?: "actual-generation-packets-v1";
   },
   signal: AbortSignal,
@@ -310,6 +312,18 @@ export async function reviewArtifact(
       !input.sources.some((s) => s.id === input.imageSourceId))
   )
     throw new Error("带读原图评价缺少图片或有效的来源绑定，未派发评价请求。");
+  if (
+    input.evaluatorVersion ===
+      "explanation-and-reading-images-v1-visible-text" &&
+    (!image ||
+      !input.imageSourceIds?.length ||
+      input.imageSourceIds.length > 8 ||
+      new Set(input.imageSourceIds).size !== input.imageSourceIds.length ||
+      input.imageSourceIds.some(
+        (id) => !input.sources.some((s) => s.id === id),
+      ))
+  )
+    throw new Error("带读多图评价缺少图片或有效的来源绑定，未派发评价请求。");
   const result = await provider.generate(
     (input.sourceExposure === "actual-generation-packets-v1"
       ? "来源文字是教学及修订请求实际收到的片段，保留原有片段边界；同一来源可有不同阶段的片段。只依据这些实际文字及本轮明确提供的图片评价，不从页码、全文记忆或预训练知识补出隐藏内容，不把未提供的文字判为漏读。\n"
@@ -320,7 +334,9 @@ export async function reviewArtifact(
       input.evaluatorVersion ===
         "explanation-and-deck-images-v3-visible-text" ||
       input.evaluatorVersion ===
-        "explanation-and-original-image-v1-visible-text"
+        "explanation-and-original-image-v1-visible-text" ||
+      input.evaluatorVersion ===
+        "explanation-and-reading-images-v1-visible-text"
         ? explanationReviewInstructions +
           (input.evaluatorVersion?.endsWith("visible-text")
             ? "\n面向用户的正文与讲稿只指title、sections中的title/text、terms中的name/explanation、slides的title/bullets/notes、speechScript及方案内容。citations、imageSource、imageCrop、kind、引用副本和版式字段是结构化元数据；这些字段合法保留来源ID不构成正文出现内部编号。若正文或备注自身出现内部问题编号仍须失败。评价位置必须给实际正文标题或逐字原句，不能将JSON字段片段或元数据当作正文定位。"
@@ -333,15 +349,21 @@ export async function reviewArtifact(
           (input.evaluatorVersion ===
           "explanation-and-original-image-v1-visible-text"
             ? "\n图片是本轮带读实际提供的原图，imageSourceId绑定其来源。结合该来源文字和原图检查分组、线型、刻度、数值与结论；图中清晰可见的信息属于已提供证据，不能仅因图注文字没有重复数字便判作未提供。模糊、遮挡或图中不可见的关键内容仍须明确未确认，不据图补造精确值。其他来源有图注不等于本轮提供了其他图片；不把这张原图当成导出的PPT页面。"
+            : "") +
+          (input.evaluatorVersion ===
+          "explanation-and-reading-images-v1-visible-text"
+            ? "\n图片是本轮带读实际提供的多图资料板，imageSourceIds依次绑定各图标签；标签只定位来源。逐图结合对应文字检查分组、坐标、数值和结论，不将某一图的内容当作另一图。图像保持完整但可能缩放，无法读清的数字不补造；未列入绑定的其他图注不代表其图像已提供。这是原图资料板，不是导出的PPT页面。"
             : "")
         : reviewInstructions),
     input,
     reviewSchema.extend({
-      checks: z.array(
-        reviewSchema.shape.checks.element.extend({
-          criterion: z.enum(input.criteria as [string, ...string[]]),
-        }),
-      ).length(input.criteria.length),
+      checks: z
+        .array(
+          reviewSchema.shape.checks.element.extend({
+            criterion: z.enum(input.criteria as [string, ...string[]]),
+          }),
+        )
+        .length(input.criteria.length),
     }),
     signal,
     image,

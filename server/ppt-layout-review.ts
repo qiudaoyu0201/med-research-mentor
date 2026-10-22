@@ -1,7 +1,7 @@
 import { slideLayout } from "../shared/slide-layout.ts";
 import type { DeckOutline, ReviewResult, Source } from "../shared/types.ts";
 
-export const pptLayoutContractVersion = "ppt-layout-v8-semantic-diagrams";
+export const pptLayoutContractVersion = "ppt-layout-v9-adaptive-flow-units";
 
 const layoutId = (index: number) => `ppt-layout-${index + 1}`;
 

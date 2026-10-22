@@ -22,8 +22,10 @@ function requestedTopics(question: string): Topic[] {
     ["missing", "imputation", "mice", "mar", "mnar"],
     /missing\s+(?:data|values)|multiple\s+imputation|缺失|插补/i,
   );
+  const populationRequest =
+    /研究对象|研究人群|人群|入组|纳排|队列|外部验证|研究设计|\bstudy\s+design\b|\bpopulation\b|\bcohort\b|\beligibility\b/i;
   add(
-    /研究对象|研究人群|人群|入组|纳排|队列|外部验证|\bpopulation\b|\bcohort\b|\beligibility\b/i,
+    populationRequest,
     [
       "population",
       "patients",
@@ -33,6 +35,51 @@ function requestedTopics(question: string): Topic[] {
       "excluded",
     ],
     /study\s+population|eligibility|inclusion\s+criteria|exclusion\s+criteria|纳排|入组/i,
+  );
+  add(
+    populationRequest,
+    ["baseline", "characteristics", "identified", "recruited", "enrolled"],
+    /baseline\s+characteristics(?:\s+of\s+(?:the\s+)?(?:patients|participants|cohort))?|(?:identified|included|enrolled|recruited)\s+[\d,]+\s+(?:eligible\s+)?(?:patients|participants|adults|children)|(?:patients|participants)\s*\(\s*n\s*=|基线特征|共(?:纳入|入组)|纳入\s*[\d,]+/i,
+    true,
+  );
+  add(
+    populationRequest,
+    [
+      "retrospective",
+      "prospective",
+      "multicenter",
+      "multicentre",
+      "single-center",
+      "single-centre",
+    ],
+    /study\s+(?:design|setting)(?:\s+and\s+(?:setting|participants))?|(?:single|multi)[ -]cent(?:er|re)|(?:conducted|performed|undertook)\s+(?:a\s+)?(?:retrospective|prospective)|研究设计|单中心|多中心|回顾性|前瞻性/i,
+    true,
+  );
+  add(
+    populationRequest,
+    ["linked", "limited", "restricted", "population", "setting"],
+    /(?:limited|restricted)\s+(?:the\s+)?(?:study|analysis)\s+to|patient\s+records?\s+were\s+linked|recruitment\s+(?:setting|sites)|研究地区|研究场所/i,
+    true,
+  );
+  const interventionRequest =
+    /干预|治疗|联用|操作流程|给药|\bintervention\b|\btreatment\b|\bprocedures?\b/i;
+  add(
+    interventionRequest,
+    ["infused", "administered", "dose", "catheter", "saline", "temperature"],
+    /(?:infused|administered)\s+(?:at|through|via)|(?:of|with)\s+[\d.]+\s*°?\s*c\b|给药|输注/i,
+    true,
+  );
+  add(
+    interventionRequest,
+    ["control", "group", "received", "underwent", "identical", "saline"],
+    /(?:control|comparator|placebo)\s+group\s+(?:received|underwent|was\s+(?:given|treated))|对照组(?:接受|给予|采用)/i,
+    true,
+  );
+  add(
+    /统计|分析|结果|结论|证据|多重|\bstatistic(?:al|s)\b|\bmultiplicity\b|\bcomparisons?\b/i,
+    ["correction", "corrections", "adjustment", "multiple", "comparisons"],
+    /(?:no|without)\s+(?:corrections?|adjustments?)[\s\S]{0,60}(?:multiple|repeated)\s+(?:comparisons?|testing)|(?:not|un)adjusted[\s\S]{0,40}multiple\s+(?:comparisons?|testing)|多重比较|多重检验/i,
+    true,
   );
   // Assignment to a strategy and regrouping for analysis answer different
   // questions. Keep both definitions when the reader asks about trial groups.
@@ -72,6 +119,40 @@ function requestedTopics(question: string): Topic[] {
     /结局|终点|\boutcomes?\b|\bendpoints?\b/i,
     ["outcome", "outcomes", "endpoint", "endpoints"],
     /primary\s+(?:outcome|endpoint)|(?:outcomes?|endpoints?)\s+(?:was|were|is|are)\s+defined|主要结局|主要终点/i,
+    true,
+  );
+  // Keep the mechanism of a stated limitation, not only its heading. Selection
+  // and verification bias differ from unavailable measurements and transportability.
+  const limitationRequest =
+    /局限|偏倚|外推|适用范围|\blimitations?\b|\bbias\b|\bgenerali[sz]ability\b/i;
+  add(
+    limitationRequest,
+    [
+      "selection",
+      "verification",
+      "false",
+      "sensitivity",
+      "bias",
+      "under-estimated",
+      "underestimated",
+      "over-estimated",
+      "overestimated",
+    ],
+    /selection\s+bias|verification\s+bias|false\s+negatives?[\s\S]{0,100}(?:under.?estimated|missed)|sensitivity[\s\S]{0,70}over.?estimated|选择偏倚|验证偏倚/i,
+    true,
+  );
+  add(
+    limitationRequest,
+    [
+      "not",
+      "data",
+      "measured",
+      "recorded",
+      "possible",
+      "generalizability",
+      "generalisability",
+    ],
+    /(?:did|were|was)\s+not\s+(?:extract|collect|measure|record)|(?:not\s+possible|unable)\s+to\s+(?:tell|determine|establish)|(?:generalizability|generalisability)\s+(?:is|was|may)|未(?:收集|测量|记录)|无法确定/i,
     true,
   );
   add(

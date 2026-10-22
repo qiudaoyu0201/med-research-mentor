@@ -512,3 +512,65 @@ test("source footers keep table identifiers and visibly mark omitted long text",
   assert.ok(footer.lines[1].endsWith("…"));
   assert.ok(footer.y + footer.h <= 7.5);
 });
+
+test("long ordered procedures use wide rows without rewriting or dropping any steps", async () => {
+  const bullets = [
+    "采样前记录处理条件与对照来源，随后以8°C盐水75 mL，15 mL/min实施局部操作。",
+    "在同一固定时间窗口完成主要操作，保留各组一致的读出流程。",
+    "操作后完成两项预先固定的测量，按原始组别估计差异并保留全部关键条件。",
+    "最后完成盲法结局评价，保留缺失状态及统一随访窗口，不直接推断临床获益。",
+  ];
+  const slide = {
+    title: "操作与结局评价流程",
+    bullets,
+    notes: "工程夹具，验证步骤文本与布局。",
+    citations: [paper.sources[0].id],
+    layout: "flow" as const,
+  };
+  const layout = slideLayout(slide, paper.sources);
+  const boxes = layout.text.filter((box) => box.role === "bullet");
+  assert.deepEqual(
+    boxes.map((box) => box.lines.join("").replace(/\s/g, "")),
+    bullets.map((value) => value.replace(/\s/g, "")),
+  );
+  assert.ok(boxes.every((box) => box.w > 10 && box.fontSize === 24));
+  assert.deepEqual(
+    boxes.map((box) => box.marker),
+    ["01", "02", "03", "04"],
+  );
+  boxes.forEach((box, i) => {
+    assert.ok(box.y + box.h < 6.7);
+    if (i) assert.ok(box.y >= boxes[i - 1].y + boxes[i - 1].h);
+  });
+  for (const measurement of ["8°C", "75 mL", "15 mL/min"])
+    assert.ok(boxes[0].lines.some((line) => line.includes(measurement)));
+  const output = await exportDeck(
+    { slides: [slide] },
+    paper,
+    "long-flow-" + randomUUID(),
+  );
+  try {
+    const zip = unzipSync(await readFile(output));
+    const xml = strFromU8(zip["ppt/slides/slide1.xml"]);
+    for (const value of bullets)
+      assert.ok(
+        xml
+          .replace(/<[^>]+>/g, "")
+          .replace(/\s/g, "")
+          .includes(value.replace(/\s/g, "")),
+      );
+  } finally {
+    await unlink(output);
+  }
+  assert.throws(
+    () =>
+      slideLayout(
+        {
+          ...slide,
+          bullets: bullets.map(() => "无法容纳的必要条件".repeat(90)),
+        },
+        paper.sources,
+      ),
+    /过密/,
+  );
+});

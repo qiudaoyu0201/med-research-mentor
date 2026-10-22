@@ -1051,3 +1051,155 @@ test("professional plan exports include only cited sources and preserve the save
   assert.equal(before.versions.at(-1)!.topic.sources.length, 2);
   assert.deepEqual(h.store.get(p.id), before);
 });
+
+test("local plan citations freeze parent paper context in both exports without borrowing live metadata", async () => {
+  const outputs: unknown[] = [];
+  const h = harness(outputs);
+  h.papers[0].title = "A parent cohort paper";
+  h.papers[0].sources[0].title = "PDF 第 4 页";
+  const p = await h.store.create({
+    ...topic,
+    sources: [{ paperId: "a", sourceVersion: "1", sourceId: "duplicate" }],
+  });
+  const ref = p.topic.sources[0];
+  assert.equal(ref.paperTitle, "A parent cohort paper");
+  outputs.push(
+    {
+      ...content,
+      sections: content.sections.map((s) => ({ ...s, sourceRefs: [ref.id] })),
+    },
+    { ...review, checkedSourceRefs: [ref.id] },
+  );
+  const job = await h.store.start(p.id, input(p));
+  const done = await h.store.wait(job.id);
+  assert.equal(done.status, "completed", done.error);
+  const saved = h.store.get(p.id);
+  h.papers[0].title = "Changed live paper title";
+  const restored = new ResearchPlans(
+    h.provider,
+    async () => h.papers[0],
+    new TaskScheduler(),
+    h.persist,
+    h.erase,
+  );
+  await restored.restore(
+    [saved],
+    [structuredClone(h.records.get(`research-plan-jobs/${job.id}`))],
+  );
+  for (const text of [
+    restored.exportMarkdown(p.id, done.resultVersion!),
+    strFromU8(
+      unzipSync(restored.exportDocx(p.id, done.resultVersion!))[
+        "word/document.xml"
+      ],
+    ),
+  ]) {
+    assert.match(text, /A parent cohort paper · PDF 第 4 页/);
+    assert.doesNotMatch(text, /Changed live paper title/);
+  }
+  await assert.rejects(
+    restored.start(p.id, input(restored.get(p.id))),
+    /来源内容/,
+  );
+  assert.equal(h.calls.length, 2);
+});
+
+test("legacy local references without parent titles still reopen and generate while real text changes remain blocked", async () => {
+  const h = harness();
+  const p = await h.store.create({
+    ...topic,
+    sources: [{ paperId: "a", sourceVersion: "1", sourceId: "duplicate" }],
+  });
+  for (const ref of p.topic.sources) delete ref.paperTitle;
+  const restored = new ResearchPlans(
+    h.provider,
+    async () => h.papers[0],
+    new TaskScheduler(),
+    h.persist,
+    h.erase,
+  );
+  await restored.restore([p], []);
+  const job = await restored.start(p.id, input(restored.get(p.id)));
+  const done = await restored.wait(job.id);
+  assert.equal(done.status, "completed", done.error);
+  assert.equal(
+    restored.get(p.id).versions[0].topic.sources[0].paperTitle,
+    undefined,
+  );
+  h.papers[0].sources[0].text += " changed";
+  await assert.rejects(
+    restored.start(p.id, input(restored.get(p.id))),
+    /来源内容/,
+  );
+  assert.equal(h.calls.length, 2);
+});
+
+test("plan exports share a paper citation across frozen excerpts while retaining locations and distinct papers", async () => {
+  const outputs: unknown[] = [];
+  const h = harness(outputs);
+  h.papers[0].title = h.papers[1].title = "Shared paper title";
+  h.papers[0].sources[0].title = "Page 3";
+  h.papers[0].sources[0].locator = "PDF page 3";
+  h.papers[0].sources.push(
+    {
+      ...h.papers[0].sources[0],
+      id: "page-4",
+      title: "Page 4",
+      locator: "PDF page 4",
+    },
+    {
+      ...h.papers[0].sources[0],
+      id: "unused",
+      title: "Unused page",
+      locator: "PDF page 99",
+    },
+  );
+  h.papers[1].sources[0].title = "Other paper result";
+  const p = await h.store.create({
+    ...topic,
+    sources: h.papers.flatMap((paper) =>
+      paper.sources.map((source) => ({
+        paperId: paper.id,
+        sourceVersion: paper.version,
+        sourceId: source.id,
+      })),
+    ),
+  });
+  const refs = p.topic.sources;
+  const draft = {
+    ...structuredClone(content),
+    sections: content.sections.map((s) => ({
+      ...structuredClone(s),
+      sourceRefs: [] as string[],
+    })),
+  };
+  draft.sections[0].sourceRefs = [refs[0].id, refs[1].id];
+  draft.sections[1].sourceRefs = [refs[1].id, refs[3].id];
+  outputs.push(draft, { ...review, checkedSourceRefs: refs.map((r) => r.id) });
+  const job = await h.store.start(p.id, input(p));
+  const done = await h.store.wait(job.id);
+  assert.equal(done.status, "completed", done.error);
+  const saved = h.store.get(p.id);
+  const md = h.store.exportMarkdown(p.id, done.resultVersion!);
+  const document = strFromU8(
+    unzipSync(h.store.exportDocx(p.id, done.resultVersion!))[
+      "word/document.xml"
+    ],
+  );
+  for (const text of [md, document]) {
+    assert.equal(
+      (text.match(/Shared paper title/g) ?? []).length,
+      2,
+      "same title in distinct papers cannot collapse their identities",
+    );
+    assert.match(text, /Page 3 · PDF page 3；Page 4 · PDF page 4/);
+    assert.match(text, /Other paper result/);
+    assert.doesNotMatch(text, /Unused page|PDF page 99|\[3\]|\[1\] \[1\]/);
+    assert.match(text, /\[1\] \[2\]/);
+  }
+  assert.deepEqual(
+    h.store.get(p.id),
+    saved,
+    "export must not rewrite saved section source bindings",
+  );
+});

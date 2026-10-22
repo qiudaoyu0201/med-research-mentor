@@ -1,5 +1,6 @@
 import { zipSync, strToU8 } from "fflate";
 import type { ResearchPlanVersion } from "../shared/research-plan.ts";
+import { planReferences } from "./plan-references.ts";
 
 const xml = (s: string) =>
   s
@@ -53,22 +54,17 @@ export function planDocx(
   historical = false,
 ): Buffer {
   const v = version,
-    refs = v.topic.sources.filter((source) =>
-      v.content.sections.some((section) =>
-        section.sourceRefs.includes(source.id),
-      ),
-    );
+    { groups: refs, citationNumbers } = planReferences(v);
   const cite = (ids: string[]) =>
-    ids
-      .map((id) => {
-        const n = refs.findIndex((r) => r.id === id);
-        if (n < 0) throw new Error("导出引用不存在。");
-        return `[${n + 1}]`;
+    citationNumbers(ids)
+      .map((n) => {
+        if (n === undefined) throw new Error("导出引用不存在。");
+        return `[${n}]`;
       })
       .join(" ");
   const links: string[] = [];
   const source = refs
-    .map((r, i) => {
+    .map(({ source: r, location }, i) => {
       const b = r.bibliography;
       const url = b?.doi ? `https://doi.org/${b.doi}` : r.url;
       const safe =
@@ -77,7 +73,7 @@ export function planDocx(
         !/localhost|127\.0\.0\.1|\[::1\]/i.test(url)
           ? url
           : undefined;
-      const ref = `[${i + 1}] ${b?.authors.length ? `${b.authors.join(", ")}. ` : ""}${r.title}${b ? `. ${b.journal}, ${b.year}. PMID ${b.pmid}${b.doi ? `. DOI ${b.doi}` : ""}` : ` · ${r.locator}`}`;
+      const ref = `[${i + 1}] ${b?.authors.length ? `${b.authors.join(", ")}. ` : ""}${!b && r.paperTitle ? `${r.paperTitle} · ` : ""}${b ? r.title : location}${b ? `. ${b.journal}, ${b.year}. PMID ${b.pmid}${b.doi ? `. DOI ${b.doi}` : ""}` : ""}`;
       let result = paragraph(ref, "Reference", Boolean(safe || b));
       if (safe) {
         links.push(safe);
@@ -123,9 +119,6 @@ export function planDocx(
           ? "本版本正文未引用所提供资料，设计建议与假设仍待核实。"
           : "本版本没有提供文献依据，设计建议与假设仍待核实。",
       ),
-    paragraph(
-      "本文件为研究方案草案；拟议方法和假设尚需按实际资源及伦理要求确认。",
-    ),
   ].join("");
   const header = '<?xml version="1.0" encoding="UTF-8" standalone="yes"?>';
   const styles = `<w:styles xmlns:w="http://schemas.openxmlformats.org/wordprocessingml/2006/main"><w:docDefaults><w:rPrDefault><w:rPr><w:rFonts w:ascii="Calibri" w:hAnsi="Calibri" w:eastAsia="Microsoft YaHei"/><w:sz w:val="22"/><w:color w:val="000000"/><w:lang w:val="en-US" w:eastAsia="zh-CN"/></w:rPr></w:rPrDefault><w:pPrDefault><w:pPr><w:spacing w:after="120" w:line="330" w:lineRule="auto"/><w:widowControl/></w:pPr></w:pPrDefault></w:docDefaults><w:style w:type="paragraph" w:default="1" w:styleId="Normal"><w:name w:val="Normal"/></w:style>${[
@@ -139,7 +132,7 @@ export function planDocx(
     )
     .join(
       "",
-    )}<w:style w:type="paragraph" w:styleId="Reference"><w:name w:val="Reference"/><w:basedOn w:val="Normal"/><w:pPr><w:spacing w:after="80" w:line="264" w:lineRule="auto"/></w:pPr></w:style><w:style w:type="character" w:styleId="Hyperlink"><w:name w:val="Hyperlink"/><w:rPr><w:color w:val="0563C1"/><w:u w:val="single"/></w:rPr></w:style></w:styles>`;
+    )}<w:style w:type="paragraph" w:styleId="Reference"><w:name w:val="Reference"/><w:basedOn w:val="Normal"/><w:pPr><w:keepLines/><w:spacing w:after="80" w:line="264" w:lineRule="auto"/></w:pPr></w:style><w:style w:type="character" w:styleId="Hyperlink"><w:name w:val="Hyperlink"/><w:rPr><w:color w:val="0563C1"/><w:u w:val="single"/></w:rPr></w:style></w:styles>`;
   const files: Record<string, Uint8Array> = {};
   const add = (name: string, content: string) => {
     files[name] = strToU8(header + content);
