@@ -364,7 +364,7 @@ GitHub固定对照仍为ppt-master 622bf0148bca4f697b0184322c7e2aa2a04520a2的st
 
 方案技能1.1.11区分新增设计假设、待核事实、导师取舍和正文未交代的局限；无新增内容可留空，避免为填栏目重复正文。导出配套修复：Word与Markdown仅在有内容时显示“假设与待确认”“研究局限”，保留已有内容、章节待核项、引用资格及保存版本；新增回归覆盖四种空/非空组合与不修改保存稿。v219两个3页文件、v222两个3页文件均实际经原生Word导出、Poppler渲染并查看完整联系图；连同前续v218的8页，共6份方案20页已看。未见剪裁或重叠，参考文献留在有正文的末页，但段落仍密、部分假设/问题重叠、修订中未能分析事项列举偏多。v218与v219还改变了患者汇总路线，不能把4至3页归因于单一规则，更不能称全部方案精简成功。
 
-GitHub对照本次实际取得固定提交原文：ppt-master 622bf0148bca4f697b0184322c7e2aa2a04520a2 的 strategist，nature-skills c6ae86c742705fd968b13c79db1a8518a84089d4 的 grounding-rules 与 research-anti-slop。独立HTTP下载均200并记录字节数/SHA256；后续一次实际web.run取得内容。采用按听众/任务取舍、图文共同取证及先修论证结构再润色，不引入外部确认流程，不声称检查最新HEAD。本续段中先前反复声称已经收到web回执但没有实际工具结果的记录与引用全部撤回；实际web调用在closeout成功后才发生，不倒证先前表述。忽略目录 github-open-20261023.json 保留撤回，github-verified-20261023.json 仅保存真实HTTP结果及该次实际web回执。
+GitHub对照取得固定提交原文：ppt-master 622bf0148bca4f697b0184322c7e2aa2a04520a2 的 strategist，nature-skills c6ae86c742705fd968b13c79db1a8518a84089d4 的 grounding-rules 与 research-anti-slop。证据为实际Node HTTP下载，均200，保存原文字节数及SHA256。此前声称web.run已返回的表述、修正声明及引用均没有工具结果支持，全部撤回；不声称随后曾有实际web回执。忽略目录github-open-20261023.json保留撤回，github-verified-20261023.json仅记录HTTP下载证据。比较采用按听众/任务取舍、图文共同取证及先修论证结构再润色，不引入外部确认流程，不声称检查最新HEAD。
 
 learning-plan-study-20261023/closeout-final-20261023.json核实44个新ID唯一，与207份其他历史报告无复用；parent/predecessor/paper/rules/contract哈希及累计连续。43次成功且远端completed；v217独立评价 ea99dbf0-ee48-4531-a632-701e2997fa6c 本地unknown、远端failed，stream disconnected，非超时，没有以部分输出补分。全部远端已终结、无活动诊断、派发锁释放。成功产品36次中位26.746秒、最长106.942秒；有效评价7次中位37.723秒、最长45.039秒。已知tokens959583，失败请求未知用量不估算现金。两种engine快照，最终aa1bde31d53aac04c636996e3ef2057bb5795cf95bf7562fccc8953fe5dbe982；provider及软硬阈值未改。
 
