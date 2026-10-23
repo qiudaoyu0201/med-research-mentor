@@ -712,3 +712,73 @@ test("tables reject missing cells, separator rows and excessive density rather t
   const ordinary = slideLayout({ ...slide, layout: "auto" }, paper.sources);
   assert.notEqual(ordinary.composition, "table");
 });
+
+test("tables keep complete short headers when all columns fit at the original font", () => {
+  const rows = [
+    "Hospital 1 | 低阈值／敏感度（95% CI） | 高阈值／特异度（95% CI）",
+    "原模型 | 0.080／93%（89%—96%） | 0.400／86%（84%—87%）",
+    "本地更新后 | 0.026／90%（86%—93%） | 0.130／86%（85%—88%）",
+  ];
+  const layout = slideLayout(
+    {
+      title: "本地概率阈值与分类表现",
+      bullets: rows,
+      notes: "排版回归用例，数值不构成诊疗建议。",
+      citations: [paper.sources[0].id],
+      layout: "table",
+    },
+    paper.sources,
+  );
+  const cells = layout.text.filter((box) => box.role === "bullet");
+  assert.deepEqual(
+    cells.map((box) => box.lines),
+    rows.flatMap((row) => row.split("|").map((cell) => [cell.trim()])),
+  );
+  assert.ok(cells.every((cell) => cell.fontSize === 23));
+  for (let row = 0; row < rows.length; row++) {
+    const group = cells.slice(row * 3, row * 3 + 3);
+    group.forEach((cell, col) => {
+      assert.ok(cell.x + cell.w <= 12.62);
+      assert.equal(cell.x, cells[col].x);
+      if (col) assert.ok(cell.x >= group[col - 1].x + group[col - 1].w);
+    });
+  }
+});
+
+test("four-column clinical tables fit bold headers and retain complete intervals", () => {
+  const rows = [
+    "阈值（pg/mL） | 敏感度%，95% CI | 特异度%，95% CI | 阴性预测值%，95% CI",
+    "125 | 98.8（98.5–99.1） | 13.2（12.6–13.7） | 97.3（96.5–98.0）",
+    "400 | 93.2（92.4–93.9） | 35.5（34.7–36.3） | 94.3（93.6–94.9）",
+    "660 | 未报告 | 未报告 | >90，区间未报告",
+  ];
+  const layout = slideLayout(
+    {
+      title: "不同阈值的检出与排除表现",
+      bullets: rows,
+      notes: "排版回归用例",
+      citations: [paper.sources[0].id],
+      layout: "table",
+    },
+    paper.sources,
+  );
+  const cells = layout.text.filter((box) => box.role === "bullet");
+  assert.deepEqual(
+    cells.map((cell) => cell.lines.join("").replace(/\s/g, "")),
+    rows.flatMap((row) =>
+      row.split("|").map((cell) => cell.replace(/\s/g, "")),
+    ),
+  );
+  const context = createCanvas(1, 1).getContext("2d");
+  cells.forEach((cell) => {
+    assert.equal(cell.fontSize, 23);
+    context.font =
+      (cell.bold ? "bold " : "") + cell.fontSize + "pt Microsoft YaHei";
+    for (const line of cell.lines)
+      assert.ok(
+        context.measureText(line).width <= cell.w * 96,
+        "Actual table font overflow: " + line,
+      );
+    assert.ok(cell.y + cell.h < 6.7);
+  });
+});

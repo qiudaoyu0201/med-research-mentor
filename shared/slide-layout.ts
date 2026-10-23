@@ -27,7 +27,15 @@ export const slideLineHeight = 1.18;
 
 const slideWordSegmenter = new Intl.Segmenter("zh", { granularity: "word" });
 
-export function wrapSlideText(text: string, width: number, fontSize: number) {
+export function wrapSlideText(
+  text: string,
+  width: number,
+  fontSize: number,
+  bold = false,
+) {
+  // Bold CJK glyphs need slightly more room in Office than regular body text.
+  const glyphUnits = (c: string) =>
+    c.charCodeAt(0) < 128 ? 0.62 : bold ? 1.04 : 1;
   // Reserve room for Office glyph placement. Mixed Latin/CJK labels such as
   // repeated acronyms overflowed the former 0.52-em Latin estimate in PowerPoint.
   const limit = (width * 72 * 0.95) / fontSize,
@@ -65,10 +73,7 @@ export function wrapSlideText(text: string, width: number, fontSize: number) {
       else words.push(token);
     }
     for (const word of words) {
-      const units = [...word].reduce(
-        (n, c) => n + (/[\x00-\x7f]/.test(c) ? 0.62 : 1),
-        0,
-      );
+      const units = [...word].reduce((n, c) => n + glyphUnits(c), 0);
       if (length + units > limit && line) {
         lines.push(line.trimEnd());
         line = "";
@@ -76,7 +81,7 @@ export function wrapSlideText(text: string, width: number, fontSize: number) {
       }
       if (units > limit) {
         for (const c of word) {
-          const u = /[\x00-\x7f]/.test(c) ? 0.62 : 1;
+          const u = glyphUnits(c);
           if (length + u > limit && line) {
             lines.push(line);
             line = "";
@@ -290,8 +295,11 @@ export function slideLayout(
         "表格需要表头及一至四行数据，每行二至四个非空单元格，以 | 分隔；不添加Markdown分隔行，缺失指标须明确标注。",
       );
     composition = "table";
-    const units = (value: string) =>
-      [...value].reduce((n, c) => n + (/[\x00-\x7f]/.test(c) ? 0.62 : 1), 0);
+    const units = (value: string, bold = false) =>
+      [...value].reduce(
+        (n, c) => n + (c.charCodeAt(0) < 128 ? 0.62 : bold ? 1.04 : 1),
+        0,
+      );
     const weights = rows[0].map((_, col) =>
       Math.max(
         6,
@@ -301,14 +309,45 @@ export function slideLayout(
     // Reserve more space for the longest label/value in each column, with a
     // bounded weight so one long condition cannot starve the other measures.
     const totalWeight = weights.reduce((sum, weight) => sum + weight, 0);
-    const widths = weights.map((weight) => (11.9 * weight) / totalWeight);
+    const proportionalWidths = weights.map(
+      (weight) => (11.9 * weight) / totalWeight,
+    );
+    let widths = proportionalWidths;
     let fontSize = 23;
-    const measure = () =>
-      rows.map((row) =>
-        row.map((cell, col) =>
-          wrapSlideText(cell, widths[col] - 0.32, fontSize),
+    const measure = () => {
+      // Padding takes a larger share of short columns. If every column can fit
+      // without wrapping, reserve its measured width before sharing spare room.
+      const naturalWidths = rows[0].map((_, col) =>
+        Math.max(
+          1.1,
+          (Math.max(
+            ...rows.flatMap((row, index) =>
+              row[col]
+                .split("\n")
+                .map((cell) => units(cell, index === 0 || col === 0)),
+            ),
+          ) *
+            fontSize) /
+            (72 * 0.95) +
+            0.325,
         ),
       );
+      const spare = 11.9 - naturalWidths.reduce((sum, width) => sum + width, 0);
+      widths =
+        spare >= 0
+          ? naturalWidths.map((width) => width + spare / columns)
+          : proportionalWidths;
+      return rows.map((row, index) =>
+        row.map((cell, col) =>
+          wrapSlideText(
+            cell,
+            widths[col] - 0.32,
+            fontSize,
+            index === 0 || col === 0,
+          ),
+        ),
+      );
+    };
     let blocks = measure();
     const heights = () =>
       blocks.map((row) =>
