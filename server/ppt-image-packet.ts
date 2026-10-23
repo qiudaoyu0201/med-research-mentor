@@ -1,4 +1,5 @@
 import { createCanvas, loadImage } from "@napi-rs/canvas";
+import { pptSelectionCandidates } from "./figure-panels.ts";
 import { validRegion, cropPixels } from "../shared/image-region.ts";
 import type { Source, DeckOutline } from "../shared/types.ts";
 export async function pptImagePacket(sources: Source[], limit = 8) {
@@ -28,51 +29,40 @@ export async function pptImagePacket(sources: Source[], limit = 8) {
   return canvas.toDataURL("image/jpeg", 0.88);
 }
 
-export const pptSelectionImageVersion = "ppt-selection-images-v1";
+export const pptSelectionImageVersion =
+  "ppt-selection-images-v2-visible-candidates";
 // Show the actual available crops beside complete originals before selection.
 // Limits apply separately: no original is displaced by another figure's panels.
 export async function pptSelectionImagePacket(sources: Source[]) {
   const originals = sources.filter((s) => s.image).slice(0, 8);
   const pictures = originals.map((s) => ({ ...s, id: s.id + " | whole" }));
-  const panels = originals.map((s) =>
-    (s.imagePanels ?? []).filter((p) => validRegion(p.region)),
-  );
   const decoded = new Map<string, Awaited<ReturnType<typeof loadImage>>>();
-  let added = 0;
-  for (let position = 0; added < 8; position++) {
-    let found = false;
-    for (const [index, source] of originals.entries()) {
-      const panel = panels[index][position];
-      if (!panel || added === 8) continue;
-      found = true;
-      let original = decoded.get(source.id);
-      if (!original) {
-        original = await loadImage(source.image!);
-        decoded.set(source.id, original);
-      }
-      const box = cropPixels(panel.region, original.width, original.height);
-      const canvas = createCanvas(box.width, box.height);
-      canvas
-        .getContext("2d")
-        .drawImage(
-          original,
-          box.left,
-          box.top,
-          box.width,
-          box.height,
-          0,
-          0,
-          box.width,
-          box.height,
-        );
-      pictures.push({
-        ...source,
-        id: source.id + ":" + panel.label,
-        image: canvas.toDataURL("image/png"),
-      });
-      added++;
+  for (const { source, panel } of pptSelectionCandidates(sources)) {
+    let original = decoded.get(source.id);
+    if (!original) {
+      original = await loadImage(source.image!);
+      decoded.set(source.id, original);
     }
-    if (!found) break;
+    const box = cropPixels(panel.region, original.width, original.height);
+    const canvas = createCanvas(box.width, box.height);
+    canvas
+      .getContext("2d")
+      .drawImage(
+        original,
+        box.left,
+        box.top,
+        box.width,
+        box.height,
+        0,
+        0,
+        box.width,
+        box.height,
+      );
+    pictures.push({
+      ...source,
+      id: source.id + ":" + panel.label,
+      image: canvas.toDataURL("image/png"),
+    });
   }
   // Existing single whole-image behavior remains exact when no crop is available.
   return pptImagePacket(pictures, 16);

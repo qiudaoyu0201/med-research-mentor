@@ -172,11 +172,30 @@ export function clearPanelBoundaries(
   return true;
 }
 
+// Keep the selection schema and visual board on the same bounded set.
+// A region not shown individually must not be selected from its position ID.
+export function pptSelectionCandidates(sources: Source[]) {
+  const originals = sources.filter((s) => s.image).slice(0, 8);
+  const panels = originals.map((s) =>
+    (s.imagePanels ?? []).filter((p) => validRegion(p.region)),
+  );
+  const candidates: { source: Source; panel: FigurePanel }[] = [];
+  for (let position = 0; candidates.length < 8; position++) {
+    let found = false;
+    for (const [index, source] of originals.entries()) {
+      const panel = panels[index][position];
+      if (!panel || candidates.length === 8) continue;
+      found = true;
+      candidates.push({ source, panel });
+    }
+    if (!found) break;
+  }
+  return candidates;
+}
+
 export function panelSelectionIds(sources: Source[]) {
-  return sources.flatMap((s) =>
-    ((s.image && s.imagePanels) || [])
-      .filter((p) => validRegion(p.region))
-      .map((p) => s.id + ":" + p.label),
+  return pptSelectionCandidates(sources).map(
+    ({ source, panel }) => source.id + ":" + panel.label,
   );
 }
 // Model selects an existing region ID. Coordinates come from printed PDF labels

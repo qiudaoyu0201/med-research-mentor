@@ -1,7 +1,10 @@
 import test from "node:test";
 import assert from "node:assert/strict";
 import { createCanvas } from "@napi-rs/canvas";
-import { rasterFigureBands } from "../server/raster-figure-bands.ts";
+import {
+  rasterFigureBands,
+  rasterFigureRegions,
+} from "../server/raster-figure-bands.ts";
 import {
   clearPanelBoundaries,
   applyDeckPanels,
@@ -100,4 +103,112 @@ test("blank, small, wide or continuous raster figures retain the full image", ()
   assert.deepEqual(rasterFigureBands(tiny.getContext("2d"), 300, 600), []);
   const wide = createCanvas(1000, 400);
   assert.deepEqual(rasterFigureBands(wide.getContext("2d"), 1000, 400), []);
+});
+
+test("raster column choices retain complete plots and attached risk rows while keeping full-row fallback", () => {
+  const { ctx } = figure();
+  const regions = rasterFigureRegions(ctx, 800, 1500);
+  assert.deepEqual(
+    regions.map((p) => p.label),
+    [
+      "band-1",
+      "band-2",
+      "band-3",
+      "band-1-col-1",
+      "band-1-col-2",
+      "band-2-col-1",
+      "band-2-col-2",
+      "band-3-col-1",
+      "band-3-col-2",
+    ],
+  );
+  assert.equal(clearPanelBoundaries(ctx, 800, 1500, regions), true);
+  for (let n = 1; n <= 3; n++) {
+    const row = regions.find((p) => p.label === "band-" + n)!;
+    const cells = regions.filter((p) =>
+      p.label.startsWith("band-" + n + "-col-"),
+    );
+    assert.equal(cells[0].region.left, 0);
+    assert.equal(cells.at(-1)!.region.left + cells.at(-1)!.region.width, 1);
+    assert.ok(
+      cells.every(
+        (p) =>
+          p.region.top === row.region.top &&
+          p.region.height === row.region.height,
+      ),
+    );
+    assert.equal(
+      cells[0].region.left + cells[0].region.width,
+      cells[1].region.left,
+    );
+  }
+  const source: Source = {
+    id: "grid",
+    kind: "paper",
+    title: "Figure 2",
+    text: "Paired plots",
+    locator: "PDF p.9",
+    verified: false,
+    image: ctx.canvas.toDataURL("image/png"),
+    imagePanels: regions,
+  };
+  const selected = groundedTeachingSchema([source])
+    .shape.deck.unwrap()
+    .shape.slides.parse([
+      {
+        title: "目标比较",
+        bullets: ["完整的曲线及风险人数"],
+        notes: "按轴和图例比较",
+        citations: [source.id],
+        imageSource: source.id,
+        imagePanel: "grid:band-2-col-2",
+      },
+    ]);
+  const deck = { slides: selected } as DeckOutline;
+  const before = structuredClone(source);
+  applyDeckPanels(deck, [source]);
+  assert.deepEqual(
+    deck.slides[0].imageCrop,
+    regions.find((p) => p.label === "band-2-col-2")!.region,
+  );
+  assert.deepEqual(source, before);
+  assert.equal("imagePanel" in deck.slides[0], false);
+});
+
+test("raster columns reject even faint connectors and narrow label gaps, and support wide paired plots", () => {
+  const { ctx } = figure();
+  ctx.fillStyle = "#eeeeee";
+  ctx.fillRect(380, 20, 40, 4);
+  const regions = rasterFigureRegions(ctx, 800, 1500);
+  assert.equal(
+    regions.some((p) => p.label.startsWith("band-1-col-")),
+    false,
+  );
+  assert.equal(
+    regions.some((p) => p.label.startsWith("band-2-col-")),
+    true,
+  );
+  const wide = createCanvas(1000, 400),
+    w = wide.getContext("2d");
+  w.fillStyle = "white";
+  w.fillRect(0, 0, 1000, 400);
+  w.fillStyle = "black";
+  w.fillRect(10, 20, 15, 300); // detached y label, not its own panel
+  w.fillRect(45, 20, 400, 300);
+  w.fillRect(550, 20, 420, 300);
+  w.fillRect(45, 345, 400, 45);
+  w.fillRect(550, 345, 420, 45);
+  const cells = rasterFigureRegions(w, 1000, 400);
+  assert.deepEqual(
+    cells.map((p) => p.label),
+    ["band-1-col-1", "band-1-col-2"],
+  );
+  assert.equal(cells[0].region.left, 0);
+  assert.equal(cells[0].region.top, 0);
+  assert.equal(cells[0].region.height, 1);
+  assert.ok(cells[0].region.width > 0.445 && cells[0].region.width < 0.55);
+  assert.equal(clearPanelBoundaries(w, 1000, 400, cells), true);
+  w.fillStyle = "#ffb4b4";
+  w.fillRect(440, 50, 120, 2);
+  assert.deepEqual(rasterFigureRegions(w, 1000, 400), []);
 });

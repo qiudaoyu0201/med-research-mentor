@@ -275,3 +275,20 @@ test("raster-style plots separated by clear horizontal gutters expose spatial ba
   assert.equal(bands[0].region.top, 0);
   assert.equal(bands[1].region.top + bands[1].region.height, 1);
 });
+
+test("raster columns expose whole-height paired plots through the PDF extraction path", async () => {
+  const result = await extract(
+    text("F1", 36, 100, "Figure 6. Paired complete plots."),
+    "90 220 170 250 re\n320 220 170 250 re f",
+  );
+  assert.equal(result.sources.length, 1);
+  const regions = result.sources[0].imagePanels!;
+  assert.deepEqual(
+    regions.map((p) => p.label),
+    ["band-1-col-1", "band-1-col-2"],
+  );
+  assert.equal(regions[0].region.left, 0);
+  assert.equal(regions[1].region.left + regions[1].region.width, 1);
+  assert.equal(regions[0].region.width, regions[1].region.left);
+  assert.ok(regions.every((p) => p.region.top === 0 && p.region.height === 1));
+});

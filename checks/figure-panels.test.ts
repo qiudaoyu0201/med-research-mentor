@@ -5,6 +5,7 @@ import {
   figurePanels,
   clearPanelBoundaries,
   applyDeckPanels,
+  panelSelectionIds,
 } from "../server/figure-panels.ts";
 import { groundedTeachingSchema } from "../server/schemas.ts";
 import {
@@ -272,4 +273,42 @@ test("candidate pictures do not displace whole originals and total board size st
   assert.equal(board.width, 1800);
   assert.equal(board.height, 620 * 8);
   assert.equal(await pptSelectionImagePacket([]), undefined);
+});
+
+test("grounded crop selection rejects candidates outside the actual visual board", () => {
+  const s = source();
+  const many = Array.from({ length: 10 }, (_, i) => ({
+    ...s,
+    id: "figure-" + i,
+    imagePanels: Array.from({ length: 8 }, (_, j) => ({
+      ...s.imagePanels![0],
+      label: String.fromCharCode(97 + j),
+    })),
+  }));
+  const before = structuredClone(many);
+  assert.deepEqual(
+    panelSelectionIds(many),
+    many.slice(0, 8).map((s) => s.id + ":a"),
+  );
+  const slides = groundedTeachingSchema(many).shape.deck.unwrap().shape.slides;
+  slides.parse(
+    deck({
+      imageSource: "figure-7",
+      imagePanel: "figure-7:a",
+      citations: ["figure-7"],
+    }).slides,
+  );
+  for (const id of ["figure-0:b", "figure-8:a"]) {
+    assert.throws(() =>
+      slides.parse(
+        deck({
+          imageSource: id.split(":")[0],
+          citations: [id.split(":")[0]],
+          imagePanel: id,
+        }).slides,
+      ),
+    );
+  }
+  assert.deepEqual(many, before);
+  assert.deepEqual(panelSelectionIds([s]), ["figure:a"]);
 });

@@ -1,5 +1,5 @@
 import type { SKRSContext2D } from "@napi-rs/canvas";
-import type { FigurePanel } from "../shared/image-region.ts";
+import { cropPixels, type FigurePanel } from "../shared/image-region.ts";
 
 // Full-width spatial groups for raster figures without reliable PDF panel labels.
 // These groups do not identify scientific panels. Every original row is retained.
@@ -66,4 +66,90 @@ export function rasterFigureBands(
       height: (bounds[i + 1] - top) / height,
     },
   }));
+}
+
+// Optional full-height columns within a spatial row. These are not scientific
+// panel identities: preserve the row choice and every original pixel, including
+// axes, labels and attached risk tables. A non-white connector blocks its gutter.
+export function rasterFigureRegions(
+  ctx: SKRSContext2D,
+  width: number,
+  height: number,
+): FigurePanel[] {
+  if (width < 400 || height < 180) return [];
+  const bands = rasterFigureBands(ctx, width, height);
+  const rows: FigurePanel[] = bands.length
+    ? bands
+    : [
+        {
+          label: "band-1",
+          region: { left: 0, top: 0, width: 1, height: 1 },
+        },
+      ];
+  const columns: FigurePanel[] = [];
+  for (const row of rows) {
+    const b = cropPixels(row.region, width, height);
+    const pixels = ctx.getImageData(b.left, b.top, b.width, b.height).data;
+    const inkColumns = new Uint32Array(b.width);
+    const gaps: { middle: number; size: number }[] = [];
+    let start = -1;
+    for (let x = 0; x <= b.width; x++) {
+      let clear = x < b.width;
+      for (let y = 0; x < b.width && y < b.height; y++) {
+        const i = (y * b.width + x) * 4;
+        if (
+          pixels[i + 3] > 32 &&
+          Math.min(pixels[i], pixels[i + 1], pixels[i + 2]) < 245
+        ) {
+          clear = false;
+          inkColumns[x]++;
+        }
+      }
+      if (clear && start < 0) start = x;
+      if (!clear && start >= 0) {
+        // A thin strip between a y label and its axis is not a panel gutter.
+        if (x - start >= Math.max(24, b.width * 0.012))
+          gaps.push({ middle: Math.floor((start + x) / 2), size: x - start });
+        start = -1;
+      }
+    }
+    const minimum = Math.max(160, b.width * 0.24);
+    const cuts: number[] = [];
+    for (const gap of gaps.sort((a, b) => b.size - a.size)) {
+      if (
+        gap.middle < minimum ||
+        b.width - gap.middle < minimum ||
+        cuts.some((cut) => Math.abs(cut - gap.middle) < minimum)
+      )
+        continue;
+      cuts.push(gap.middle);
+      if (cuts.length === 2) break;
+    }
+    if (!cuts.length) continue;
+    const bounds = [0, ...cuts.sort((a, b) => a - b), b.width];
+    if (
+      bounds
+        .slice(0, -1)
+        .some(
+          (left, i) =>
+            inkColumns
+              .slice(left, bounds[i + 1])
+              .reduce((sum, n) => sum + n, 0) <
+            b.height * 0.1,
+        )
+    )
+      continue;
+    bounds.slice(0, -1).forEach((left, i) =>
+      columns.push({
+        label: row.label + "-col-" + (i + 1),
+        region: {
+          left: left / width,
+          top: row.region.top,
+          width: (bounds[i + 1] - left) / width,
+          height: row.region.height,
+        },
+      }),
+    );
+  }
+  return [...bands, ...columns];
 }

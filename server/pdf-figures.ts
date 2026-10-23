@@ -2,7 +2,7 @@ import { OPS, Util, type PDFPageProxy } from "pdfjs-dist/legacy/build/pdf.mjs";
 import { createCanvas } from "@napi-rs/canvas";
 import type { Source } from "../shared/types.ts";
 import { figurePanels, clearPanelBoundaries } from "./figure-panels.ts";
-import { rasterFigureBands } from "./raster-figure-bands.ts";
+import { rasterFigureRegions } from "./raster-figure-bands.ts";
 import type { ImageRegion } from "../shared/image-region.ts";
 
 type Box = { left: number; top: number; right: number; bottom: number };
@@ -281,7 +281,7 @@ export async function pageFigures(
     );
     const candidates = panels.length
       ? panels
-      : rasterFigureBands(crop.getContext("2d"), w, h);
+      : rasterFigureRegions(crop.getContext("2d"), w, h);
     const imagePanels = clearPanelBoundaries(
       crop.getContext("2d"),
       w,
