@@ -782,3 +782,117 @@ test("four-column clinical tables fit bold headers and retain complete intervals
     assert.ok(cell.y + cell.h < 6.7);
   });
 });
+
+test("paired calibration panels gain space without changing captions or shrinking their text", async () => {
+  const bullets = [
+    "医院1：原模型总体高估风险；更新后校准关系更接近理想对角线",
+    "预测概率向低值移动，排序保持不变；高风险部分仍有偏离与较宽误差线",
+  ];
+  const figure = createCanvas(1410, 697);
+  const localPaper = {
+    ...paper,
+    sources: paper.sources.map((s) =>
+      s.id === "xu-fig1" ? { ...s, image: figure.toDataURL("image/png") } : s,
+    ),
+  };
+  const slide = { ...compact.slides[0], bullets };
+  const layout = slideLayout(slide, localPaper.sources, {
+    width: 1410,
+    height: 697,
+  });
+  assert.equal(layout.composition, "evidence-wide");
+  assert.ok(layout.image!.w >= 7.95 * 1.05);
+  assert.ok(Math.abs(layout.image!.w / layout.image!.h - 1410 / 697) < 1e-9);
+  const captions = layout.text.filter((b) => b.role === "bullet");
+  assert.deepEqual(
+    captions.map((b) => b.lines.join("")),
+    bullets,
+  );
+  assert.ok(
+    captions.every(
+      (b) =>
+        b.fontSize === 20 &&
+        b.y >= layout.image!.y + layout.image!.h + 0.2 &&
+        b.y + b.h <= 6.68 + 1e-9,
+    ),
+  );
+  const deck = { slides: [slide] };
+  const output = await exportDeck(
+    deck,
+    localPaper,
+    "paired-panel-space-" + randomUUID(),
+  );
+  const guidancePath = output.replace(/\.pptx$/, "-guidance.md");
+  try {
+    await writeFile(guidancePath, trainingGuidance(deck));
+    const xml = strFromU8(
+      unzipSync(await readFile(output))["ppt/slides/slide1.xml"],
+    );
+    const pic = /<p:pic\b[\s\S]*?<\/p:pic>/.exec(xml)![0];
+    const width = Number(/<a:ext\b[^>]*cx="(\d+)"/.exec(pic)![1]);
+    assert.ok(Math.abs(width / 914400 - layout.image!.w) < 1e-5);
+    assert.equal(
+      (
+        await verifyTrainingDeliveryFiles(
+          {
+            id: "paired-panels",
+            side: "candidate",
+            status: "generated",
+            exportPath: output,
+            artifact: { deck },
+            delivery: { version: "separate-guidance-v1", guidancePath },
+          },
+          localPaper,
+        )
+      ).slides,
+      1,
+    );
+  } finally {
+    await unlink(output);
+    await unlink(guidancePath).catch(() => {});
+  }
+});
+
+test("Latin row labels stay whole beside long mixed-language headers", () => {
+  const rows = [
+    "医院 | 原模型：低风险阈值；敏感度（95% CI） | 本地更新后：低风险阈值；敏感度（95% CI）",
+    "Mbagathi | 0.08；93%（89%–96%） | 0.026；90%（86%–93%）",
+    "Kiambu | 阈值未报告；81%（74%–88%） | 0.020；84%（77%–90%）",
+  ];
+  const layout = slideLayout(
+    {
+      title: "本地概率阈值与分类表现",
+      bullets: rows,
+      notes: "回归排版用例",
+      citations: [paper.sources[0].id],
+      layout: "table",
+    },
+    paper.sources,
+  );
+  const cells = layout.text.filter((box) => box.role === "bullet");
+  assert.deepEqual(cells[3].lines, ["Mbagathi"]);
+  assert.deepEqual(cells[6].lines, ["Kiambu"]);
+  assert.deepEqual(
+    cells.map((box) => box.lines.join("").replace(/\s/g, "")),
+    rows.flatMap((row) =>
+      row.split("|").map((cell) => cell.replace(/\s/g, "")),
+    ),
+  );
+  const context = createCanvas(1, 1).getContext("2d");
+  for (const cell of cells) {
+    assert.equal(cell.fontSize, 23);
+    context.font =
+      (cell.bold ? "bold " : "") + cell.fontSize + "pt Microsoft YaHei";
+    for (const line of cell.lines)
+      assert.ok(
+        context.measureText(line).width <= cell.w * 96,
+        "Clipped cell: " + line,
+      );
+    assert.ok(cell.y + cell.h <= 6.7);
+  }
+  assert.ok(
+    cells.every(
+      (cell, i) => i % 3 === 0 || cell.x >= cells[i - 1].x + cells[i - 1].w,
+    ),
+  );
+});

@@ -242,7 +242,7 @@ export function slideLayout(
     );
     if (
       blocks.every((block) => block.lines.length <= 4) &&
-      scale >= previousScale * 1.12
+      scale >= previousScale * 1.05
     ) {
       const w = imageSize.width * scale,
         h = imageSize.height * scale;
@@ -336,7 +336,51 @@ export function slideLayout(
       widths =
         spare >= 0
           ? naturalWidths.map((width) => width + spare / columns)
-          : proportionalWidths;
+          : [...proportionalWidths];
+      if (spare < 0) {
+        // Keep Latin names and identifiers whole where the table has room.
+        // Long prose headers may wrap; they must not starve short row labels.
+        const minimumWidths = rows[0].map((_, col) =>
+          Math.max(
+            1.1,
+            (Math.max(
+              0,
+              ...rows.flatMap((row, index) =>
+                (row[col].match(/[A-Za-z][A-Za-z0-9_./+-]*/g) ?? []).map(
+                  (word) =>
+                    word.length * (index === 0 || col === 0 ? 0.7 : 0.62),
+                ),
+              ),
+            ) *
+              fontSize) /
+              (72 * 0.95) +
+              0.325,
+          ),
+        );
+        if (minimumWidths.reduce((sum, width) => sum + width, 0) <= 11.9) {
+          const flexible = new Set(weights.map((_, col) => col));
+          let available = 11.9;
+          while (flexible.size) {
+            const weight = [...flexible].reduce(
+              (sum, col) => sum + weights[col],
+              0,
+            );
+            const constrained = [...flexible].filter(
+              (col) => (available * weights[col]) / weight < minimumWidths[col],
+            );
+            if (!constrained.length) {
+              for (const col of flexible)
+                widths[col] = (available * weights[col]) / weight;
+              break;
+            }
+            for (const col of constrained) {
+              widths[col] = minimumWidths[col];
+              available -= widths[col];
+              flexible.delete(col);
+            }
+          }
+        }
+      }
       return rows.map((row, index) =>
         row.map((cell, col) =>
           wrapSlideText(
