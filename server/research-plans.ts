@@ -1186,10 +1186,15 @@ export class ResearchPlans {
         `设计理由：${s.rationale}`,
         ...(s.unknowns.length ? [`待确认：${s.unknowns.join("；")}`] : []),
       ]),
-      "## 假设与待确认",
-      ...new Set([...v.content.assumptions, ...v.content.questions]),
-      "## 研究局限",
-      ...new Set(v.content.limitations),
+      ...(v.content.assumptions.length || v.content.questions.length
+        ? [
+            "## 假设与待确认",
+            ...new Set([...v.content.assumptions, ...v.content.questions]),
+          ]
+        : []),
+      ...(v.content.limitations.length
+        ? ["## 研究局限", ...new Set(v.content.limitations)]
+        : []),
       "## 来源",
       ...(refs.length
         ? refs.flatMap(({ source: r, location }, i) => [

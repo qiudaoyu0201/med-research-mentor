@@ -106,12 +106,20 @@ export function planDocx(
           ? paragraph(`待确认：${s.unknowns.join("；")}`)
           : ""),
     ),
-    paragraph("假设与待确认", "Heading1"),
-    ...[...new Set([...v.content.assumptions, ...v.content.questions])].map(
-      (s) => paragraph(s),
-    ),
-    paragraph("研究局限", "Heading1"),
-    ...[...new Set(v.content.limitations)].map((s) => paragraph(s)),
+    ...(v.content.assumptions.length || v.content.questions.length
+      ? [
+          paragraph("假设与待确认", "Heading1"),
+          ...[...new Set([...v.content.assumptions, ...v.content.questions])].map(
+            (s) => paragraph(s),
+          ),
+        ]
+      : []),
+    ...(v.content.limitations.length
+      ? [
+          paragraph("研究局限", "Heading1"),
+          ...[...new Set(v.content.limitations)].map((s) => paragraph(s)),
+        ]
+      : []),
     paragraph("参考文献", "Heading1"),
     source ||
       paragraph(

@@ -1203,3 +1203,54 @@ test("plan exports share a paper citation across frozen excerpts while retaining
     "export must not rewrite saved section source bindings",
   );
 });
+
+test("plan exports omit empty optional sections and preserve nonempty saved content", async () => {
+  for (const [assumptions, questions, limitations] of [
+    [[], [], []],
+    [["新增设计假设"], [], []],
+    [[], ["需导师选择的取舍"], []],
+    [[], [], ["尚未交代的解释边界"]],
+  ]) {
+    const draft = {
+      ...structuredClone(content),
+      assumptions,
+      questions,
+      limitations,
+    };
+    const h = harness([draft, review]);
+    const p = await h.store.create(topic);
+    const j = await h.store.start(p.id, input(p, { maxCalls: 2 }));
+    const done = await h.store.wait(j.id);
+    assert.equal(done.status, "completed", done.error);
+    const before = h.store.get(p.id);
+    const id = before.currentVersion!;
+    const md = h.store.exportMarkdown(p.id, id);
+    const doc = strFromU8(
+      unzipSync(h.store.exportDocx(p.id, id))["word/document.xml"],
+    );
+    assert.equal(
+      md.includes("## 假设与待确认"),
+      Boolean(assumptions.length || questions.length),
+    );
+    assert.equal(
+      doc.includes(">假设与待确认<"),
+      Boolean(assumptions.length || questions.length),
+    );
+    assert.equal(md.includes("## 研究局限"), Boolean(limitations.length));
+    assert.equal(doc.includes(">研究局限<"), Boolean(limitations.length));
+    for (const text of [md, doc]) {
+      for (const item of [...assumptions, ...questions, ...limitations])
+        assert.ok(text.includes(item));
+      assert.ok(text.includes(content.sections[0].text));
+      assert.ok(
+        text.includes("对象待确认"),
+        "section-level unknowns must remain",
+      );
+    }
+    assert.deepEqual(
+      h.store.get(p.id),
+      before,
+      "export must not alter saved versions",
+    );
+  }
+});
