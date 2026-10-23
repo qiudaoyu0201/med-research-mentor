@@ -149,7 +149,7 @@ export interface Slide {
   citations: string[];
   imageSource?: string;
   imageCrop?: import("./image-region.ts").ImageRegion;
-  layout?: "auto" | "flow" | "comparison" | "spotlight";
+  layout?: "auto" | "flow" | "comparison" | "spotlight" | "table";
 }
 export interface DeckOutline {
   slides: Slide[];

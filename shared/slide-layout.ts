@@ -266,9 +266,112 @@ export function slideLayout(
   const requested = slide.layout ?? "auto";
   if (requested !== "auto" && hasImage)
     throw new Error(
-      "流程、对照或重点版式与原图页应分开，请为本页保留一种主要表达。",
+      "流程、对照、重点或表格版式与原图页应分开，请为本页保留一种主要表达。",
     );
-  if (requested === "flow" || requested === "comparison") {
+  if (requested === "table") {
+    // Rows are explicit model-authored cells. Never infer values from prose or
+    // fill a short row: a missing measure must be stated by its author.
+    const rows = slide.bullets.map((row) =>
+      row.split("|").map((cell) => cell.trim()),
+    );
+    const columns = rows[0]?.length ?? 0;
+    if (
+      count < 2 ||
+      count > 5 ||
+      columns < 2 ||
+      columns > 4 ||
+      rows.some(
+        (row) =>
+          row.length !== columns ||
+          row.some((cell) => !cell || /^:?-{3,}:?$/.test(cell)),
+      )
+    )
+      throw new Error(
+        "表格需要表头及一至四行数据，每行二至四个非空单元格，以 | 分隔；不添加Markdown分隔行，缺失指标须明确标注。",
+      );
+    composition = "table";
+    const units = (value: string) =>
+      [...value].reduce((n, c) => n + (/[\x00-\x7f]/.test(c) ? 0.62 : 1), 0);
+    const weights = rows[0].map((_, col) =>
+      Math.max(
+        6,
+        Math.min(24, Math.max(...rows.map((row) => units(row[col])))),
+      ),
+    );
+    // Reserve more space for the longest label/value in each column, with a
+    // bounded weight so one long condition cannot starve the other measures.
+    const totalWeight = weights.reduce((sum, weight) => sum + weight, 0);
+    const widths = weights.map((weight) => (11.9 * weight) / totalWeight);
+    let fontSize = 23;
+    const measure = () =>
+      rows.map((row) =>
+        row.map((cell, col) =>
+          wrapSlideText(cell, widths[col] - 0.32, fontSize),
+        ),
+      );
+    let blocks = measure();
+    const heights = () =>
+      blocks.map((row) =>
+        Math.max(
+          0.74,
+          (Math.max(...row.map((lines) => lines.length)) *
+            fontSize *
+            slideLineHeight) /
+            72 +
+            0.32,
+        ),
+      );
+    let rowHeights = heights();
+    while (rowHeights.reduce((sum, h) => sum + h, 0) > 4.9 && fontSize > 20) {
+      fontSize--;
+      blocks = measure();
+      rowHeights = heights();
+    }
+    const totalHeight = rowHeights.reduce((sum, h) => sum + h, 0);
+    if (totalHeight > 4.9)
+      throw new Error(
+        "表格过密，请取舍指标或拆页；不能缩小字号或删除关键区间来容纳。",
+      );
+    let y = 1.65 + (4.98 - totalHeight) / 2;
+    rows.forEach((row, index) => {
+      const h = rowHeights[index];
+      shapes.push({
+        x: 0.72,
+        y,
+        w: 11.9,
+        h,
+        fill: index === 0 ? "12384A" : index % 2 ? "EDF4F3" : "FFFFFF",
+      });
+      let x = 0.72;
+      row.forEach((_, col) => {
+        const lines = blocks[index][col];
+        const textHeight =
+          (lines.length * fontSize * slideLineHeight) / 72 + 0.09;
+        customText.push({
+          x: x + 0.16,
+          y: y + 0.12,
+          w: widths[col] - 0.32,
+          h: textHeight,
+          fontSize,
+          lines,
+          color: index === 0 ? "FFFFFF" : "26384A",
+          bold: index === 0 || col === 0,
+          role: "bullet",
+          sourceIndex: index,
+        });
+        x += widths[col];
+      });
+      shapes.push({
+        x: 0.72,
+        y: y + h - 0.012,
+        w: 11.9,
+        h: 0.012,
+        fill: "DCE7E5",
+      });
+      y += h;
+    });
+    custom = true;
+  } else if (requested === "flow" || requested === "comparison") {
     const flow = requested === "flow";
     if ((flow && (count < 2 || count > 4)) || (!flow && count !== 2))
       throw new Error(

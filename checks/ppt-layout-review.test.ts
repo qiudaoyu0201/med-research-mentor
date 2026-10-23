@@ -574,3 +574,141 @@ test("long ordered procedures use wide rows without rewriting or dropping any st
     /过密/,
   );
 });
+
+test("numeric comparison tables preserve every cell, align columns and export editable text", async () => {
+  const { deckSchema } = await import("../server/schemas.ts");
+  const rows = [
+    "阈值（pg/mL） | 敏感度（95% CI） | 特异度（95% CI）",
+    "125 | 98.8%（98.5–99.1） | 13.2%（12.6–13.7）",
+    "400 | 93.2%（92.4–93.9） | 35.5%（34.7–36.3）",
+  ];
+  const parsed = deckSchema.parse({
+    slides: [
+      {
+        title: "提高阈值的检出与误报取舍",
+        bullets: rows,
+        notes: "完整讲述提示另行交付",
+        citations: [paper.sources[0].id],
+        layout: "table",
+      },
+    ],
+  });
+  const layout = slideLayout(parsed.slides[0], paper.sources);
+  assert.equal(layout.composition, "table");
+  const cells = layout.text.filter((box) => box.role === "bullet");
+  assert.equal(cells.length, 9);
+  assert.deepEqual(
+    cells.map((box) => box.lines.join("")),
+    rows.flatMap((row) => row.split("|").map((cell) => cell.trim())),
+  );
+  for (let row = 0; row < 3; row++) {
+    const group = cells.slice(row * 3, row * 3 + 3);
+    assert.equal(new Set(group.map((box) => box.y)).size, 1);
+    assert.ok(
+      group.every(
+        (box) =>
+          box.fontSize >= 20 && box.x + box.w < 13 && box.y + box.h < 6.7,
+      ),
+    );
+    if (row)
+      assert.ok(group[0].y >= cells[(row - 1) * 3].y + cells[(row - 1) * 3].h);
+    group.forEach((box, col) => assert.equal(box.x, cells[col].x));
+  }
+  assert.equal(
+    layout.shapes.some((shape) => shape.kind === "chevron"),
+    false,
+  );
+  const output = await exportDeck(
+    parsed,
+    paper,
+    "table-regression-" + randomUUID(),
+  );
+  try {
+    const zip = unzipSync(await readFile(output));
+    const xml = strFromU8(zip["ppt/slides/slide1.xml"]);
+    assert.equal(xml.includes("完整讲述提示另行交付"), false);
+    for (const cell of rows.flatMap((row) =>
+      row.split("|").map((value) => value.trim()),
+    ))
+      assert.ok(
+        xml
+          .replace(/<[^>]+>/g, "")
+          .replace(/\s/g, "")
+          .includes(cell.replace(/\s/g, "")),
+      );
+    assert.equal((xml.match(/<p:pic>/g) ?? []).length, 0);
+    const guidancePath = output.replace(/\.pptx$/, ".md");
+    await writeFile(guidancePath, trainingGuidance(parsed));
+    try {
+      await verifyTrainingDeliveryFiles(
+        {
+          id: "table",
+          side: "candidate",
+          status: "generated",
+          artifact: { deck: parsed },
+          exportPath: output,
+          delivery: { version: "separate-guidance-v1", guidancePath },
+        },
+        paper,
+      );
+    } finally {
+      await unlink(guidancePath);
+    }
+  } finally {
+    await unlink(output);
+  }
+});
+
+test("tables reject missing cells, separator rows and excessive density rather than fabricate or hide values", () => {
+  const slide = {
+    title: "同指标比较",
+    bullets: ["阈值 | 敏感度", "125 | 98.8%", "400 | 93.2%"],
+    notes: "提示",
+    citations: [paper.sources[0].id],
+    layout: "table" as const,
+  };
+  for (const bullets of [
+    ["阈值 | 敏感度", "125"],
+    ["阈值 | 敏感度", "125 | "],
+    ["阈值 | 敏感度", "--- | ---", "125 | 98.8%"],
+    ["单列", "125"],
+  ])
+    assert.throws(
+      () => slideLayout({ ...slide, bullets }, paper.sources),
+      /表格/,
+    );
+  assert.throws(
+    () => slideLayout(slide, paper.sources, { width: 800, height: 500 }),
+    /原图/,
+  );
+  assert.throws(
+    () =>
+      slideLayout(
+        {
+          ...slide,
+          bullets: [
+            "阈值 | 条件",
+            ...Array.from(
+              { length: 4 },
+              () => "125 | " + "不可省略的条件".repeat(20),
+            ),
+          ],
+        },
+        paper.sources,
+      ),
+    /过密/,
+  );
+  const unknown = slideLayout(
+    { ...slide, bullets: ["阈值 | 区间", "660 | 未报告"] },
+    paper.sources,
+  );
+  assert.equal(
+    unknown.text
+      .filter((box) => box.role === "bullet")
+      .at(-1)
+      ?.lines.join(""),
+    "未报告",
+  );
+  const ordinary = slideLayout({ ...slide, layout: "auto" }, paper.sources);
+  assert.notEqual(ordinary.composition, "table");
+});
