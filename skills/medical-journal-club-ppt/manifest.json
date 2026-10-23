@@ -1,7 +1,7 @@
 {
   "id": "medical-journal-club-ppt",
   "title": "汇报大纲",
-  "version": "1.4.29",
+  "version": "1.4.32",
   "dependencies": [
     "shared"
   ],

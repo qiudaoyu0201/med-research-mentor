@@ -8,6 +8,7 @@ import { unzipSync, strFromU8 } from "fflate";
 import type { PlanContent, ResearchPlan } from "../shared/research-plan.ts";
 import type { PaperBundle } from "../shared/types.ts";
 import type { PlanJobInput } from "../server/research-plan-schemas.ts";
+import { planContentSchema } from "../server/research-plan-schemas.ts";
 const content = {
   title: "测量与对照草案",
   sections: [
@@ -1252,5 +1253,52 @@ test("plan exports omit empty optional sections and preserve nonempty saved cont
       before,
       "export must not alter saved versions",
     );
+  }
+});
+
+test("plan rationale may be empty when reasoning is in the body, and survives save, restore and export", async () => {
+  const draft = structuredClone(content);
+  draft.sections[0].text =
+    "拟按患者汇总测量，因为同一患者的多次读数并非独立样本。";
+  draft.sections[0].rationale = "   ";
+  const h = harness([draft, review]);
+  const p = await h.store.create(topic);
+  const job = await h.store.start(p.id, input(p, { maxCalls: 2 }));
+  const done = await h.store.wait(job.id);
+  assert.equal(done.status, "completed", done.error);
+  const saved = h.store.get(p.id);
+  const version = saved.versions.at(-1)!;
+  assert.equal(version.content.sections[0].rationale, "");
+  assert.equal(
+    version.content.sections[1].rationale,
+    content.sections[1].rationale,
+  );
+  const restored = harness();
+  await restored.store.restore(
+    [saved],
+    [...h.records.entries()]
+      .filter(([key]) => key.startsWith("research-plan-jobs/"))
+      .map(([, value]) => value),
+  );
+  for (const store of [h.store, restored.store]) {
+    const before = store.get(p.id);
+    const md = store.exportMarkdown(p.id, version.id);
+    const doc = strFromU8(
+      unzipSync(store.exportDocx(p.id, version.id))["word/document.xml"],
+    );
+    for (const text of [md, doc]) {
+      assert.equal((text.match(/设计理由：/g) ?? []).length, 1);
+      assert.ok(text.includes(draft.sections[0].text));
+      assert.ok(text.includes(content.sections[1].rationale));
+      assert.ok(text.includes("对象待确认"));
+    }
+    assert.deepEqual(store.get(p.id), before);
+  }
+  const parsed = planContentSchema.parse(draft);
+  assert.equal(parsed.sections[0].rationale, "");
+  for (const invalid of [undefined, null, "x".repeat(3001)]) {
+    const broken = structuredClone(draft) as any;
+    broken.sections[0].rationale = invalid;
+    assert.equal(planContentSchema.safeParse(broken).success, false);
   }
 });

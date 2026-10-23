@@ -1183,7 +1183,7 @@ export class ResearchPlans {
       ...v.content.sections.flatMap((s) => [
         `## ${s.title}`,
         `${s.kind === "hypothesis" ? "待验证假设：" : s.kind === "possible-result" ? "可能出现的结果（尚未观察到）：" : ""}${s.text}${s.sourceRefs.length ? `${s.text.trimEnd().endsWith("|") ? "\n\n" : " "}${citation(s.sourceRefs)}` : ""}`,
-        `设计理由：${s.rationale}`,
+        ...(s.rationale ? [`设计理由：${s.rationale}`] : []),
         ...(s.unknowns.length ? [`待确认：${s.unknowns.join("；")}`] : []),
       ]),
       ...(v.content.assumptions.length || v.content.questions.length

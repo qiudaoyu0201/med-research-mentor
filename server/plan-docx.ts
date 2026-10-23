@@ -101,7 +101,7 @@ export function planDocx(
         body(
           `${s.kind === "hypothesis" ? "待验证假设：" : s.kind === "possible-result" ? "可能结果（尚未观察到）：" : ""}${s.text}${s.sourceRefs.length ? `${s.text.trimEnd().endsWith("|") ? "\n" : " "}${cite(s.sourceRefs)}` : ""}`,
         ) +
-        paragraph(`设计理由：${s.rationale}`) +
+        (s.rationale ? paragraph(`设计理由：${s.rationale}`) : "") +
         (s.unknowns.length
           ? paragraph(`待确认：${s.unknowns.join("；")}`)
           : ""),

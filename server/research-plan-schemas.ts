@@ -57,7 +57,7 @@ export const sectionSchema = z
     id: researchId,
     title: text(160),
     text: text(6000),
-    rationale: text(3000),
+    rationale: z.string().trim().max(3000),
     kind: z.enum(["proposal", "hypothesis", "source-fact", "possible-result"]),
     sourceRefs: z.array(researchId).max(12),
     unknowns: z.array(text(500)).max(10),
