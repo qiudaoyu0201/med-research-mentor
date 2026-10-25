@@ -2,7 +2,7 @@ import { slideLayout } from "../shared/slide-layout.ts";
 import type { DeckOutline, ReviewResult, Source } from "../shared/types.ts";
 
 export const pptLayoutContractVersion =
-  "ppt-layout-v10-explicit-comparison-table";
+  "ppt-layout-v11-scientific-table-widths";
 
 const layoutId = (index: number) => `ppt-layout-${index + 1}`;
 

@@ -896,3 +896,86 @@ test("Latin row labels stay whole beside long mixed-language headers", () => {
     ),
   );
 });
+
+test("comparison tables keep numerical confidence intervals together beside long headers", () => {
+  const rows = [
+    "结局与时间窗 | 试验数；事件/分析人数（二甲双胍 vs 安慰剂） | 风险比RR（95% CI） | 证据确定性与判断",
+    "死亡，28天 | 2项；8/811 vs 10/804 | 0.76（0.30–1.90） | 低；可能几乎无影响",
+    "因COVID-19住院，28天 | 2项；42/811 vs 47/804 | 0.74（0.28–1.95） | 极低；效果不确定",
+    "长新冠，300天 | 1项；35/564 vs 58/562 | 0.60（0.40–0.90） | 低；可能减少发生",
+  ];
+  const layout = slideLayout(
+    {
+      title: "三个结局的比较",
+      bullets: rows,
+      notes: "排版回归夹具",
+      citations: [paper.sources[0].id],
+      layout: "table",
+    },
+    paper.sources,
+  );
+  const cells = layout.text.filter((box) => box.role === "bullet");
+  for (const [row, interval] of [
+    "（0.30–1.90）",
+    "（0.28–1.95）",
+    "（0.40–0.90）",
+  ].entries()) {
+    assert.ok(
+      cells[(row + 1) * 4 + 2].lines.some((line) => line.includes(interval)),
+      "Split confidence interval: " + interval,
+    );
+  }
+  assert.deepEqual(
+    cells.map((box) => box.lines.join("").replace(/\s/g, "")),
+    rows.flatMap((row) =>
+      row.split("|").map((cell) => cell.replace(/\s/g, "")),
+    ),
+  );
+  assert.ok(cells.every((box) => box.fontSize >= 20 && box.y + box.h < 6.7));
+});
+
+test("comparison tables reserve short row labels and keep risk denominators intact", () => {
+  const rows = [
+    "结局 | 每1000人绝对效应（95% CI） | 最小重要差异 | GRADE降级依据",
+    "死亡，28天 | 少3人（少8至多11） | 3/1000 | 非常严重的不精确：区间包含重要获益与伤害",
+    "住院，28天 | 少15人（少42至多55） | 15/1000 | 严重不一致，I²=76.7%；非常严重的不精确",
+    "长新冠，300天 | 少41人（少62至少10） | 20/1000 | 严重偏倚风险及不精确：存在失访，区间涵盖不重要获益",
+  ];
+  const layout = slideLayout(
+    {
+      title: "绝对效应及证据判断",
+      bullets: rows,
+      notes: "排版回归夹具",
+      citations: [paper.sources[0].id],
+      layout: "table",
+    },
+    paper.sources,
+  );
+  const cells = layout.text.filter((box) => box.role === "bullet");
+  for (const [row, ratio] of ["3/1000", "15/1000", "20/1000"].entries())
+    assert.ok(
+      cells[(row + 1) * 4 + 2].lines.some((line) => line.includes(ratio)),
+      "Split denominator: " + ratio,
+    );
+  assert.ok(
+    cells[12].lines.some((line) => line.includes("长新冠")),
+    "Short row label split between characters",
+  );
+  assert.deepEqual(
+    cells.map((box) => box.lines.join("").replace(/\s/g, "")),
+    rows.flatMap((row) =>
+      row.split("|").map((cell) => cell.replace(/\s/g, "")),
+    ),
+  );
+  const context = createCanvas(1, 1).getContext("2d");
+  for (const cell of cells) {
+    context.font =
+      (cell.bold ? "bold " : "") + cell.fontSize + "pt Microsoft YaHei";
+    for (const line of cell.lines)
+      assert.ok(
+        context.measureText(line).width <= cell.w * 96,
+        "Clipped table cell: " + line,
+      );
+    assert.ok(cell.fontSize >= 20 && cell.y + cell.h < 6.7);
+  }
+});

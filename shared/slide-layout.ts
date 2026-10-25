@@ -47,7 +47,7 @@ export function wrapSlideText(
     // Match known units before identifiers; an arbitrary English word is not a unit.
     const tokens = (
       paragraph.match(
-        /\d+(?:[∶:]\d+)+|(?:[+−±-][ \t\u00a0]*)?\d[\d,.]*(?:[–—−-][+−-]?\d[\d,.]*)?[ \t\u00a0]*(?:(?:mEq|[mµμ]?mol|[npµμm]?g)\/(?:dL|mL|L|kg)|[µμm]?L(?:\/(?:min|h))?|°[CF]|(?:mm|cm)[ \t\u00a0]*(?:Hg|H2O))(?![A-Za-z0-9_./+-])|(?:mm|cm)[ \t\u00a0]+(?:Hg|H2O)\b|[0-9]+[A-Za-z\u0370-\u03ff][A-Za-z0-9\u0370-\u03ff_./+-]*|(?:[+−±-][ \t\u00a0]*)?\d[\d,.]*(?:[–—−-][+−-]?\d[\d,.]*)?(?:%|％|‰)?|[A-Za-z\u0370-\u03ff][A-Za-z0-9\u0370-\u03ff_./+-]*|\p{Script=Han}+|[^\x00-\x7f]|\s+|./gu,
+        /\d+(?:[∶:]\d+)+|\d+(?:\.\d+)?(?:[ \t]*\/[ \t]*\d+(?:\.\d+)?)+|(?:[+−±-][ \t\u00a0]*)?\d[\d,.]*(?:[–—−-][+−-]?\d[\d,.]*)?[ \t\u00a0]*(?:(?:mEq|[mµμ]?mol|[npµμm]?g)\/(?:dL|mL|L|kg)|[µμm]?L(?:\/(?:min|h))?|°[CF]|(?:mm|cm)[ \t\u00a0]*(?:Hg|H2O))(?![A-Za-z0-9_./+-])|(?:mm|cm)[ \t\u00a0]+(?:Hg|H2O)\b|[0-9]+[A-Za-z\u0370-\u03ff][A-Za-z0-9\u0370-\u03ff_./+-]*|(?:[+−±-][ \t\u00a0]*)?\d[\d,.]*(?:[–—−-][+−-]?\d[\d,.]*)?(?:%|％|‰)?|[A-Za-z\u0370-\u03ff][A-Za-z0-9\u0370-\u03ff_./+-]*|\p{Script=Han}+|[^\x00-\x7f]|\s+|./gu,
       ) ?? []
     ).flatMap((token) =>
       /^\p{Script=Han}+$/u.test(token)
@@ -338,17 +338,23 @@ export function slideLayout(
           ? naturalWidths.map((width) => width + spare / columns)
           : [...proportionalWidths];
       if (spare < 0) {
-        // Keep Latin names and identifiers whole where the table has room.
-        // Long prose headers may wrap; they must not starve short row labels.
-        const minimumWidths = rows[0].map((_, col) =>
+        // Reserve scientific intervals and denominators before distributing
+        // spare space by prose length. A long header must not split 3/1000
+        // or leave a confidence interval's closing bracket on its own line.
+        let minimumWidths = rows[0].map((_, col) =>
           Math.max(
             1.1,
             (Math.max(
               0,
               ...rows.flatMap((row, index) =>
-                (row[col].match(/[A-Za-z][A-Za-z0-9_./+-]*/g) ?? []).map(
-                  (word) =>
-                    word.length * (index === 0 || col === 0 ? 0.7 : 0.62),
+                (
+                  row[col].match(
+                    /[（(][+−±-]?\d[\d,.]*(?:%|％)?\s*[–—−-]\s*[+−±-]?\d[\d,.]*(?:%|％)?[）)]|\d+(?:\.\d+)?(?:[ \t]*\/[ \t]*\d+(?:\.\d+)?)+|[A-Za-z][A-Za-z0-9_./+-]*/g,
+                  ) ?? []
+                ).map((atom) =>
+                  /^[A-Za-z]/.test(atom)
+                    ? atom.length * (index === 0 || col === 0 ? 0.7 : 0.62)
+                    : units(atom, index === 0 || col === 0),
                 ),
               ),
             ) *
@@ -357,6 +363,34 @@ export function slideLayout(
               0.325,
           ),
         );
+        // Reserve the row label with its following separator, before a time
+        // or other qualifier. Longer labels may wrap within an equal share
+        // of the table rather than crowding every result column.
+        const labelWidth = Math.min(
+          11.9 / columns,
+          (Math.max(
+            ...rows
+              .slice(1)
+              .flatMap((row) =>
+                row[0]
+                  .split("\n")
+                  .map((label) =>
+                    units(
+                      /^[^，,;；]*(?:[，,;；]|$)/.exec(label)?.[0] ?? label,
+                      true,
+                    ),
+                  ),
+              ),
+          ) *
+            fontSize) /
+            (72 * 0.95) +
+            0.325,
+        );
+        const withLabels = minimumWidths.map((width, col) =>
+          col === 0 ? Math.max(width, labelWidth) : width,
+        );
+        if (withLabels.reduce((sum, width) => sum + width, 0) <= 11.9)
+          minimumWidths = withLabels;
         if (minimumWidths.reduce((sum, width) => sum + width, 0) <= 11.9) {
           const flexible = new Set(weights.map((_, col) => col));
           let available = 11.9;
