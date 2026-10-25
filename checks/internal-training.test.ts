@@ -442,7 +442,8 @@ test("reading multi-figure review requires all source bindings and forwards the 
     model: "fixture",
     async generate(rules, input: any, schema, _signal, image) {
       calls++;
-      assert.match(rules, /多图资料板/);
+      assert.match(rules, /资料板/);
+      assert.match(rules, /imageSourceIds/);
       assert.equal(image, "actual-reading-packet");
       assert.deepEqual(input.imageSourceIds, ["figure-a", "figure-b"]);
       return {

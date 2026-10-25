@@ -1,13 +1,23 @@
 import { createCanvas, loadImage } from "@napi-rs/canvas";
+import { panelSelectionIds } from "./figure-panels.ts";
+import { pptSelectionImagePacket } from "./ppt-image-packet.ts";
 import type { Source } from "../shared/types.ts";
 
-export const readingImagePacketVersion = "selected-reading-images-v1";
+export const readingImagePacketVersion =
+  "selected-reading-images-v2-known-panels";
 export async function readingImagePacket(sources: Source[], explicit?: string) {
   if (explicit) {
     const source = sources.find((s) => s.image === explicit);
     return { image: explicit, sourceIds: source ? [source.id] : [] };
   }
   const pictures = sources.filter((s) => s.image).slice(0, 8);
+  const panelIds = panelSelectionIds(sources);
+  if (panelIds.length)
+    return {
+      image: await pptSelectionImagePacket(sources),
+      sourceIds: pictures.map((s) => s.id),
+      panelIds,
+    };
   if (pictures.length <= 1)
     return {
       image: pictures[0]?.image,

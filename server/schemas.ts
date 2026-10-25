@@ -53,6 +53,15 @@ export const unitSchema = z.object({
         text: z.string().min(1).max(4000),
         kind: z.enum(["paper", "foundation", "interpretation", "background"]),
         citations,
+        figures: z
+          .array(
+            z.object({
+              sourceId: z.string().min(1),
+              panelId: z.string().optional(),
+            }),
+          )
+          .max(2)
+          .optional(),
       }),
     )
     .min(1)
@@ -121,7 +130,11 @@ export const groundingContractVersion = "grounded-output-v4-source-kinds";
 export function groundedTeachingSchema(
   sources: Source[],
   speechScript = false,
-  options: { compactUnit?: boolean } = {},
+  options: {
+    compactUnit?: boolean;
+    readingFigureSourceIds?: string[];
+    readingFigurePanelIds?: string[];
+  } = {},
 ) {
   const ids = z.array(z.enum(sources.map((s) => s.id))).max(20);
   const kinds = [
@@ -132,7 +145,31 @@ export function groundedTeachingSchema(
       ? ["foundation" as const]
       : []),
   ] as const;
+  const figureSources = sources.filter((s) =>
+    options.readingFigureSourceIds?.includes(s.id),
+  );
   const sections = unitSchema.shape.sections.element.extend({
+    figures: z
+      .array(
+        z.object({
+          sourceId: figureSources.length
+            ? z.enum(figureSources.map((s) => s.id))
+            : z.string().min(1),
+          panelId: z
+            .enum([
+              "",
+              ...panelSelectionIds(figureSources).filter((id) =>
+                options.readingFigurePanelIds?.includes(id),
+              ),
+            ])
+            .optional(),
+        }),
+      )
+      .max(figureSources.length ? 2 : 0)
+      .optional()
+      .describe(
+        "仅在本节实质讲图时选择已引用的图；sourceId须为本节citations中的可见原图ID，panelId选择资料板中实际展示且匹配该图的局部ID，空字符串表示全图。图就近显示，不为每个段落重复全图；需要完整轴、组别或图例时选全图，不能猜裁剪坐标。无图时省略或返回空数组。",
+      ),
     citations: ids,
     kind: z
       .enum(kinds)

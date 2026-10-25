@@ -1225,3 +1225,12 @@ footer {
   margin-top: 10px;
   font-size: 12px;
 }
+
+.learning-section .reading-section-figure {
+  margin: 16px 0;
+}
+.learning-section .reading-section-figure .rw-image-thumbnail img {
+  max-width: 100%;
+  max-height: 380px;
+  object-fit: contain;
+}

@@ -1,4 +1,5 @@
 import { z } from "zod";
+import { panelSelectionIds } from "./figure-panels.ts";
 import { digest } from "./materials.ts";
 import type { TrainingBatch } from "./internal-training.ts";
 import type { TaskTiming, Source, RoleRecord } from "../shared/types.ts";
@@ -209,24 +210,48 @@ export function finishedDiagnostic(previous: {
 // Preserve the reading task's actual image exposure and source binding.
 export function diagnosticReadingImage(
   visibleImage: string | undefined,
-  sources: Pick<Source, "id" | "image">[],
-  binding?: { sourceIds: string[]; imageHash: string },
-) {
+  sources: Pick<Source, "id" | "image" | "imagePanels">[],
+  binding?: { sourceIds: string[]; imageHash: string; panelIds?: string[] },
+):
+  | {
+      image: string;
+      imageSourceId?: string;
+      imageSourceIds?: string[];
+      imagePanelIds?: string[];
+    }
+  | undefined {
   if (!visibleImage) return undefined;
-  if (binding && binding.sourceIds.length > 1) {
+  if (binding) {
     if (
       binding.imageHash !== digest(visibleImage) ||
+      !binding.sourceIds.length ||
       binding.sourceIds.length > 8 ||
+      (binding.panelIds?.length ?? 0) > 8 ||
+      new Set(binding.panelIds ?? []).size !==
+        (binding.panelIds?.length ?? 0) ||
+      (binding.panelIds ?? []).some(
+        (id) =>
+          !panelSelectionIds(
+            sources.filter((s) => binding.sourceIds.includes(s.id)) as Source[],
+          ).includes(id),
+      ) ||
       new Set(binding.sourceIds).size !== binding.sourceIds.length ||
       binding.sourceIds.some(
         (id) => !sources.some((s) => s.id === id && s.image),
       )
     )
       throw new Error("带读多图评价的图片或来源绑定无效，未派发评价请求。");
-    return { image: visibleImage, imageSourceIds: binding.sourceIds };
+  }
+  if (binding && (binding.sourceIds.length > 1 || binding.panelIds?.length)) {
+    return {
+      image: visibleImage,
+      imageSourceIds: binding.sourceIds,
+      ...(binding.panelIds?.length ? { imagePanelIds: binding.panelIds } : {}),
+    };
   }
   const source = sources.find((s) => s.image === visibleImage);
-  if (!source) throw new Error("带读独立评价的原图无法绑定到本任务来源。");
+  if (!source || (binding && binding.sourceIds[0] !== source.id))
+    throw new Error("带读独立评价的原图无法绑定到本任务来源。");
   return { image: visibleImage, imageSourceId: source.id };
 }
 

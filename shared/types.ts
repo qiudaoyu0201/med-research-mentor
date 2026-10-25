@@ -109,6 +109,7 @@ export interface Section {
   text: string;
   kind: SourceKind | "background";
   citations: string[];
+  figures?: { sourceId: string; panelId?: string }[];
 }
 export interface LearningUnit {
   title: string;
@@ -271,7 +272,11 @@ export interface TaskRun {
   error?: string;
   budget?: BudgetState;
   cacheHit?: string;
-  readingImageEvidence?: { sourceIds: string[]; imageHash: string };
+  readingImageEvidence?: {
+    sourceIds: string[];
+    imageHash: string;
+    panelIds?: string[];
+  };
   materials?: MaterialSnapshot[];
   materialRequests?: MaterialRequest[];
   evaluationBudget?: BudgetState;

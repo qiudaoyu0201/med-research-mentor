@@ -353,6 +353,7 @@ try {
       let image: string | undefined;
       let imageSourceId: string | undefined;
       let imageSourceIds: string[] | undefined;
+      let imagePanelIds: string[] | undefined;
       if (frozen.manifest.module === "research-plan") {
         const { runDiagnosticPlan } =
           await import("../server/diagnostic-plan.ts");
@@ -443,6 +444,7 @@ try {
           image = evidence?.image;
           imageSourceId = evidence?.imageSourceId;
           imageSourceIds = evidence?.imageSourceIds;
+          imagePanelIds = evidence?.imagePanelIds;
         }
         artifact = { unit: run.result, deck: run.deck ?? null };
       }
@@ -462,16 +464,19 @@ try {
           evaluatorVersion:
             frozen.manifest.module === "ppt"
               ? "explanation-and-deck-images-v3-visible-text"
-              : imageSourceIds
-                ? "explanation-and-reading-images-v1-visible-text"
-                : imageSourceId
-                  ? "explanation-and-original-image-v1-visible-text"
-                  : "explanation-v2-visible-text",
+              : imagePanelIds?.length
+                ? "explanation-and-reading-images-v2-known-panels-visible-text"
+                : imageSourceIds
+                  ? "explanation-and-reading-images-v1-visible-text"
+                  : imageSourceId
+                    ? "explanation-and-original-image-v1-visible-text"
+                    : "explanation-v2-visible-text",
           ...(frozen.manifest.module !== "research-plan"
             ? { sourceExposure: "actual-generation-packets-v1" as const }
             : {}),
           ...(imageSourceId ? { imageSourceId } : {}),
           ...(imageSourceIds ? { imageSourceIds } : {}),
+          ...(imagePanelIds ? { imagePanelIds } : {}),
         },
         controller.signal,
         image,

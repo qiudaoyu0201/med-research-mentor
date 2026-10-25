@@ -15,6 +15,7 @@ import type {
   Source,
 } from "../shared/types.ts";
 import { profiles, exampleUnits, defaultDeck } from "../examples/bundle.ts";
+import { validateReadingFigures } from "../shared/reading-figures.ts";
 import { applyDeckPanels } from "./figure-panels.ts";
 import {
   pptSelectionImagePacket,
@@ -100,6 +101,7 @@ export function validateCitations(
   deck?: DeckOutline,
   deliveryPolicy: "internal" | "online" = "internal",
 ) {
+  validateReadingFigures(unit, sources);
   const ids = new Set(sources.map((s) => s.id));
   const used = [
     ...unit.sections.flatMap((s) => s.citations),
@@ -452,6 +454,9 @@ export class TaskManager {
               readingImageEvidence: {
                 sourceIds: readingImages.sourceIds,
                 imageHash: digest(readingImages.image),
+                ...("panelIds" in readingImages
+                  ? { panelIds: readingImages.panelIds }
+                  : {}),
               },
             }
           : {}),
@@ -588,6 +593,9 @@ export class TaskManager {
         input = {
           ...(input as object),
           visibleImageSourceIds: run.readingImageEvidence.sourceIds,
+          ...(run.readingImageEvidence.panelIds?.length
+            ? { visibleImagePanelIds: run.readingImageEvidence.panelIds }
+            : {}),
         };
       let record = {
         role,
@@ -797,7 +805,11 @@ export class TaskManager {
           const baseSchema = groundedTeachingSchema(
             illustratedSources(),
             run.input.speechScript,
-            { compactUnit: run.input.module === "ppt" },
+            {
+              compactUnit: run.input.module === "ppt",
+              readingFigureSourceIds: run.readingImageEvidence?.sourceIds ?? [],
+              readingFigurePanelIds: run.readingImageEvidence?.panelIds ?? [],
+            },
           );
           return run.input.diagnosticScope && run.input.module === "ppt"
             ? baseSchema.extend({
@@ -817,7 +829,10 @@ export class TaskManager {
           "teaching",
           teaching +
             (run.input.diagnosticScope
-              ? "\n只完成当前完整片段，保留必要方法、比较、测量解释与证据边界。PPT 的 unit 只写一段简短导读；必要解释进入页面和逐页备注，不另写重复长讲解，不生成完整演讲稿。"
+              ? "\n只完成当前完整片段，保留必要方法、比较、测量解释与证据边界。" +
+                (run.input.module === "ppt"
+                  ? "PPT 的 unit 只写一段简短导读；必要解释进入页面和逐页备注，不另写重复长讲解，不生成完整演讲稿。"
+                  : "")
               : "") +
             (run.input.speechScript
               ? "\n同时在 deck.speechScript 输出完整中文演讲稿（Markdown）：开场、按实际页序逐页讲述与转场、结尾。解释图件与方法，不机械复读 bullet，不补造结果；结构随研究类型和用户要求调整。"
@@ -830,6 +845,11 @@ export class TaskManager {
         ).includes("ppt");
         if (!requestedDeck) generated = { ...generated, deck: null };
         applyDeckPanels(generated.deck, illustratedSources());
+        validateReadingFigures(
+          generated.unit,
+          illustratedSources(),
+          run.readingImageEvidence,
+        );
         reviewImage = requestedDeck
           ? await pptDeckImagePacket(generated.deck, illustratedSources())
           : undefined;
@@ -1072,7 +1092,7 @@ export class TaskManager {
           generated = await call(
             "revision",
             teaching +
-              (run.input.diagnosticScope
+              (run.input.diagnosticScope && run.input.module === "ppt"
                 ? "\n保留片段范围：PPT unit 仅简短导读，解释集中在页面和逐页备注，不生成完整稿或重复长讲解。"
                 : "") +
               (run.input.speechScript
@@ -1120,6 +1140,11 @@ export class TaskManager {
           );
           if (!requestedDeck) generated = { ...generated, deck: null };
           applyDeckPanels(generated.deck, illustratedSources());
+          validateReadingFigures(
+            generated.unit,
+            illustratedSources(),
+            run.readingImageEvidence,
+          );
           reviewImage = requestedDeck
             ? await pptDeckImagePacket(generated.deck, illustratedSources())
             : undefined;
