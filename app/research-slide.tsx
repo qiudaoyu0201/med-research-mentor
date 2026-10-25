@@ -109,6 +109,24 @@ export function ResearchSlide({
               fill={`#${shape.fill}`}
             />
           );
+        if (shape.kind === "downArrow")
+          return (
+            <polygon
+              key={`shape-${index}`}
+              points={[
+                [x + w * 0.3, y],
+                [x + w * 0.7, y],
+                [x + w * 0.7, y + h * 0.45],
+                [x + w, y + h * 0.45],
+                [x + w * 0.5, y + h],
+                [x, y + h * 0.45],
+                [x + w * 0.3, y + h * 0.45],
+              ]
+                .map((point) => point.join(","))
+                .join(" ")}
+              fill={`#${shape.fill}`}
+            />
+          );
         if (shape.kind === "ellipse")
           return (
             <ellipse

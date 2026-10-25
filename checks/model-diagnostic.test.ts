@@ -3,6 +3,7 @@ import assert from "node:assert/strict";
 import {
   diagnosticManifest,
   diagnosticLimit,
+  diagnosticCallLimit,
   diagnosticTiming,
   diagnosticReadingImage,
   diagnosticVisibleSources,
@@ -94,6 +95,32 @@ test("pilot binds Sol explicitly and keeps timing targets below protection limit
     onlineUrl: "http://127.0.0.1:4336",
   };
   assert.equal(diagnosticManifest.parse(input).model, "gpt-6.1-sol");
+  assert.equal(
+    diagnosticManifest.parse({ ...input, module: "ppt", slideCount: 16 })
+      .slideCount,
+    16,
+  );
+  assert.equal(
+    diagnosticManifest.parse({ ...input, slideCount: 1 }).slideCount,
+    1,
+  );
+  assert.equal(
+    diagnosticManifest.parse({
+      ...input,
+      sourceIds: Array.from({ length: 100 }, (_, i) => `s${i}`),
+    }).sourceIds.length,
+    100,
+  );
+  assert.equal(diagnosticCallLimit({}), 8);
+  assert.equal(
+    diagnosticCallLimit(diagnosticManifest.parse({ ...input, callLimit: 16 })),
+    16,
+  );
+  for (const callLimit of [3, 65, 8.5])
+    assert.throws(() => diagnosticManifest.parse({ ...input, callLimit }));
+  assert.throws(() =>
+    diagnosticManifest.parse({ ...input, module: "ppt", slideCount: 17 }),
+  );
   assert.throws(() =>
     diagnosticManifest.parse({ ...input, model: "gpt-5.6-sol" }),
   );
@@ -229,4 +256,18 @@ test("diagnostic retains captions explicitly delivered in generator references w
     diagnosticVisibleSources([role])[0].text,
     sources.blocks[0].text,
   );
+});
+
+test("configured diagnostic budgets remain frozen and are reported without the pilot default", () => {
+  const b = batch();
+  b.budget.limit = b.budget.groupLimit = b.cycleLimit = 16;
+  assert.doesNotThrow(() =>
+    assertDiagnosticRun("prepared", b, "same", "same", 16),
+  );
+  assert.throws(() => assertDiagnosticRun("prepared", b, "same", "same"));
+  const metrics = diagnosticMetrics(b);
+  assert.equal(metrics.limit, 16);
+  assert.equal(metrics.remaining, 16);
+  b.budget.groupLimit = 8;
+  assert.throws(() => assertDiagnosticRun("prepared", b, "same", "same", 16));
 });

@@ -106,7 +106,7 @@ export const reviewSchema = z.object({
 });
 export const slideSchema = z.object({
   title: z.string().min(1).max(65),
-  bullets: z.array(z.string().max(140)).min(1).max(5),
+  bullets: z.array(z.string().max(140)).min(1).max(6),
   notes: z.string().min(1).max(2000),
   citations,
   imageSource: z.string().optional(),
@@ -115,7 +115,7 @@ export const slideSchema = z.object({
     .enum(["auto", "flow", "comparison", "spotlight", "table"])
     .optional()
     .describe(
-      "页面表达：auto常规图文；flow仅用于来源支持的2–4步有序流程；comparison用于2项并列比较，不暗示先后；spotlight突出研究问题或目的并补充至多2项解释。table用于有共同指标的2–4列表格，bullets首项为表头、其余为数据行，每行以 | 分隔且列数一致，表头占一项，数据行数服从bullets长度上限；不加Markdown分隔行，缺失值明确写未报告，不猜值。非auto版式不同时选择imageSource。",
+      "页面表达：auto常规图文；flow仅用于来源支持的2–6步有序流程，5–6步用简短节点展开；comparison用于2项并列比较，不暗示先后；spotlight突出研究问题或目的并补充至多2项解释。table用于有共同指标的2–4列表格，bullets首项为表头、其余为数据行，每行以 | 分隔且列数一致，表头占一项，数据行数服从bullets长度上限；不加Markdown分隔行，缺失值明确写未报告，不猜值。非auto版式不同时选择imageSource。",
     ),
 });
 export const deckSchema = z.object({
@@ -180,7 +180,7 @@ export function groundedTeachingSchema(
   const slides = slideSchema.omit({ imageCrop: true }).extend({
     // The rendered evidence layout reserves a narrow text column. Keep generated
     // bullets compact enough to survive the actual PowerPoint export.
-    bullets: z.array(z.string().trim().min(1).max(120)).min(1).max(4),
+    bullets: z.array(z.string().trim().min(1).max(120)).min(1).max(6),
     citations: ids,
     imagePanel: z
       .enum(["", ...panelSelectionIds(sources)])
@@ -204,6 +204,17 @@ export function groundedTeachingSchema(
     .max(16)
     .superRefine((items, ctx) => {
       for (const [index, slide] of items.entries()) {
+        const maximum =
+          slide.layout === "flow" ? 6 : slide.layout === "table" ? 5 : 4;
+        if (slide.bullets.length > maximum)
+          ctx.addIssue({
+            code: "too_big",
+            origin: "array",
+            maximum,
+            inclusive: true,
+            path: [index, "bullets"],
+            message: "普通页面最多四项；流程最多六步，表格最多表头及四行。",
+          });
         if (slide.imageSource && slide.bullets.length > 3)
           ctx.addIssue({
             code: "too_big",

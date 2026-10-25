@@ -17,6 +17,11 @@ export const diagnosticManifest = z
     module: z.enum(["paper", "ppt", "research-plan"]),
     plan: z
       .object({
+        verbosity: z.enum(["brief", "standard", "deep"]).optional(),
+        requestedScope: z
+          .enum(["direction", "design-draft", "full-plan"])
+          .optional(),
+        maxCalls: z.union([z.literal(2), z.literal(4)]).optional(),
         conditions: z.string().trim().min(1).max(5000),
         studyTypes: z
           .array(z.enum(studyTypeIds))
@@ -32,9 +37,10 @@ export const diagnosticManifest = z
       .strict()
       .optional(),
     question: z.string().trim().min(1).max(3000),
-    sourceIds: z.array(z.string().min(1)).min(1).max(20),
+    sourceIds: z.array(z.string().min(1)).min(1).max(100),
     criteria: z.array(z.string().min(1)).min(3).max(12),
-    slideCount: z.number().int().min(3).max(6).default(4),
+    slideCount: z.number().int().min(1).max(16).default(4),
+    callLimit: z.number().int().min(4).max(64).optional(),
     onlineUrl: z.string().url(),
     sharedAddition: z.string().max(3000).default(""),
     previousDiagnostic: z.string().min(1).optional(),
@@ -59,7 +65,16 @@ export const diagnosticManifest = z
       });
   });
 export type DiagnosticManifest = z.infer<typeof diagnosticManifest>;
+// A per-experiment cost default, independent of artifact size and case count.
 export const diagnosticLimit = 8;
+export function diagnosticCallLimit(manifest: { callLimit?: number }) {
+  return z
+    .number()
+    .int()
+    .min(4)
+    .max(64)
+    .parse(manifest.callLimit ?? diagnosticLimit);
+}
 // Temporary pilot settings, not online defaults or a claim of optimal latency.
 export const diagnosticTiming: TaskTiming = {
   version: "task-timing-v1",
@@ -128,19 +143,21 @@ export function assertDiagnosticRun(
   batch: TrainingBatch,
   contractHash: string,
   currentHash: string,
+  expectedLimit = diagnosticLimit,
 ) {
   if (status !== "prepared" || batch.budget.attempts.length !== 0)
     throw new Error("诊断只派发一次；中断或未知请求不自动重发。");
   if (
-    batch.budget.limit !== diagnosticLimit ||
-    batch.cycleLimit !== diagnosticLimit ||
-    batch.budget.groupLimit !== diagnosticLimit ||
+    batch.budget.limit !== expectedLimit ||
+    batch.cycleLimit !== expectedLimit ||
+    batch.budget.groupLimit !== expectedLimit ||
     digest(batch.budget.timing) !== digest(diagnosticTiming) ||
     contractHash !== currentHash
   )
     throw new Error("诊断额度或冻结输入已变化。");
 }
 export function diagnosticMetrics(batch: TrainingBatch) {
+  const limit = batch.cycleLimit ?? batch.budget.limit;
   const attempts = batch.budget.attempts;
   const summary = (records: typeof attempts) => ({
     calls: records.length,
@@ -154,9 +171,9 @@ export function diagnosticMetrics(batch: TrainingBatch) {
     maxOutputGapMs: records.map((a) => a.observation?.maxOutputGapMs ?? null),
   });
   return {
-    limit: diagnosticLimit,
+    limit,
     calls: attempts.length,
-    remaining: diagnosticLimit - attempts.length,
+    remaining: limit - attempts.length,
     successful: summary(attempts.filter((a) => a.status === "succeeded")),
     incomplete: attempts
       .filter((a) => a.status !== "succeeded")

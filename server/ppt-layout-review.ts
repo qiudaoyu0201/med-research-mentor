@@ -2,7 +2,7 @@ import { slideLayout } from "../shared/slide-layout.ts";
 import type { DeckOutline, ReviewResult, Source } from "../shared/types.ts";
 
 export const pptLayoutContractVersion =
-  "ppt-layout-v11-scientific-table-widths";
+  "ppt-layout-v13-scientific-wrap-and-flow";
 
 const layoutId = (index: number) => `ppt-layout-${index + 1}`;
 

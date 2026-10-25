@@ -413,7 +413,7 @@ test("semantic diagrams preserve scientific text and keep process arrows separat
   );
   assert.throws(
     () => slideLayout({ ...slide, bullets: ["只有一步"] }, paper.sources),
-    /二至四/,
+    /二至六/,
   );
   assert.throws(
     () => slideLayout({ ...slide, layout: "comparison" }, paper.sources),
@@ -978,4 +978,214 @@ test("comparison tables reserve short row labels and keep risk denominators inta
       );
     assert.ok(cell.fontSize >= 20 && cell.y + cell.h < 6.7);
   }
+});
+
+test("five and six step routes preserve order, fit and export native downward connections", async () => {
+  const bullets = [
+    "明确筛查人群与纳入条件",
+    "采集图像并固定输入",
+    "运行模型取得优先级",
+    "医务人员结合提示复核",
+    "对照参考标准评价差异",
+    "随访实际流程中的结局",
+  ];
+  for (const count of [5, 6]) {
+    const slide = {
+      title: "从研究对象到实际评价",
+      bullets: bullets.slice(0, count),
+      notes: "讲述提示单独交付。",
+      citations: [paper.sources[0].id],
+      layout: "flow" as const,
+    };
+    const layout = slideLayout(slide, paper.sources);
+    const boxes = layout.text.filter((b) => b.role === "bullet");
+    assert.deepEqual(
+      boxes.map((b) => b.lines.join("")),
+      slide.bullets,
+    );
+    assert.equal(
+      layout.shapes.filter((s) => s.kind === "downArrow").length,
+      count - 1,
+    );
+    boxes.forEach((b, i) => {
+      assert.ok(b.fontSize >= 20 && b.y + b.h < 6.7);
+      if (i) assert.ok(b.y > boxes[i - 1].y + boxes[i - 1].h);
+    });
+    const output = await exportDeck(
+      { slides: [slide] },
+      paper,
+      "expanded-flow-" + randomUUID(),
+    );
+    try {
+      const xml = strFromU8(
+        unzipSync(await readFile(output))["ppt/slides/slide1.xml"],
+      );
+      assert.equal((xml.match(/prst="downArrow"/g) ?? []).length, count - 1);
+      for (const value of slide.bullets)
+        assert.ok(xml.replace(/<[^>]+>/g, "").includes(value));
+    } finally {
+      await unlink(output);
+    }
+  }
+  assert.throws(
+    () =>
+      slideLayout(
+        {
+          title: "过密流程",
+          bullets: bullets.map(() => "过长的步骤说明".repeat(30)),
+          notes: "讲述提示单独交付。",
+          citations: [],
+          layout: "flow",
+        },
+        [],
+      ),
+    /过密/,
+  );
+});
+
+test("comparison headings retain their original text and never introduce sequence arrows", () => {
+  const bullets = [
+    "既有研究：受控环境中的模型验证",
+    "当前研究：在实际读片流程中比较辅助效果",
+  ];
+  const layout = slideLayout(
+    {
+      title: "临床流程带来什么新问题",
+      bullets,
+      notes: "讲述提示单独交付。",
+      citations: [],
+      layout: "comparison",
+    },
+    [],
+  );
+  for (const [i, value] of bullets.entries()) {
+    const boxes = layout.text.filter((b) => b.sourceIndex === i);
+    assert.equal(boxes.map((b) => b.lines.join("")).join(""), value);
+    assert.equal(boxes[0].bold, true);
+    assert.ok(boxes.every((b) => b.fontSize >= 20 && b.y + b.h < 6.7));
+  }
+  assert.equal(
+    layout.shapes.some((s) => ["chevron", "downArrow"].includes(s.kind ?? "")),
+    false,
+  );
+});
+
+test("generated six-step routes pass the grounded contract without increasing ordinary page density", () => {
+  const schema = groundedTeachingSchema(paper.sources);
+  const slide = {
+    title: "完整研究路径",
+    bullets: [
+      "确定研究对象",
+      "形成输入",
+      "生成预测",
+      "人员复核",
+      "比较结局",
+      "随访验证",
+    ],
+    notes: "讲述提示单独交付。",
+    citations: [],
+    layout: "flow" as const,
+  };
+  assert.equal(
+    schema.parse({ unit, deck: { slides: [slide] } }).deck!.slides[0].bullets
+      .length,
+    6,
+  );
+  assert.throws(() =>
+    schema.parse({ unit, deck: { slides: [{ ...slide, layout: "auto" }] } }),
+  );
+  assert.throws(() =>
+    schema.parse({
+      unit,
+      deck: { slides: [{ ...slide, imageSource: "xu-fig1" }] },
+    }),
+  );
+});
+
+test("long cohort labels do not starve short headers or split numbered hospital labels", () => {
+  const rows = [
+    "医院 | 分析人数 | 复合结局阳性",
+    "Mbagathi County Hospital（医院1） | 2539 | 226（占本院分析人群8.9%）",
+    "Kiambu County Referral Hospital（医院2） | 2464 | 112（占本院分析人群4.5%）",
+  ];
+  const layout = slideLayout(
+    {
+      title: "两院分析样本",
+      bullets: rows,
+      notes: "",
+      citations: [],
+      layout: "table",
+    },
+    [],
+  );
+  const cells = layout.text.filter((b) => b.role === "bullet");
+  assert.deepEqual(cells[1].lines, ["分析人数"]);
+  assert.ok(cells[3].lines.some((line) => line.includes("医院1）")));
+  assert.ok(cells[6].lines.some((line) => line.includes("医院2）")));
+  assert.deepEqual(
+    cells.map((b) => b.lines.join("").replace(/\s/g, "")),
+    rows.flatMap((row) =>
+      row.split("|").map((cell) => cell.replace(/\s/g, "")),
+    ),
+  );
+});
+
+test("percentage confidence intervals and their labels wrap as complete scientific expressions", () => {
+  const rows = [
+    "医院／状态 | 低阈值：敏感度（95%CI） | 高阈值：特异度（95%CI）",
+    "医院1／原模型 | 0.080：93%（89%–96%） | 0.400：86%（84%–87%）",
+    "医院1／截距更新后 | 0.026：90%（86%–93%） | 0.130：86%（85%–88%）",
+  ];
+  const layout = slideLayout(
+    {
+      title: "阈值与区间",
+      bullets: rows,
+      notes: "",
+      citations: [],
+      layout: "table",
+    },
+    [],
+  );
+  const cells = layout.text.filter((b) => b.role === "bullet");
+  for (const index of [1, 2])
+    assert.ok(cells[index].lines.some((line) => line.includes("（95%CI）")));
+  for (const [index, interval] of [
+    [4, "（89%–96%）"],
+    [5, "（84%–87%）"],
+    [7, "（86%–93%）"],
+    [8, "（85%–88%）"],
+  ] as const)
+    assert.ok(
+      cells[index].lines.some((line) => line.includes(interval)),
+      cells[index].lines.join(" / "),
+    );
+  assert.deepEqual(
+    cells.map((b) => b.lines.join("").replace(/\s/g, "")),
+    rows.flatMap((row) =>
+      row.split("|").map((cell) => cell.replace(/\s/g, "")),
+    ),
+  );
+});
+
+test("four-step procedures use wide rows when narrow cards strand a final CJK character", () => {
+  const bullets = [
+    "原模型：计算肯尼亚儿童风险",
+    "外部验证：分院及合并评价",
+    "本地更新：重新估计截距",
+    "更新评估：检查校准与阈值",
+  ];
+  const layout = slideLayout(
+    { title: "验证与更新", bullets, notes: "", citations: [], layout: "flow" },
+    [],
+  );
+  const boxes = layout.text.filter((b) => b.role === "bullet");
+  assert.deepEqual(
+    boxes.map((b) => b.lines.join("")),
+    bullets,
+  );
+  assert.ok(boxes.every((b) => b.w > 8));
+  assert.ok(boxes.every((b) => b.fontSize >= 24 && b.y + b.h < 6.7));
+  boxes.forEach((b, i) => {
+    if (i) assert.ok(b.y > boxes[i - 1].y + boxes[i - 1].h);
+  });
 });

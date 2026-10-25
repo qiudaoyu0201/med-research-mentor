@@ -5,7 +5,7 @@ import { digest } from "../server/materials.ts";
 import { hashFile, trainingEngine } from "../server/training-engine.ts";
 import {
   diagnosticManifest,
-  diagnosticLimit,
+  diagnosticCallLimit,
   diagnosticTiming,
   diagnosticReadingImage,
   diagnosticVisibleSources,
@@ -165,7 +165,7 @@ try {
     rulesHash: digest(rules),
     provider: fingerprint,
     timing: diagnosticTiming,
-    limit: diagnosticLimit,
+    limit: diagnosticCallLimit(value),
     engineHash: digest(await trainingEngine()),
     planHash: await hashFile("docs/ITERATION.md"),
     parentHash: await hashFile(resolve(value.parentReport)),
@@ -180,7 +180,7 @@ try {
       await claim.writeFile(
         JSON.stringify({
           id,
-          limit: diagnosticLimit,
+          limit: diagnosticCallLimit(manifest!),
           createdAt: new Date().toISOString(),
         }),
       );
@@ -220,13 +220,13 @@ try {
       undefined,
       diagnosticTiming.taskMs,
     ).state;
-    budget.limit = budget.groupLimit = diagnosticLimit;
+    budget.limit = budget.groupLimit = diagnosticCallLimit(manifest!);
     budget.timing = diagnosticTiming;
     const batch: TrainingBatch = {
       id,
       phase: "M1",
       status: "awaiting-continuation",
-      cycleLimit: diagnosticLimit,
+      cycleLimit: diagnosticCallLimit(manifest!),
       budget,
     };
     await store.save("freeze", "inputs", {
@@ -245,14 +245,14 @@ try {
       parentEvidence,
       priorDiagnosticCalls,
       scope:
-        "独立八次诊断；父周期调用保持原状，不使用旧余额，不构成候选发布、盲测或真人效果证据。",
+        "独立诊断；调用额度由本次清单冻结，默认八次，可按实验规模配置。父周期调用保持原状，不使用旧余额，不构成候选发布、盲测或真人效果证据。",
     });
     console.log(
       JSON.stringify({
         id,
         modelCalls: 0,
         contractHash: digest(contract),
-        limit: diagnosticLimit,
+        limit: diagnosticCallLimit(manifest!),
       }),
     );
   } else {
@@ -268,6 +268,7 @@ try {
       report.batch,
       frozen.contractHash,
       digest(await bindings(frozen.manifest, frozen.paper, frozen.rules)),
+      diagnosticCallLimit(frozen.manifest),
     );
     const parent = JSON.parse(
       await readFile(resolve(frozen.manifest.parentReport), "utf8"),

@@ -19,7 +19,7 @@ export type SlideShape = {
   w: number;
   h: number;
   fill: string;
-  kind?: "rect" | "roundRect" | "chevron" | "ellipse";
+  kind?: "rect" | "roundRect" | "chevron" | "downArrow" | "ellipse";
 };
 export const slideSize = { width: 13.333333, height: 7.5 };
 // Explicit point advances keep SVG, capacity checks, and PowerPoint in sync.
@@ -45,9 +45,10 @@ export function wrapSlideText(
       length = 0;
     // Keep clinical measurements, signed estimates, and scientific identifiers intact.
     // Match known units before identifiers; an arbitrary English word is not a unit.
+    // Short parenthesized category labels and CI expressions also stay together.
     const tokens = (
       paragraph.match(
-        /\d+(?:[∶:]\d+)+|\d+(?:\.\d+)?(?:[ \t]*\/[ \t]*\d+(?:\.\d+)?)+|(?:[+−±-][ \t\u00a0]*)?\d[\d,.]*(?:[–—−-][+−-]?\d[\d,.]*)?[ \t\u00a0]*(?:(?:mEq|[mµμ]?mol|[npµμm]?g)\/(?:dL|mL|L|kg)|[µμm]?L(?:\/(?:min|h))?|°[CF]|(?:mm|cm)[ \t\u00a0]*(?:Hg|H2O))(?![A-Za-z0-9_./+-])|(?:mm|cm)[ \t\u00a0]+(?:Hg|H2O)\b|[0-9]+[A-Za-z\u0370-\u03ff][A-Za-z0-9\u0370-\u03ff_./+-]*|(?:[+−±-][ \t\u00a0]*)?\d[\d,.]*(?:[–—−-][+−-]?\d[\d,.]*)?(?:%|％|‰)?|[A-Za-z\u0370-\u03ff][A-Za-z0-9\u0370-\u03ff_./+-]*|\p{Script=Han}+|[^\x00-\x7f]|\s+|./gu,
+        /[（(]\p{Script=Han}{1,6}\d+[）)]|\d+(?:\.\d+)?(?:%|％)[ \t]*CI\b|\d+(?:[∶:]\d+)+|\d+(?:\.\d+)?(?:[ \t]*\/[ \t]*\d+(?:\.\d+)?)+|(?:[+−±-][ \t\u00a0]*)?\d[\d,.]*(?:[–—−-][+−-]?\d[\d,.]*)?[ \t\u00a0]*(?:(?:mEq|[mµμ]?mol|[npµμm]?g)\/(?:dL|mL|L|kg)|[µμm]?L(?:\/(?:min|h))?|°[CF]|(?:mm|cm)[ \t\u00a0]*(?:Hg|H2O))(?![A-Za-z0-9_./+-])|(?:mm|cm)[ \t\u00a0]+(?:Hg|H2O)\b|[0-9]+[A-Za-z\u0370-\u03ff][A-Za-z0-9\u0370-\u03ff_./+-]*|(?:[+−±-][ \t\u00a0]*)?\d[\d,.]*(?:(?:%|％|‰)?[ \t\u00a0]*[–—−-][ \t\u00a0]*[+−-]?\d[\d,.]*)?(?:%|％|‰)?|[A-Za-z\u0370-\u03ff][A-Za-z0-9\u0370-\u03ff_./+-]*|\p{Script=Han}+|[^\x00-\x7f]|\s+|./gu,
       ) ?? []
     ).flatMap((token) =>
       /^\p{Script=Han}+$/u.test(token)
@@ -338,7 +339,7 @@ export function slideLayout(
           ? naturalWidths.map((width) => width + spare / columns)
           : [...proportionalWidths];
       if (spare < 0) {
-        // Reserve scientific intervals and denominators before distributing
+        // Reserve short headers, scientific intervals and denominators before distributing
         // spare space by prose length. A long header must not split 3/1000
         // or leave a confidence interval's closing bracket on its own line.
         let minimumWidths = rows[0].map((_, col) =>
@@ -347,11 +348,14 @@ export function slideLayout(
             (Math.max(
               0,
               ...rows.flatMap((row, index) =>
-                (
-                  row[col].match(
+                [
+                  ...(index === 0 && units(row[col], true) <= 8
+                    ? [row[col]]
+                    : []),
+                  ...(row[col].match(
                     /[（(][+−±-]?\d[\d,.]*(?:%|％)?\s*[–—−-]\s*[+−±-]?\d[\d,.]*(?:%|％)?[）)]|\d+(?:\.\d+)?(?:[ \t]*\/[ \t]*\d+(?:\.\d+)?)+|[A-Za-z][A-Za-z0-9_./+-]*/g,
-                  ) ?? []
-                ).map((atom) =>
+                  ) ?? []),
+                ].map((atom) =>
                   /^[A-Za-z]/.test(atom)
                     ? atom.length * (index === 0 || col === 0 ? 0.7 : 0.62)
                     : units(atom, index === 0 || col === 0),
@@ -488,11 +492,84 @@ export function slideLayout(
       y += h;
     });
     custom = true;
+  } else if (requested === "flow" && count >= 5 && count <= 6) {
+    // A longer route needs wide, short nodes rather than six narrow cards.
+    // All steps and their order come from the author; no branch is inferred.
+    composition = "flow";
+    let fontSize = 24;
+    const measure = () =>
+      slide.bullets.map((value) => {
+        const lines = wrapSlideText(value, 9.7, fontSize);
+        const textH = (lines.length * fontSize * slideLineHeight) / 72 + 0.09;
+        return { lines, textH, h: Math.max(0.62, textH + 0.18) };
+      });
+    let rows = measure();
+    const height = () =>
+      rows.reduce((sum, row) => sum + row.h, 0) + (count - 1) * 0.18;
+    while (height() > 4.9 && fontSize > 20) {
+      fontSize--;
+      rows = measure();
+    }
+    if (height() > 4.9)
+      throw new Error("流程文字过密，请精简节点或拆页，不能缩小关键条件。");
+    let y = 1.7 + (4.9 - height()) / 2;
+    rows.forEach((row, i) => {
+      const dark = i === 0 || i === count - 1;
+      shapes.push({
+        x: 1.08,
+        y,
+        w: 11.1,
+        h: row.h,
+        kind: "roundRect",
+        fill: i === 0 ? "12384A" : dark ? "146A71" : "EDF4F3",
+      });
+      customText.push({
+        x: 1.8,
+        y: y + (row.h - row.textH) / 2,
+        w: 9.7,
+        h: row.textH,
+        lines: row.lines,
+        fontSize,
+        color: dark ? "FFFFFF" : "26384A",
+        role: "bullet",
+        sourceIndex: i,
+      });
+      if (i < count - 1)
+        shapes.push({
+          x: 6.5,
+          y: y + row.h + 0.025,
+          w: 0.28,
+          h: 0.13,
+          kind: "downArrow",
+          fill: "177E7D",
+        });
+      y += row.h + 0.18;
+    });
+    custom = true;
+  } else if (requested === "comparison" && count === 2) {
+    composition = "comparison";
+    // A short author-supplied label can head a column. Preserve its punctuation
+    // and the full comparison text instead of inventing labels or takeaways.
+    shapes.push({ x: 6.65, y: 1.9, w: 0.018, h: 4.45, fill: "DCE7E5" });
+    slide.bullets.forEach((value, i) => {
+      const x = i === 0 ? 0.98 : 7.1;
+      const parts = /^([^：:\n]{1,18}[：:])\s*(.+)$/s.exec(value);
+      shapes.push({ x, y: 1.82, w: 0.6, h: 0.055, fill: "177E7D" });
+      if (parts) {
+        if (
+          !put(i, parts[1], x, 2.1, 5.2, 0.92, 29, "12384A", true) ||
+          !put(i, value.slice(parts[1].length), x, 3.12, 5.2, 3.05, 26)
+        )
+          throw new Error("对照文字过密，请保留必要差异并展开较长解释。");
+      } else if (!put(i, value, x, 2.25, 5.2, 3.9, 27))
+        throw new Error("对照文字过密，请保留必要差异并展开较长解释。");
+    });
+    custom = true;
   } else if (requested === "flow" || requested === "comparison") {
     const flow = requested === "flow";
     if ((flow && (count < 2 || count > 4)) || (!flow && count !== 2))
       throw new Error(
-        flow ? "流程页需要二至四个有序步骤。" : "对照页需要两项并列内容。",
+        flow ? "流程页需要二至六个有序步骤。" : "对照页需要两项并列内容。",
       );
     composition = requested;
     const gap = flow ? 0.5 : 0.55;
@@ -525,7 +602,12 @@ export function slideLayout(
       rowHeights.reduce((sum, h) => sum + h, 0) + rowGap * (count - 1);
     const vertical =
       flow &&
-      blocks.some((block) => block.lines.length > 3) &&
+      blocks.some(
+        (block) =>
+          block.lines.length > 3 ||
+          (block.lines.length >= 3 &&
+            /^\p{Script=Han}[）)。，；：、]*$/u.test(block.lines.at(-1)!)),
+      ) &&
       totalHeight <= 4.9;
     if (vertical) {
       let y = 1.7 + (4.9 - totalHeight) / 2;

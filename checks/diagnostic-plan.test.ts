@@ -193,3 +193,46 @@ test("progress persistence failure cancels and waits for the launched plan job",
   assert.ok(["cancelled", "completed"].includes(jobs[0][1].status));
   assert.ok(h.inputs.length <= 2);
 });
+
+test("complete plan diagnostics honor scope and depth and retain repaired drafts as history", async () => {
+  const blocked = {
+    ...review,
+    issues: [
+      {
+        id: "missing",
+        sectionId: "design",
+        severity: "blocking",
+        message: "需要补全测量流程",
+        evidence: [],
+      },
+    ],
+  };
+  const h = harness([content, blocked, content, review, content, review]);
+  h.options.manifest = diagnosticManifest.parse({
+    ...manifest,
+    callLimit: 16,
+    plan: {
+      ...manifest.plan,
+      requestedScope: "full-plan",
+      verbosity: "deep",
+      maxCalls: 4,
+    },
+  });
+  const result = await runDiagnosticPlan(h.options);
+  assert.equal(h.inputs.length, 6);
+  assert.equal(result.plan.versions.length, 3);
+  assert.equal(result.artifact.versions.length, 2);
+  assert.ok(
+    result.jobs.every((job) => job.context.requestedScope === "full-plan"),
+  );
+  assert.equal(result.plan.topic.learningPreferences.verbosity, "deep");
+  assert.equal(result.assessment.strictPassed, true);
+  assert.equal(result.plan.versions[0].review!.status, "issues");
+  assert.equal(result.jobs[0].budget.attempts.length, 4);
+  const broken = structuredClone(result.plan);
+  broken.versions[1].parentId = null;
+  assert.equal(
+    diagnosticPlanAssessment(broken, result.jobs).mainlinePassed,
+    false,
+  );
+});

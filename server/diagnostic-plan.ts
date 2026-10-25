@@ -17,19 +17,35 @@ export function diagnosticPlanAssessment(plan: ResearchPlan, jobs: PlanJob[]) {
   // A complete job and a saved version alone are not a quality pass.
   const complete =
     jobs.length === 2 && jobs.every((j) => j.status === "completed");
+  const terminalVersions = jobs.flatMap((job) => {
+    const version = plan.versions.find(
+      (v) => v.id === job.resultVersion && v.jobId === job.id,
+    );
+    return version ? [version] : [];
+  });
+  const stages = plan.versions.map((v) =>
+    jobs.findIndex((job) => job.id === v.jobId),
+  );
   const bound =
-    plan.versions.length === 2 &&
+    jobs.length === 2 &&
+    terminalVersions.length === 2 &&
+    new Set(plan.versions.map((v) => v.id)).size === plan.versions.length &&
     plan.versions.every(
       (version, index) =>
-        version.jobId === jobs[index]?.id &&
-        version.id === jobs[index]?.resultVersion &&
-        (index === 0
-          ? version.parentId === null
-          : version.parentId === plan.versions[0].id),
-    );
-  const issues = plan.versions.flatMap((v) => v.review?.issues ?? []);
+        version.parentId ===
+          (index === 0 ? null : plan.versions[index - 1].id) &&
+        stages[index] >= 0 &&
+        (index === 0 || stages[index] >= stages[index - 1]),
+    ) &&
+    jobs.every(
+      (job, index) =>
+        plan.versions.filter((v) => v.jobId === job.id).at(-1)?.id ===
+        terminalVersions[index].id,
+    ) &&
+    plan.versions.at(-1)?.id === terminalVersions[1].id;
+  const issues = terminalVersions.flatMap((v) => v.review?.issues ?? []);
   const mainlinePassed =
-    complete && bound && plan.versions.every(planVersionReady);
+    complete && bound && terminalVersions.every(planVersionReady);
   return {
     runStatus: complete ? "completed" : "failed",
     mainlinePassed,
@@ -98,7 +114,7 @@ export async function runDiagnosticPlan(options: {
         sourceId,
       })),
       learningPreferences: {
-        verbosity: "standard",
+        verbosity: settings.verbosity ?? "standard",
         focus: "research-reasoning",
       },
     };
@@ -118,8 +134,8 @@ export async function runDiagnosticPlan(options: {
           expectedTopicVersion: plan.topic.version,
           action,
           instruction,
-          requestedScope: "design-draft",
-          maxCalls: 2,
+          requestedScope: settings.requestedScope ?? "design-draft",
+          maxCalls: settings.maxCalls ?? 2,
           retrieveLiterature: false,
         },
         { signal },
@@ -141,15 +157,22 @@ export async function runDiagnosticPlan(options: {
     await progress({ planId: plan.id, jobIds });
     await stage(
       "generate",
-      "给出能用于讨论的简短设计草案，说明必要测量与对照的作用，以及结论边界。缺条件保留未知，不补造参数或结果。",
+      settings.requestedScope === "full-plan"
+        ? "按当前资源写可供导师评阅的完整研究方案，展开背景缺口、目标与设计、测量与分析、可行性及实施安排；说明必要选择理由，缺条件保留未知，不补造参数或结果。"
+        : settings.requestedScope === "direction"
+          ? "给出聚焦的研究方向与可行性取舍，保留下一步所需的关键条件，不展开尚未选定路线的完整方案。"
+          : "给出能用于讨论的简短设计草案，说明必要测量与对照的作用，以及结论边界。缺条件保留未知，不补造参数或结果。",
     );
-    const original = structuredClone(plan.versions[0]);
+    const original = structuredClone(plan.versions);
     plan = await manager.updateTopic(plan.id, plan.topic.version, {
       ...topic,
       conditions: settings.revision.conditions,
     });
     await stage("revise", settings.revision.instruction);
-    if (JSON.stringify(original) !== JSON.stringify(plan.versions[0]))
+    if (
+      JSON.stringify(original) !==
+      JSON.stringify(plan.versions.slice(0, original.length))
+    )
       throw new Error("修订改写了历史版本，不能标记通过。");
     return {
       plan,
@@ -169,10 +192,15 @@ export async function runDiagnosticPlan(options: {
         })),
       ),
       artifact: {
-        versions: plan.versions.map((v) => ({
-          topic: { question: v.topic.question, conditions: v.topic.conditions },
-          content: v.content,
-        })),
+        versions: jobs
+          .map((job) => plan.versions.find((v) => v.id === job.resultVersion)!)
+          .map((v) => ({
+            topic: {
+              question: v.topic.question,
+              conditions: v.topic.conditions,
+            },
+            content: v.content,
+          })),
       },
       sources: plan.topic.sources.map((s) => ({
         id: s.id,
