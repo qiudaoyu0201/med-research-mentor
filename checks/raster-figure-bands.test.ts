@@ -427,3 +427,40 @@ test("local raster rows reject a faint connector and do not split a short attach
     false,
   );
 });
+
+test("landscape multirow figures expose complete rows without slicing attached labels", () => {
+  const canvas = createCanvas(1200, 820),
+    ctx = canvas.getContext("2d");
+  ctx.fillStyle = "white";
+  ctx.fillRect(0, 0, 1200, 820);
+  ctx.fillStyle = "black";
+  for (const top of [12, 432]) {
+    for (const left of [12, 412, 812]) {
+      ctx.fillRect(left, top, 20, 18); // printed panel label
+      ctx.fillRect(left + 45, top + 35, 300, 260); // complete plot
+      ctx.fillRect(left + 20, top + 315, 340, 70); // axis/attached distribution
+    }
+  }
+  const bands = rasterFigureBands(ctx, 1200, 820);
+  assert.equal(bands.length, 2);
+  const cut = bands[1].region.top * 820;
+  assert.ok(cut > 397 && cut < 432);
+  assert.equal(clearPanelBoundaries(ctx, 1200, 820, bands), true);
+  assert.equal(bands[0].region.top, 0);
+  assert.equal(bands[1].region.top + bands[1].region.height, 1);
+  // Every ink pixel is retained, and a connector disallows the row split.
+  ctx.fillStyle = "#eeeeee";
+  ctx.fillRect(600, 0, 2, 820);
+  assert.deepEqual(rasterFigureBands(ctx, 1200, 820), []);
+});
+
+test("a wide plot stays attached to its short risk table across a broad white gap", () => {
+  const canvas = createCanvas(1200, 820),
+    ctx = canvas.getContext("2d");
+  ctx.fillStyle = "white";
+  ctx.fillRect(0, 0, 1200, 820);
+  ctx.fillStyle = "black";
+  ctx.fillRect(30, 10, 1140, 500);
+  ctx.fillRect(30, 650, 1140, 150);
+  assert.deepEqual(rasterFigureBands(ctx, 1200, 820), []);
+});

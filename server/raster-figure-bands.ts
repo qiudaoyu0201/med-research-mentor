@@ -9,7 +9,7 @@ export function rasterFigureBands(
   width: number,
   height: number,
 ): FigurePanel[] {
-  if (width < 400 || height < width * 0.95) return [];
+  if (width < 400) return [];
   return pixelBands(ctx.getImageData(0, 0, width, height).data, width, height);
 }
 
@@ -19,7 +19,6 @@ function pixelBands(
   height: number,
   minimumGap = Math.max(12, height * 0.018),
 ): FigurePanel[] {
-  if (height < width * 0.95) return [];
   const gaps: { middle: number; size: number }[] = [];
   const inkRows = new Uint32Array(height);
   let start = -1;
@@ -42,7 +41,9 @@ function pixelBands(
       start = -1;
     }
   }
-  // Prefer broad gaps. Nearby gaps may divide a plot from its labels or histogram.
+  // Prefer broad gaps. The minimum on both sides also protects short attached
+  // tables in landscape figures; aspect ratio alone does not identify one row.
+  // Nearby gaps may divide a plot from its labels or histogram.
   const minimum = Math.max(height * 0.18, width * 0.28);
   const cuts: number[] = [];
   for (const gap of gaps.sort((a, b) => b.size - a.size)) {

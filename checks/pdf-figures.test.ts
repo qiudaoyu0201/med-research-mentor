@@ -432,3 +432,70 @@ test("subpixel borders enclose the full table including its notes above a figure
   assert.ok(region.top < 0.41, "plot top is retained");
   assert.ok(region.top + region.height > 0.72, "bottom labels are retained");
 });
+
+test("a body sentence beginning with an unpunctuated figure reference cannot become a caption", async () => {
+  for (const phrase of [
+    "Figure 3 shows the effect in the trial population.",
+    "Fig. 3 shows the effect in the trial population.",
+  ]) {
+    const result = await extract(text("F1", 36, 160, phrase));
+    assert.equal(result.sources.length, 0);
+  }
+});
+
+test("a complete unpunctuated caption still needs a distinct caption font and title", async () => {
+  const title = "Figure 3 Treatment effect in the trial population.";
+  const body = text(
+    "F1",
+    36,
+    700,
+    "The study methods and results are described here in the main text font with sufficient context.",
+  );
+  const result = await extract([body, text("F2", 36, 160, title)].join("\n"));
+  assert.equal(result.sources.length, 1);
+  assert.equal(result.sources[0].figure, "3");
+  assert.equal(
+    (await extract([body, text("F1", 36, 160, title)].join("\n"))).sources
+      .length,
+    0,
+  );
+});
+
+test("a neighboring text column across a narrow gutter does not suppress a real caption", async () => {
+  const paragraph =
+    "The left column describes the study population and baseline characteristics.";
+  const probe = await extract(text("F1", 36, 161.5, paragraph), false);
+  const item = probe.items.find(
+    (candidate) => "str" in candidate && candidate.str === paragraph,
+  );
+  assert.ok(item && "width" in item);
+  const width = item.width;
+  const result = await extract(
+    [
+      text("F1", 338 - width, 161.5, paragraph),
+      text("F2", 350, 160, "Fig. 1 | Outcomes by randomized group."),
+    ].join("\n"),
+    "350 220 210 250 re S",
+  );
+  assert.deepEqual(
+    result.sources.map((source) => source.figure),
+    ["1"],
+  );
+  assert.ok(result.sources[0].imageRegion!.left > 0.5);
+});
+
+test("out-of-order PDF text runs retain axis titles and the attached risk rows", async () => {
+  const result = await extract(
+    [
+      text("F2", 36, 160, "Fig. 1 | Time to first kidney event."),
+      text("F1", 96, 185, "Placebo 100 90 80"),
+      text("F1", 96, 194, "Treatment 100 92 84"),
+      text("F1", 180, 210, "Time since randomization (weeks)"),
+    ].join("\n"),
+  );
+  assert.equal(result.sources.length, 1);
+  const bottom =
+    result.sources[0].imageRegion!.top + result.sources[0].imageRegion!.height;
+  assert.ok(bottom * 792 >= 607, "both attached risk rows must remain visible");
+  assert.ok(bottom * 792 < 624, "the caption must not enter the crop");
+});

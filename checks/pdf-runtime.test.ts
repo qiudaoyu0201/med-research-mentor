@@ -19,7 +19,7 @@ test("PDF decoder resources resolve locally with PDF.js trailing slash semantics
   await access(pdfRuntime.wasmUrl + "openjpeg.wasm");
 });
 test("new decoder uses a fresh cache version while old cache records remain readable", () => {
-  assert.equal(pdfExtractionVersion, "pdf-figures-v13-column-rows");
+  assert.equal(pdfExtractionVersion, "pdf-figures-v14-landscape-anchors");
   const key = `${"a".repeat(64)}-${pdfExtractionVersion}`;
   assert.equal(safeId(key), key);
   const record = { pages: ["原文"], parseStatus: "ready", figures: [] };
@@ -35,6 +35,7 @@ test("new decoder uses a fresh cache version while old cache records remain read
     "pdf-figures-v10-raster-columns",
     "pdf-figures-v11-ruled-grid",
     "pdf-figures-v12-caption-table",
+    "pdf-figures-v13-column-rows",
     pdfExtractionVersion,
   ]) {
     assert.ok(validRecordShape("material-cache", record, `hash-${version}`));

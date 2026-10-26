@@ -44,9 +44,11 @@ export async function pageFigures(
   const captions = texts
     .filter((t) => {
       const label = t.text.trim();
-      const wholeAnchor = /^(?:Fig(?:ure)?\.?|图)\s*\d+\s*(?:[|:：.]|\s)/i.test(
-        label,
-      );
+      const wholeAnchor =
+        /^(?:Fig(?:ure)?\.?|图)\s*\d+\s*[|:：.]/i.test(label) ||
+        (!!t.font &&
+          t.font !== bodyFont &&
+          /^(?:Fig\.|Figure|图)\s*\d+\s+[A-Z\u4e00-\u9fff].{11,}$/.test(label));
       // Some PDFs put the bold figure number and normal punctuation in separate runs.
       // Require adjacent punctuation on the same baseline; bare in-text references do not qualify.
       const splitAnchor =
@@ -81,7 +83,8 @@ export async function pageFigures(
         adjacentTitle.text.trim().length >= 12;
       // Font changes can split a body sentence just before "Fig 2.". A caption
       // must start its local line, not borrow a plot from a preceding caption.
-      // Check only adjacent runs so independent columns remain valid anchors.
+      // Join only a normal inter-word gap; a narrow page-column gutter is not
+      // part of the caption line even when neighboring baselines nearly align.
       const inlineReference = texts.some(
         (previous) =>
           previous !== t &&
@@ -89,7 +92,7 @@ export async function pageFigures(
             Math.max(previous.height, t.height) * 0.35 &&
           previous.left < t.left &&
           previous.right <= t.left + 1 &&
-          previous.right >= t.left - Math.max(previous.height, t.height) * 1.5,
+          previous.right >= t.left - Math.max(previous.height, t.height) * 0.8,
       );
       return (
         (wholeAnchor || splitAnchor || styledTitleAnchor) &&
@@ -258,14 +261,18 @@ export async function pageFigures(
       top = Math.min(...graphics.map((b) => b.top)),
       bottom = Math.max(...graphics.map((b) => b.bottom));
     // Include text labels just outside vector/raster bounds, but never the caption/body.
-    for (const t of texts.filter(
-      (t) =>
-        t.bottom < cap.top - 1 &&
-        t.top >= top - 18 &&
-        t.bottom <= bottom + 18 &&
-        t.right >= left - 24 &&
-        t.left <= right + 24,
-    )) {
+    // PDF content order need not match visual order. Extend downward through
+    // nearby axis titles and risk rows in reading order, stopping at the caption.
+    for (const t of texts
+      .filter(
+        (t) =>
+          t.bottom < cap.top - 1 &&
+          t.top >= top - 18 &&
+          t.right >= left - 24 &&
+          t.left <= right + 24,
+      )
+      .sort((a, b) => a.top - b.top)) {
+      if (t.bottom > bottom + 18) continue;
       left = Math.min(left, t.left);
       right = Math.max(right, t.right);
       top = Math.min(top, t.top);

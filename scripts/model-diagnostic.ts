@@ -499,9 +499,12 @@ try {
           } = await import("../server/training-delivery.ts");
           const { renderExportedDeckPages } =
             await import("../server/ppt-render.ts");
+          // Export the same validated final materials used by grounding and
+          // image review, including foundations added during the run.
+          const deliveryPaper = { ...frozen.paper, sources: material };
           const exportPath = await exportDeck(
             candidateDeck,
-            frozen.paper,
+            deliveryPaper,
             `${id}-${run.id}`,
           );
           const deliveryDirectory = join(directory, "records", "delivery");
@@ -522,7 +525,7 @@ try {
           };
           const exportAudit = await verifyTrainingDeliveryFiles(
             product,
-            frozen.paper,
+            deliveryPaper,
           );
           const nativeTablesVerified =
             exportAudit.nativeTableCount > 0 &&
@@ -533,7 +536,7 @@ try {
           const renderAudit = await renderExportedDeckPages(
             exportPath,
             candidateDeck,
-            frozen.paper.sources,
+            deliveryPaper.sources,
             renderDirectory,
           );
           const { pptImagePacket } =
