@@ -31,6 +31,16 @@ export async function pageFigures(
         height: h,
       };
     });
+  // Caption numbers may be styled separately from an unpunctuated title.
+  // A different font from the page's main text plus an adjacent title keeps
+  // ordinary line-start references such as "Fig. 2 shows ..." conservative.
+  const fontCharacters = new Map<string, number>();
+  for (const t of texts)
+    fontCharacters.set(
+      t.font,
+      (fontCharacters.get(t.font) ?? 0) + t.text.length,
+    );
+  const bodyFont = [...fontCharacters].sort((a, b) => b[1] - a[1])[0]?.[0];
   const captions = texts
     .filter((t) => {
       const label = t.text.trim();
@@ -49,6 +59,26 @@ export async function pageFigures(
             next.left >= t.right - 1 &&
             next.left <= t.right + Math.max(t.height, next.height) * 1.5,
         );
+      const styledNumber =
+        /^(?:Fig\.|Figure|图)\s*\d+$/i.test(label) &&
+        !!t.font &&
+        t.font !== bodyFont;
+      const adjacentTitle = styledNumber
+        ? texts
+            .filter(
+              (next) =>
+                Math.abs(next.bottom - t.bottom) <=
+                  Math.max(t.height, next.height) * 0.35 &&
+                next.left >= t.right - 1 &&
+                next.left <= t.right + Math.max(t.height, next.height) * 1.5,
+            )
+            .sort((a, b) => a.left - b.left)[0]
+        : undefined;
+      const styledTitleAnchor =
+        styledNumber &&
+        !!adjacentTitle &&
+        /^[A-Z\u4e00-\u9fff]/.test(adjacentTitle.text.trim()) &&
+        adjacentTitle.text.trim().length >= 12;
       // Font changes can split a body sentence just before "Fig 2.". A caption
       // must start its local line, not borrow a plot from a preceding caption.
       // Check only adjacent runs so independent columns remain valid anchors.
@@ -62,7 +92,7 @@ export async function pageFigures(
           previous.right >= t.left - Math.max(previous.height, t.height) * 1.5,
       );
       return (
-        (wholeAnchor || splitAnchor) &&
+        (wholeAnchor || splitAnchor || styledTitleAnchor) &&
         !inlineReference &&
         t.top > H * 0.06 &&
         t.top < H * 0.95
@@ -71,10 +101,12 @@ export async function pageFigures(
     .sort((a, b) => a.top - b.top);
   if (!captions.length) return [];
   const ops = await page.getOperatorList(),
-    boxes: Box[] = [];
+    boxes: Box[] = [],
+    rasterBoxes: Box[] = [],
+    ruleBoxes: Box[] = [];
   let matrix = [...viewport.transform];
   const stack: number[][] = [];
-  const add = (b: number[]) => {
+  const add = (b: number[], raster = false) => {
     const corners = [
       [b[0], b[1]],
       [b[2], b[1]],
@@ -90,14 +122,27 @@ export async function pageFigures(
       top: Math.min(...corners.map((p) => p[1])),
       bottom: Math.max(...corners.map((p) => p[1])),
     };
+    // Subpixel rules are still real table borders; they need not qualify as
+    // figure content to delimit a separately titled table.
+    if (
+      !raster &&
+      box.bottom - box.top >= 0 &&
+      box.bottom - box.top <= 4 &&
+      box.right - box.left >= 120 &&
+      box.top > H * 0.055 &&
+      box.bottom < H * 0.96
+    )
+      ruleBoxes.push(box);
     if (
       box.bottom - box.top > 1 &&
       box.right - box.left > 1 &&
       box.top > H * 0.055 &&
       box.bottom < H * 0.96 &&
       (box.bottom - box.top) * (box.right - box.left) < W * H * 0.65
-    )
+    ) {
       boxes.push(box);
+      if (raster) rasterBoxes.push(box);
+    }
   };
   for (let i = 0; i < ops.fnArray.length; i++) {
     const f = ops.fnArray[i],
@@ -119,7 +164,7 @@ export async function pageFigures(
         OPS.paintImageMaskXObject,
       ].includes(f)
     )
-      add([0, 0, 1, 1]);
+      add([0, 0, 1, 1], true);
   }
   const regions: { region: ImageRegion; caption: string; number: string }[] =
     [];
@@ -145,7 +190,61 @@ export async function pageFigures(
           c.top < cap.top - 2 && c.left < column.right && c.right > column.left,
       )
       .at(-1);
-    const topLimit = previous ? previous.bottom + 15 : H * 0.06;
+    let topLimit = previous ? previous.bottom + 15 : H * 0.06;
+    // A raster figure may sit below an independently captioned ruled table.
+    // Match that table's own header/footer rules before the first image; do
+    // not combine all drawing operators above the figure into one crop.
+    const precedingTable = texts
+      .filter(
+        (t) =>
+          /^(?:Table|表)\s*\d+[.:：]?$/i.test(t.text.trim()) &&
+          t.bottom < cap.top &&
+          t.top >= topLimit &&
+          t.left < column.right &&
+          t.right > column.left,
+      )
+      .sort((a, b) => b.top - a.top)[0];
+    if (precedingTable) {
+      const rasterTop = Math.min(
+        ...rasterBoxes
+          .filter(
+            (b) =>
+              b.top > precedingTable.bottom &&
+              b.bottom <= cap.top + 1 &&
+              b.right > column.left &&
+              b.left < column.right &&
+              b.right - b.left > 60 &&
+              b.bottom - b.top > 35,
+          )
+          .map((b) => b.top),
+      );
+      if (Number.isFinite(rasterTop)) {
+        const rules = ruleBoxes
+          .filter(
+            (b) =>
+              b.top >= precedingTable.top - cap.height * 1.5 &&
+              b.bottom < rasterTop &&
+              b.bottom - b.top <= Math.max(2, cap.height * 0.3) &&
+              b.right - b.left >=
+                Math.max(120, (column.right - column.left) * 0.65) &&
+              b.left <= precedingTable.left + cap.height &&
+              b.right >= precedingTable.right,
+          )
+          .sort((a, b) => a.top - b.top);
+        const header = rules[0];
+        const footer =
+          header &&
+          rules
+            .filter(
+              (b) =>
+                b.top > header.bottom + cap.height &&
+                Math.abs(b.left - header.left) <= 2 &&
+                Math.abs(b.right - header.right) <= 2,
+            )
+            .at(-1);
+        if (footer) topLimit = Math.max(topLimit, footer.bottom + 1);
+      }
+    }
     const graphics = boxes.filter(
       (b) =>
         b.top >= topLimit &&

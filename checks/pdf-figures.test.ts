@@ -18,7 +18,7 @@ function fixture(caption: string, graphics: boolean | string = true) {
   const objects = [
     "<< /Type /Catalog /Pages 2 0 R >>",
     "<< /Type /Pages /Kids [3 0 R] /Count 1 >>",
-    "<< /Type /Page /Parent 2 0 R /MediaBox [0 0 612 792] /Resources << /Font << /F1 4 0 R /F2 5 0 R >> >> /Contents 6 0 R >>",
+    "<< /Type /Page /Parent 2 0 R /MediaBox [0 0 612 792] /Resources << /Font << /F1 4 0 R /F2 5 0 R >> /XObject << /Im1 7 0 R >> >> /Contents 6 0 R >>",
     "<< /Type /Font /Subtype /Type1 /BaseFont /Helvetica >>",
     "<< /Type /Font /Subtype /Type1 /BaseFont /Helvetica-Bold >>",
     "<< /Length " +
@@ -26,6 +26,7 @@ function fixture(caption: string, graphics: boolean | string = true) {
       " >>\nstream\n" +
       stream +
       "\nendstream",
+    "<< /Type /XObject /Subtype /Image /Width 2 /Height 2 /ColorSpace /DeviceRGB /BitsPerComponent 8 /Length 12 >>\nstream\nAAAAAAAAAAAA\nendstream",
   ];
   let pdf = "%PDF-1.4\n";
   const offsets = [0];
@@ -326,4 +327,108 @@ test("closed ruled figure grids survive PDF extraction with full-cell region cho
   assert.ok(lowerRight.left > 0.49 && lowerRight.left < 0.51);
   assert.ok(lowerRight.left + lowerRight.width >= 0.999);
   assert.ok(lowerRight.top + lowerRight.height >= 0.999);
+});
+
+test("styled figure labels without trailing punctuation bind an adjacent caption title", async () => {
+  const result = await extract(
+    [
+      text("F2", 36, 160, "Fig. 2"),
+      text("F1", 67, 160, "Causal impact analysis on patient outcomes."),
+    ].join("\n"),
+  );
+  assert.equal(result.sources.length, 1);
+  assert.equal(result.sources[0].figure, "2");
+  assert.match(result.sources[0].caption!, /Causal impact analysis/);
+});
+
+test("unpunctuated figure references in the main text font do not create figures", async () => {
+  const result = await extract(
+    [
+      text("F1", 36, 160, "Fig. 2"),
+      text("F1", 67, 160, "Shows the patient outcomes discussed above."),
+    ].join("\n"),
+  );
+  assert.equal(result.sources.length, 0);
+});
+
+test("styled figure numbers require an adjacent title on the same baseline", async () => {
+  for (const [x, y, title] of [
+    [145, 160, "Causal impact analysis on patient outcomes."],
+    [67, 145, "Causal impact analysis on patient outcomes."],
+    [67, 160, "shows the patient outcomes discussed above."],
+  ] as const) {
+    const result = await extract(
+      [text("F2", 36, 160, "Fig. 2"), text("F1", x, y, title)].join("\n"),
+    );
+    assert.equal(result.sources.length, 0);
+  }
+});
+
+test("a styled unpunctuated label cannot skip intervening punctuation or create a plot", async () => {
+  const malformed = await extract(
+    [
+      text("F2", 36, 160, "Fig. 2"),
+      text("F1", 61, 160, ")."),
+      text("F1", 70, 160, "Causal impact analysis on patient outcomes."),
+    ].join("\n"),
+  );
+  assert.equal(malformed.sources.length, 0);
+  const noPlot = await extract(
+    [
+      text("F2", 36, 160, "Fig. 2"),
+      text("F1", 67, 160, "Causal impact analysis on patient outcomes."),
+    ].join("\n"),
+    false,
+  );
+  assert.equal(noPlot.sources.length, 0);
+});
+
+test("a raster figure below a separately titled ruled table excludes that table", async () => {
+  const result = await extract(
+    [
+      text("F2", 36, 690, "Table 1."),
+      text("F1", 78, 690, "Observed and expected outcomes."),
+      text("F2", 36, 160, "Fig. 2"),
+      text("F1", 67, 160, "Causal impact analysis on patient outcomes."),
+    ].join("\n"),
+    "36 660 500 1.2 re f\n36 500 500 1.2 re f\nq 400 0 0 250 90 220 cm /Im1 Do Q",
+  );
+  assert.equal(result.sources.length, 1);
+  const region = result.sources[0].imageRegion!;
+  assert.ok(region.top > 0.38, "the table above the plot is excluded");
+  assert.ok(region.top < 0.41, "the top of the original plot is retained");
+  assert.ok(region.top + region.height > 0.72, "bottom labels are retained");
+  assert.doesNotMatch(result.sources[0].caption!, /Table 1/);
+});
+
+test("table separation requires matching original rules rather than an inferred table height", async () => {
+  const result = await extract(
+    [
+      text("F2", 36, 690, "Table 1."),
+      text("F1", 78, 690, "Observed and expected outcomes."),
+      text("F2", 36, 160, "Fig. 2"),
+      text("F1", 67, 160, "Causal impact analysis on patient outcomes."),
+    ].join("\n"),
+    "36 660 500 1.2 re f\n70 500 430 1.2 re f\nq 400 0 0 250 90 220 cm /Im1 Do Q",
+  );
+  assert.equal(result.sources.length, 1);
+  assert.ok(result.sources[0].imageRegion!.top < 0.2);
+});
+
+test("subpixel borders enclose the full table including its notes above a figure", async () => {
+  const result = await extract(
+    [
+      text("F2", 36, 690, "Table 1."),
+      text("F1", 78, 690, "Observed and expected outcomes."),
+      text("F1", 36, 495, "Table note below the last data row."),
+      text("F2", 36, 160, "Fig. 2"),
+      text("F1", 67, 160, "Causal impact analysis on patient outcomes."),
+    ].join("\n"),
+    "36 700 500 0.45 re f\n36 510 500 1.2 re f\n36 480 500 0.5 re f\nq 400 0 0 250 90 220 cm /Im1 Do Q",
+  );
+  assert.equal(result.sources.length, 1);
+  const region = result.sources[0].imageRegion!;
+  assert.ok(region.top > 0.39, "table notes and outer border are excluded");
+  assert.ok(region.top < 0.41, "plot top is retained");
+  assert.ok(region.top + region.height > 0.72, "bottom labels are retained");
 });

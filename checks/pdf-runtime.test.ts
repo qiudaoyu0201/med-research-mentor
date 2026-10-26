@@ -3,6 +3,7 @@ import assert from "node:assert/strict";
 import { access } from "node:fs/promises";
 import { pdfRuntime, pdfExtractionVersion } from "../server/pdf-runtime.ts";
 import { validRecordShape } from "../server/record-shapes.ts";
+import { safeId } from "../server/storage.ts";
 
 test("PDF decoder resources resolve locally with PDF.js trailing slash semantics on Windows", async () => {
   for (const path of [
@@ -18,7 +19,9 @@ test("PDF decoder resources resolve locally with PDF.js trailing slash semantics
   await access(pdfRuntime.wasmUrl + "openjpeg.wasm");
 });
 test("new decoder uses a fresh cache version while old cache records remain readable", () => {
-  assert.equal(pdfExtractionVersion, "pdf-figures-v11-ruled-grid");
+  assert.equal(pdfExtractionVersion, "pdf-figures-v12-caption-table");
+  const key = `${"a".repeat(64)}-${pdfExtractionVersion}`;
+  assert.equal(safeId(key), key);
   const record = { pages: ["原文"], parseStatus: "ready", figures: [] };
   for (const version of [
     "pdf-figures-v2",
@@ -30,6 +33,7 @@ test("new decoder uses a fresh cache version while old cache records remain read
     "pdf-figures-v8-caption-line-start",
     "pdf-figures-v9-raster-bands",
     "pdf-figures-v10-raster-columns",
+    "pdf-figures-v11-ruled-grid",
     pdfExtractionVersion,
   ]) {
     assert.ok(validRecordShape("material-cache", record, `hash-${version}`));

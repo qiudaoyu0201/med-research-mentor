@@ -746,6 +746,9 @@ export class TaskManager {
             : "") +
           (skills.teachingContract ?? "") +
           "\n" +
+          (run.input.module === "ppt"
+            ? "文件导出和页面渲染由宿主在内容生成后执行，文件进度由宿主单独展示；不要在unit、页面或讲述提示中自行声明文件已经或尚未导出、表格已经或尚未转换及渲染验收状态。真实的来源缺口仍在影响科学判断处说明。\n"
+            : "") +
           skills.modules
             .filter(
               (m) =>
@@ -768,6 +771,9 @@ export class TaskManager {
           "\n若 deck 含 speechScript，联合核对完整稿与页面的事实、术语、页序、转场和结尾；仅提供逐页备注不能当作完整稿。";
         const scopedChecking =
           checking +
+          (run.input.module === "ppt"
+            ? "\n当前页面结构的表格格式是layout=table、bullets逐项为一行、单元格以 | 分隔，第一行为表头；宿主将其转换为原生可编辑表格。这是受支持的单元格结构，不要求Schema之外的headers、rows或table字段，也不能仅因使用bullets与竖线就判定不是表格。仍须核对行列对应、数字、来源和密度；实际文件是否已导出、可编辑或渲染通过，必须等待宿主审计证据，不能由此结构预先认定。"
+            : "") +
           "\n图件绑定已由程序执行：当前deck的imageCrop是按提供的面板ID解析得到的坐标，临时imagePanel已移除；不得仅因看到imageCrop或未看到imagePanel便声称模型猜测坐标。检查实际核验画面是否与页面讲解一致，必要的轴、单位、组别、图例和比例尺是否完整；当前画面未展示的其他读数不得声称图中可见。同一完整图片没有不同裁剪或可见强调而多页原样复用，属于影响汇报的实质图件问题，应列为blocking并要求修订；已有不同面板裁剪不能因来源ID相同而判重复。" +
           "\n图像事实核对：显著性括号必须按该面板横向组别逐个定位两条竖线端点，再用图例核对两端点的颜色、形状和组名；不要按星号居中位置、最近的散点或其他面板推测比较组。提出改组建议时在suggestion写明这条定位依据。原稿、前次审核和用户的说法均不是原始证据；重新核对图像后才能采纳，读不清时限定到可确认的结果，不编造精确比较。" +
           (this.deliveryPolicy === "online" ? onlineReviewInstructions : "") +
