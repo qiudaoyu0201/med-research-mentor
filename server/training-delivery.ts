@@ -90,6 +90,19 @@ export async function verifyTrainingDeliveryFiles(
   );
   if (slides.length !== deck.slides.length)
     throw new Error("实际 PPT 页数与冻结产物不一致。");
+  const slideXml = slides.map((path) => strFromU8(zip[path]));
+  const editableTextShapeCount = slideXml.reduce(
+    (sum, xml) =>
+      sum +
+      (xml.match(/<p:sp\b[\s\S]*?<\/p:sp>/g) ?? []).filter((shape) =>
+        /<a:t>/.test(shape),
+      ).length,
+    0,
+  );
+  const nativeTableCount = slideXml.reduce(
+    (sum, xml) => sum + (xml.match(/<a:tbl\b/g) ?? []).length,
+    0,
+  );
   for (const path of Object.keys(zip).filter((p) =>
     /^ppt\/notesSlides\/notesSlide\d+\.xml$/.test(p),
   ))
@@ -121,8 +134,15 @@ export async function verifyTrainingDeliveryFiles(
     );
     const expectedText =
       layout.text
+        .filter(
+          (box) =>
+            !layout.table ||
+            box.role !== "bullet" ||
+            box.sourceIndex === undefined,
+        )
         .flatMap((box) => [...(box.marker ? [box.marker] : []), ...box.lines])
         .join("") +
+      (layout.table?.cellLines.flat(2).join("") ?? "") +
       (slide.imageSource && !source?.image ? "原图未提供" : "") +
       `${i + 1} / ${deck.slides.length}`;
     if (compact(xmlText(xml)) !== compact(expectedText))
@@ -202,5 +222,40 @@ export async function verifyTrainingDeliveryFiles(
       path: file.path,
       hash: createHash("sha256").update(contents[i]).digest("hex"),
     })),
+    editableTextShapeCount,
+    nativeTableCount,
+    sourceImagesVerified: true,
+    editableSurface:
+      editableTextShapeCount > 0 || nativeTableCount > 0
+        ? "native-powerpoint-objects"
+        : "unknown",
   };
+}
+
+/** Clear only an absent host deliverable after actual export/rendering. Content
+ * and readability defects still need their own evidence and review. */
+export function missingPptDeliveryClaim(
+  text: string,
+  nativeTablesVerified = false,
+) {
+  const claim = text.replace(/不是[^。；;]*错误/g, "");
+  const onlyNativeTableVerification =
+    nativeTablesVerified &&
+    /(?:不能|无法|尚未|未)[^。；;]*(?:确认|验证|证明)[^。；;]*(?:原生|可编辑)/.test(
+      claim,
+    ) &&
+    /表格|单元格/.test(claim) &&
+    !/遗漏|缺失|未列|不完整|不一致|错误|溢出|遮挡|裁切|重叠|模糊|过密|字号过小/.test(claim);
+  return (
+    onlyNativeTableVerification ||
+    (/PPTX|pptx|导出文件|成品文件|整页渲染|逐页渲染|逐页视觉|逐页审计/.test(
+      text,
+    ) &&
+      /尚未|未能|没有|缺少|未提供|未生成|未交付|未导出|缺乏|尚无|未完成|无法.*(?:核|检查|验证)/.test(
+        text,
+      ) &&
+      !/数值|置信|区间|来源|同页引用|[页表图]序|漏诊|敏感度|特异度|阈值|坐标|图例|裁切|溢出|遮挡|误用|错误|字号过小/.test(
+        text,
+      ))
+  );
 }

@@ -2,6 +2,7 @@ import { OPS, Util, type PDFPageProxy } from "pdfjs-dist/legacy/build/pdf.mjs";
 import { createCanvas } from "@napi-rs/canvas";
 import type { Source } from "../shared/types.ts";
 import { figurePanels, clearPanelBoundaries } from "./figure-panels.ts";
+import { rasterFigureRegions } from "./raster-figure-bands.ts";
 import type { ImageRegion } from "../shared/image-region.ts";
 
 type Box = { left: number; top: number; right: number; bottom: number };
@@ -30,12 +31,24 @@ export async function pageFigures(
         height: h,
       };
     });
+  // Caption numbers may be styled separately from an unpunctuated title.
+  // A different font from the page's main text plus an adjacent title keeps
+  // ordinary line-start references such as "Fig. 2 shows ..." conservative.
+  const fontCharacters = new Map<string, number>();
+  for (const t of texts)
+    fontCharacters.set(
+      t.font,
+      (fontCharacters.get(t.font) ?? 0) + t.text.length,
+    );
+  const bodyFont = [...fontCharacters].sort((a, b) => b[1] - a[1])[0]?.[0];
   const captions = texts
     .filter((t) => {
       const label = t.text.trim();
-      const wholeAnchor = /^(?:Fig(?:ure)?\.?|图)\s*\d+\s*(?:[|:：.]|\s)/i.test(
-        label,
-      );
+      const wholeAnchor =
+        /^(?:Fig(?:ure)?\.?|图)\s*\d+\s*[|:：.]/i.test(label) ||
+        (!!t.font &&
+          t.font !== bodyFont &&
+          /^(?:Fig\.|Figure|图)\s*\d+\s+[A-Z\u4e00-\u9fff].{11,}$/.test(label));
       // Some PDFs put the bold figure number and normal punctuation in separate runs.
       // Require adjacent punctuation on the same baseline; bare in-text references do not qualify.
       const splitAnchor =
@@ -48,9 +61,30 @@ export async function pageFigures(
             next.left >= t.right - 1 &&
             next.left <= t.right + Math.max(t.height, next.height) * 1.5,
         );
+      const styledNumber =
+        /^(?:Fig\.|Figure|图)\s*\d+$/i.test(label) &&
+        !!t.font &&
+        t.font !== bodyFont;
+      const adjacentTitle = styledNumber
+        ? texts
+            .filter(
+              (next) =>
+                Math.abs(next.bottom - t.bottom) <=
+                  Math.max(t.height, next.height) * 0.35 &&
+                next.left >= t.right - 1 &&
+                next.left <= t.right + Math.max(t.height, next.height) * 1.5,
+            )
+            .sort((a, b) => a.left - b.left)[0]
+        : undefined;
+      const styledTitleAnchor =
+        styledNumber &&
+        !!adjacentTitle &&
+        /^[A-Z\u4e00-\u9fff]/.test(adjacentTitle.text.trim()) &&
+        adjacentTitle.text.trim().length >= 12;
       // Font changes can split a body sentence just before "Fig 2.". A caption
       // must start its local line, not borrow a plot from a preceding caption.
-      // Check only adjacent runs so independent columns remain valid anchors.
+      // Join only a normal inter-word gap; a narrow page-column gutter is not
+      // part of the caption line even when neighboring baselines nearly align.
       const inlineReference = texts.some(
         (previous) =>
           previous !== t &&
@@ -58,10 +92,10 @@ export async function pageFigures(
             Math.max(previous.height, t.height) * 0.35 &&
           previous.left < t.left &&
           previous.right <= t.left + 1 &&
-          previous.right >= t.left - Math.max(previous.height, t.height) * 1.5,
+          previous.right >= t.left - Math.max(previous.height, t.height) * 0.8,
       );
       return (
-        (wholeAnchor || splitAnchor) &&
+        (wholeAnchor || splitAnchor || styledTitleAnchor) &&
         !inlineReference &&
         t.top > H * 0.06 &&
         t.top < H * 0.95
@@ -70,10 +104,12 @@ export async function pageFigures(
     .sort((a, b) => a.top - b.top);
   if (!captions.length) return [];
   const ops = await page.getOperatorList(),
-    boxes: Box[] = [];
+    boxes: Box[] = [],
+    rasterBoxes: Box[] = [],
+    ruleBoxes: Box[] = [];
   let matrix = [...viewport.transform];
   const stack: number[][] = [];
-  const add = (b: number[]) => {
+  const add = (b: number[], raster = false) => {
     const corners = [
       [b[0], b[1]],
       [b[2], b[1]],
@@ -89,14 +125,27 @@ export async function pageFigures(
       top: Math.min(...corners.map((p) => p[1])),
       bottom: Math.max(...corners.map((p) => p[1])),
     };
+    // Subpixel rules are still real table borders; they need not qualify as
+    // figure content to delimit a separately titled table.
+    if (
+      !raster &&
+      box.bottom - box.top >= 0 &&
+      box.bottom - box.top <= 4 &&
+      box.right - box.left >= 120 &&
+      box.top > H * 0.055 &&
+      box.bottom < H * 0.96
+    )
+      ruleBoxes.push(box);
     if (
       box.bottom - box.top > 1 &&
       box.right - box.left > 1 &&
       box.top > H * 0.055 &&
       box.bottom < H * 0.96 &&
       (box.bottom - box.top) * (box.right - box.left) < W * H * 0.65
-    )
+    ) {
       boxes.push(box);
+      if (raster) rasterBoxes.push(box);
+    }
   };
   for (let i = 0; i < ops.fnArray.length; i++) {
     const f = ops.fnArray[i],
@@ -118,7 +167,7 @@ export async function pageFigures(
         OPS.paintImageMaskXObject,
       ].includes(f)
     )
-      add([0, 0, 1, 1]);
+      add([0, 0, 1, 1], true);
   }
   const regions: { region: ImageRegion; caption: string; number: string }[] =
     [];
@@ -144,7 +193,61 @@ export async function pageFigures(
           c.top < cap.top - 2 && c.left < column.right && c.right > column.left,
       )
       .at(-1);
-    const topLimit = previous ? previous.bottom + 15 : H * 0.06;
+    let topLimit = previous ? previous.bottom + 15 : H * 0.06;
+    // A raster figure may sit below an independently captioned ruled table.
+    // Match that table's own header/footer rules before the first image; do
+    // not combine all drawing operators above the figure into one crop.
+    const precedingTable = texts
+      .filter(
+        (t) =>
+          /^(?:Table|表)\s*\d+[.:：]?$/i.test(t.text.trim()) &&
+          t.bottom < cap.top &&
+          t.top >= topLimit &&
+          t.left < column.right &&
+          t.right > column.left,
+      )
+      .sort((a, b) => b.top - a.top)[0];
+    if (precedingTable) {
+      const rasterTop = Math.min(
+        ...rasterBoxes
+          .filter(
+            (b) =>
+              b.top > precedingTable.bottom &&
+              b.bottom <= cap.top + 1 &&
+              b.right > column.left &&
+              b.left < column.right &&
+              b.right - b.left > 60 &&
+              b.bottom - b.top > 35,
+          )
+          .map((b) => b.top),
+      );
+      if (Number.isFinite(rasterTop)) {
+        const rules = ruleBoxes
+          .filter(
+            (b) =>
+              b.top >= precedingTable.top - cap.height * 1.5 &&
+              b.bottom < rasterTop &&
+              b.bottom - b.top <= Math.max(2, cap.height * 0.3) &&
+              b.right - b.left >=
+                Math.max(120, (column.right - column.left) * 0.65) &&
+              b.left <= precedingTable.left + cap.height &&
+              b.right >= precedingTable.right,
+          )
+          .sort((a, b) => a.top - b.top);
+        const header = rules[0];
+        const footer =
+          header &&
+          rules
+            .filter(
+              (b) =>
+                b.top > header.bottom + cap.height &&
+                Math.abs(b.left - header.left) <= 2 &&
+                Math.abs(b.right - header.right) <= 2,
+            )
+            .at(-1);
+        if (footer) topLimit = Math.max(topLimit, footer.bottom + 1);
+      }
+    }
     const graphics = boxes.filter(
       (b) =>
         b.top >= topLimit &&
@@ -158,18 +261,85 @@ export async function pageFigures(
       top = Math.min(...graphics.map((b) => b.top)),
       bottom = Math.max(...graphics.map((b) => b.bottom));
     // Include text labels just outside vector/raster bounds, but never the caption/body.
-    for (const t of texts.filter(
-      (t) =>
-        t.bottom < cap.top - 1 &&
-        t.top >= top - 18 &&
-        t.bottom <= bottom + 18 &&
-        t.right >= left - 24 &&
-        t.left <= right + 24,
-    )) {
+    // PDF content order need not match visual order. Extend downward through
+    // nearby axis titles and risk rows in reading order, stopping at the caption.
+    for (const t of texts
+      .filter(
+        (t) =>
+          t.bottom < cap.top - 1 &&
+          t.top >= top - 18 &&
+          t.right >= left - 24 &&
+          t.left <= right + 24,
+      )
+      .sort((a, b) => a.top - b.top)) {
+      if (t.bottom > bottom + 18) continue;
       left = Math.min(left, t.left);
       right = Math.max(right, t.right);
       top = Math.min(top, t.top);
       bottom = Math.max(bottom, t.bottom);
+    }
+    // Text columns in a forest plot can be far outside its drawing operators.
+    // Extend only through repeated short row labels aligned with numeric fields
+    // already attached to the plot; neighboring prose is not a crop boundary.
+    const numericField = (value: string) =>
+      /\d/.test(value) && /^[\s\d.,%;:(){}\[\]\/+−–—=<>≤≥±×*\-]+$/.test(value);
+    const numericRows = texts.filter(
+      (t) =>
+        t.top >= top &&
+        t.bottom <= bottom &&
+        t.left >= left &&
+        t.right <= right &&
+        numericField(t.text),
+    );
+    const outsideLabels = texts.filter(
+      (t) =>
+        t.top >= top - 18 &&
+        t.bottom <= bottom + 1 &&
+        t.left >= column.left &&
+        t.right <= column.right &&
+        (t.right < left - 24 || t.left > right + 1) &&
+        t.right - t.left <= W * 0.32 &&
+        t.text.trim().length <= 90 &&
+        numericRows.some(
+          (n) =>
+            Math.abs(n.bottom - t.bottom) <=
+            Math.max(n.height, t.height) * (numericField(t.text) ? 1.5 : 0.65),
+        ),
+    );
+    const labelColumns = outsideLabels.filter((label) => {
+      const aligned = outsideLabels.filter(
+        (other) => Math.abs(other.left - label.left) <= 3,
+      );
+      const baselines = [
+        ...new Set(aligned.map((t) => Math.round(t.bottom / 3))),
+      ];
+      return (
+        baselines.length >= 3 &&
+        Math.max(...aligned.map((t) => t.top)) -
+          Math.min(...aligned.map((t) => t.top)) >=
+          label.height * 3
+      );
+    });
+    if (labelColumns.length) {
+      left = Math.min(left, ...labelColumns.map((t) => t.left));
+      right = Math.max(right, ...labelColumns.map((t) => t.right));
+      // The table's labels, counts and headers share this horizontal envelope.
+      // Walk upward from the plot, not PDF stream order, across only small gaps.
+      for (const t of texts
+        .filter(
+          (t) =>
+            t.top >= Math.max(topLimit, top - 36) &&
+            t.bottom < cap.top - 1 &&
+            t.left >= left - 1 &&
+            t.right <= right + 24 &&
+            t.top <= bottom &&
+            t.bottom >= top - 36,
+        )
+        .sort((a, b) => b.bottom - a.bottom)) {
+        if (t.bottom < top - 18) continue;
+        top = Math.min(top, t.top);
+        right = Math.max(right, t.right);
+      }
     }
     left = Math.max(0, left - 7);
     right = Math.min(W, right + 7);
@@ -278,13 +448,16 @@ export async function pageFigures(
       caption,
       texts,
     );
+    const candidates = panels.length
+      ? panels
+      : rasterFigureRegions(crop.getContext("2d"), w, h);
     const imagePanels = clearPanelBoundaries(
       crop.getContext("2d"),
       w,
       h,
-      panels,
+      candidates,
     )
-      ? panels
+      ? candidates
       : undefined;
     return {
       ...(imagePanels?.length ? { imagePanels } : {}),

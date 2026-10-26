@@ -16,6 +16,8 @@ import "./style.css";
 import { useConversation, ConversationPanel } from "./conversation.tsx";
 import { DeckVersionPanel } from "./deck-versions.tsx";
 import { PersonalRecordsPanel } from "./learning-records.tsx";
+import { readingFiguresBySection } from "../shared/reading-figures.ts";
+import { ReadingSectionFigure } from "./reading-section-figure.tsx";
 import { ReadingPrototype } from "./reading-prototype.tsx";
 import { ResearchWorkspace } from "./research-workspace.tsx";
 import type { ConversationState } from "../shared/types.ts";
@@ -1446,6 +1448,18 @@ function App() {
                                       : "解释与推理"}
                               </small>
                             </div>
+                            {paper &&
+                              current.sourceVersion === paper.version &&
+                              readingFiguresBySection(current.result!, sources)[
+                                sectionIndex
+                              ].map((figure, index) => (
+                                <ReadingSectionFigure
+                                  key={figure.source.id + ":" + index}
+                                  figure={figure}
+                                  paper={paper}
+                                  onCitation={locate}
+                                />
+                              ))}
                             <p>{s.text}</p>
                             <button
                               disabled={isRunning}

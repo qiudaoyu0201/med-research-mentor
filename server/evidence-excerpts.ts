@@ -1,5 +1,10 @@
 export type EvidenceRange = { start: number; end: number };
-type Topic = { terms: string[]; anchor: RegExp; requireAnchor: boolean };
+type Topic = {
+  terms: string[];
+  anchor: RegExp;
+  requireAnchor: boolean;
+  sentenceLevel: boolean;
+};
 export function containsEvidenceTerm(text: string, term: string) {
   if (/^[a-z][a-z0-9-]*$/i.test(term)) {
     // The guard permits only letters, digits and literal hyphens.
@@ -14,16 +19,20 @@ function requestedTopics(question: string): Topic[] {
     terms: string[],
     anchor: RegExp,
     requireAnchor = false,
+    sentenceLevel = false,
   ) => {
-    if (request.test(question)) topics.push({ terms, anchor, requireAnchor });
+    if (request.test(question))
+      topics.push({ terms, anchor, requireAnchor, sentenceLevel });
   };
   add(
     /缺失|失访|插补|不完整|\bmissing\b|\bimputation\b/i,
     ["missing", "imputation", "mice", "mar", "mnar"],
     /missing\s+(?:data|values)|multiple\s+imputation|缺失|插补/i,
   );
+  const populationRequest =
+    /研究对象|研究人群|人群|入组|纳排|队列|外部验证|研究设计|\bstudy\s+design\b|\bpopulation\b|\bcohort\b|\beligibility\b/i;
   add(
-    /研究对象|研究人群|人群|入组|纳排|队列|外部验证|\bpopulation\b|\bcohort\b|\beligibility\b/i,
+    populationRequest,
     [
       "population",
       "patients",
@@ -33,6 +42,84 @@ function requestedTopics(question: string): Topic[] {
       "excluded",
     ],
     /study\s+population|eligibility|inclusion\s+criteria|exclusion\s+criteria|纳排|入组/i,
+  );
+  add(
+    populationRequest,
+    ["conducted", "collected", "enrolled", "recruited", "between", "from"],
+    /(?:tests?|measurements?|data|records?|patients?|participants?)\s+(?:were\s+)?(?:conducted|collected|enrolled|recruited|included|obtained)\s+(?:between|from)|study\s+period\s+(?:(?:was|ran|ranged|extended|spanned)\s+)?(?:from|between)|研究期间|纳入时间|收集期间/i,
+    true,
+    true,
+  );
+  add(
+    populationRequest,
+    ["baseline", "characteristics", "identified", "recruited", "enrolled"],
+    /baseline\s+characteristics(?:\s+of\s+(?:the\s+)?(?:patients|participants|cohort))?|(?:identified|included|enrolled|recruited)\s+[\d,]+\s+(?:eligible\s+)?(?:patients|participants|adults|children)|(?:patients|participants)\s*\(\s*n\s*=|基线特征|共(?:纳入|入组)|纳入\s*[\d,]+/i,
+    true,
+  );
+  add(
+    populationRequest,
+    [
+      "retrospective",
+      "prospective",
+      "multicenter",
+      "multicentre",
+      "single-center",
+      "single-centre",
+    ],
+    /study\s+(?:design|setting)(?:\s+and\s+(?:setting|participants))?|(?:single|multi)[ -]cent(?:er|re)|(?:conducted|performed|undertook)\s+(?:a\s+)?(?:retrospective|prospective)|研究设计|单中心|多中心|回顾性|前瞻性/i,
+    true,
+  );
+  add(
+    populationRequest,
+    ["baseline", "data", "measurements", "tests", "assessment"],
+    /(?:only|used|included)[\s\S]{0,50}\bbaseline\b|\bbaseline\b[\s\S]{0,60}(?:data|measurements?|tests?)|基线(?:测量|数据)/i,
+    true,
+  );
+  add(
+    populationRequest,
+    ["screened", "eligibility", "sampling", "recruited", "enrolled"],
+    /(?:screened|recruited|enrolled)\s+(?:for\s+eligibility|only\s+(?:during|on))|(?:sampling|recruitment)\s+(?:and\s+eligibility|hours|schedule)|工作日|招募时段/i,
+    true,
+  );
+  add(
+    populationRequest,
+    [
+      "eligible",
+      "enrolled",
+      "enrollment",
+      "recruited",
+      "excluded",
+      "patients",
+      "participants",
+    ],
+    /(?:were|was|are|is)\s+not\s+(?:enrolled|recruited)|excluded\s+from\s+(?:enrol[l]?ment|recruitment)|未予?入组/i,
+    true,
+  );
+  add(
+    populationRequest,
+    ["linked", "limited", "restricted", "population", "setting"],
+    /(?:limited|restricted)\s+(?:the\s+)?(?:study|analysis)\s+to|patient\s+records?\s+were\s+linked|recruitment\s+(?:setting|sites)|研究地区|研究场所/i,
+    true,
+  );
+  const interventionRequest =
+    /干预|治疗|联用|操作流程|给药|\bintervention\b|\btreatment\b|\bprocedures?\b/i;
+  add(
+    interventionRequest,
+    ["infused", "administered", "dose", "catheter", "saline", "temperature"],
+    /(?:infused|administered)\s+(?:at|through|via)|(?:of|with)\s+[\d.]+\s*°?\s*c\b|给药|输注/i,
+    true,
+  );
+  add(
+    interventionRequest,
+    ["control", "group", "received", "underwent", "identical", "saline"],
+    /(?:control|comparator|placebo)\s+group\s+(?:received|underwent|was\s+(?:given|treated))|对照组(?:接受|给予|采用)/i,
+    true,
+  );
+  add(
+    /统计|分析|结果|结论|证据|多重|\bstatistic(?:al|s)\b|\bmultiplicity\b|\bcomparisons?\b/i,
+    ["correction", "corrections", "adjustment", "multiple", "comparisons"],
+    /(?:no|without)\s+(?:corrections?|adjustments?)[\s\S]{0,60}(?:multiple|repeated)\s+(?:comparisons?|testing)|(?:not|un)adjusted[\s\S]{0,40}multiple\s+(?:comparisons?|testing)|多重比较|多重检验/i,
+    true,
   );
   // Assignment to a strategy and regrouping for analysis answer different
   // questions. Keep both definitions when the reader asks about trial groups.
@@ -74,6 +161,40 @@ function requestedTopics(question: string): Topic[] {
     /primary\s+(?:outcome|endpoint)|(?:outcomes?|endpoints?)\s+(?:was|were|is|are)\s+defined|主要结局|主要终点/i,
     true,
   );
+  // Keep the mechanism of a stated limitation, not only its heading. Selection
+  // and verification bias differ from unavailable measurements and transportability.
+  const limitationRequest =
+    /局限|偏倚|外推|适用范围|\blimitations?\b|\bbias\b|\bgenerali[sz]ability\b/i;
+  add(
+    limitationRequest,
+    [
+      "selection",
+      "verification",
+      "false",
+      "sensitivity",
+      "bias",
+      "under-estimated",
+      "underestimated",
+      "over-estimated",
+      "overestimated",
+    ],
+    /selection\s+bias|verification\s+bias|false\s+negatives?[\s\S]{0,100}(?:under.?estimated|missed)|sensitivity[\s\S]{0,70}over.?estimated|选择偏倚|验证偏倚/i,
+    true,
+  );
+  add(
+    limitationRequest,
+    [
+      "not",
+      "data",
+      "measured",
+      "recorded",
+      "possible",
+      "generalizability",
+      "generalisability",
+    ],
+    /(?:did|were|was)\s+not\s+(?:extract|collect|measure|record)|(?:not\s+possible|unable)\s+to\s+(?:tell|determine|establish)|(?:generalizability|generalisability)\s+(?:is|was|may)|未(?:收集|测量|记录)|无法确定/i,
+    true,
+  );
   add(
     /校准|\bcalibration\b|\brecalibration\b/i,
     ["calibration", "recalibration"],
@@ -96,9 +217,11 @@ function requestedTopics(question: string): Topic[] {
     /(?:serious\s+)?adverse\s+events|安全性|不良事件/i,
   );
   add(
-    /随访|生存|删失|\bfollow[ -]?up\b|\bsurvival\b|\bcensor(?:ing|ed)?\b/i,
+    /随访|生存|删失|死亡|预后|\bfollow[ -]?up\b|\bsurvival\b|\bmortality\b|\bprognos(?:is|tic)\b|\bcensor(?:ing|ed)?\b/i,
     ["follow-up", "followup", "survival", "censoring", "censored", "mortality"],
     /time\s+(?:to\s+event|from)|follow[ -]?up|date\s+of\s+censoring|随访|删失/i,
+    true,
+    true,
   );
   add(
     /(?=[\s\S]*(?:\bai\b|\bllms?\b|人工智能|语言模型|机器学习|深度学习))(?=[\s\S]*(?:治疗|临床|建议|生存|\btreatment\b|\brecommendations?\b|\bsurvival\b))/i,
@@ -210,6 +333,23 @@ export function evidenceExcerptRanges(
   const topics = requestedTopics(question);
   const tables = linkedTableSpans(text, quota, terms, topics);
   const spans = naturalSpans(text)
+    .flatMap((range) => {
+      const part = text.slice(range.start, range.end);
+      if (
+        part.length <= 300 ||
+        !topics.some((topic) => topic.sentenceLevel && topic.anchor.test(part))
+      )
+        return [range];
+      // Keep compact evidence intact. Split longer anchored spans without spending their limited share
+      // on adjacent procedural prose; offsets still refer to untouched text.
+      const ends = [...part.matchAll(/[.!?。！？]["')\]]*(?:\s+|$)/g)].map(
+        (m) => range.start + m.index! + m[0].length,
+      );
+      const cuts = [range.start, ...ends, range.end].filter(
+        (n, i, all) => !i || n !== all[i - 1],
+      );
+      return cuts.slice(0, -1).map((start, i) => ({ start, end: cuts[i + 1] }));
+    })
     .flatMap((range) =>
       tables.reduce<EvidenceRange[]>(
         (fragments, table) =>

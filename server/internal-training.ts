@@ -295,8 +295,13 @@ export async function reviewArtifact(
       | "explanation-v2-visible-text"
       | "explanation-and-deck-images-v2"
       | "explanation-and-deck-images-v3-visible-text"
-      | "explanation-and-original-image-v1-visible-text";
+      | "explanation-and-deck-images-v4-renderer-labelled"
+      | "explanation-and-original-image-v1-visible-text"
+      | "explanation-and-reading-images-v1-visible-text"
+      | "explanation-and-reading-images-v2-known-panels-visible-text";
     imageSourceId?: string;
+    imageSourceIds?: string[];
+    imagePanelIds?: string[];
     sourceExposure?: "actual-generation-packets-v1";
   },
   signal: AbortSignal,
@@ -310,6 +315,39 @@ export async function reviewArtifact(
       !input.sources.some((s) => s.id === input.imageSourceId))
   )
     throw new Error("带读原图评价缺少图片或有效的来源绑定，未派发评价请求。");
+  const renderedDeck =
+    input.evaluatorVersion ===
+    "explanation-and-deck-images-v4-renderer-labelled";
+  const visibleText =
+    !!input.evaluatorVersion?.endsWith("visible-text") || renderedDeck;
+  if (renderedDeck && !image)
+    throw new Error("PPT逐页评价缺少页面图片，未派发评价请求。");
+  const readingBoard =
+    input.evaluatorVersion ===
+      "explanation-and-reading-images-v1-visible-text" ||
+    input.evaluatorVersion ===
+      "explanation-and-reading-images-v2-known-panels-visible-text";
+  if (
+    readingBoard &&
+    (!image ||
+      !input.imageSourceIds?.length ||
+      input.imageSourceIds.length > 8 ||
+      new Set(input.imageSourceIds).size !== input.imageSourceIds.length ||
+      input.imageSourceIds.some(
+        (id) => !input.sources.some((s) => s.id === id),
+      ))
+  )
+    throw new Error("带读多图评价缺少图片或有效的来源绑定，未派发评价请求。");
+  if (
+    input.imagePanelIds?.some(
+      (id) =>
+        !input.imageSourceIds?.some((source) => id.startsWith(source + ":")),
+    ) ||
+    (input.imagePanelIds?.length ?? 0) > 8 ||
+    new Set(input.imagePanelIds ?? []).size !==
+      (input.imagePanelIds?.length ?? 0)
+  )
+    throw new Error("带读局部图评价缺少有效的面板来源绑定，未派发评价请求。");
   const result = await provider.generate(
     (input.sourceExposure === "actual-generation-packets-v1"
       ? "来源文字是教学及修订请求实际收到的片段，保留原有片段边界；同一来源可有不同阶段的片段。只依据这些实际文字及本轮明确提供的图片评价，不从页码、全文记忆或预训练知识补出隐藏内容，不把未提供的文字判为漏读。\n"
@@ -319,29 +357,41 @@ export async function reviewArtifact(
       input.evaluatorVersion === "explanation-and-deck-images-v2" ||
       input.evaluatorVersion ===
         "explanation-and-deck-images-v3-visible-text" ||
+      renderedDeck ||
       input.evaluatorVersion ===
-        "explanation-and-original-image-v1-visible-text"
+        "explanation-and-original-image-v1-visible-text" ||
+      readingBoard
         ? explanationReviewInstructions +
-          (input.evaluatorVersion?.endsWith("visible-text")
-            ? "\n面向用户的正文与讲稿只指title、sections中的title/text、terms中的name/explanation、slides的title/bullets/notes、speechScript及方案内容。citations、imageSource、imageCrop、kind、引用副本和版式字段是结构化元数据；这些字段合法保留来源ID不构成正文出现内部编号。若正文或备注自身出现内部问题编号仍须失败。评价位置必须给实际正文标题或逐字原句，不能将JSON字段片段或元数据当作正文定位。"
+          (visibleText
+            ? "\n面向用户的正文与讲稿只指title、sections中的title/text、terms中的name/explanation、slides的title/bullets/notes、speechScript及方案内容。citations、figures中的sourceId/panelId、imageSource、imageCrop、kind、引用副本和版式字段是结构化元数据；这些字段合法保留来源ID不构成正文出现内部编号。若正文或备注自身出现内部问题编号仍须失败。评价位置必须给实际正文标题或逐字原句，不能将JSON字段片段或元数据当作正文定位。"
             : "") +
           (input.evaluatorVersion === "explanation-and-deck-images-v2" ||
           input.evaluatorVersion ===
-            "explanation-and-deck-images-v3-visible-text"
-            ? "\n图片为各页实际展示区域，页标签仅定位展示位置，不是新的引用ID。逐页对照图件区域与标题、要点和讲述提示；未出现在当前裁剪中的内容不能声称已在该页图中展示。原文可支持额外事实，但不能代替对应页面的图件检查。本次仍未看到导出排版，不据此宣称实际PPT排版通过。"
+            "explanation-and-deck-images-v3-visible-text" ||
+          renderedDeck
+            ? "\n图片为各页实际展示区域，页标签仅定位展示位置，不是新的引用ID。逐页对照图件区域与标题、要点和讲述提示；未出现在当前裁剪中的内容不能声称已在该页图中展示。原文可支持额外事实，但不能代替对应页面的图件检查。若artifact含exportAudit及renderAudit（或artifact.delivery内含两者），且renderAudit.renderer为powerpoint，本轮图片才是实际PPTX的逐页渲染资料板；layout-preview仅为布局预览，不能证明Office排版。满足实际PPTX渲染时，可以据此核验整套页面的文字、表格、图件裁切、字号和留白；exportAudit.sourceImagesVerified为true时，宿主已逐图核对PPT图片与绑定原图及选区一致；这些页面中清晰可见的原图内容可以作为来源图证据，原生绘制图表仍须来源文字或数据支持。exportAudit中的editableSurface、editableTextShapeCount或nativeTableCount可作为可编辑对象的宿主审计证据，不再因旧的‘未看到导出排版’提示自动判失败；若缺少这些证据，仍须保留交付未完成边界。"
             : "") +
           (input.evaluatorVersion ===
           "explanation-and-original-image-v1-visible-text"
             ? "\n图片是本轮带读实际提供的原图，imageSourceId绑定其来源。结合该来源文字和原图检查分组、线型、刻度、数值与结论；图中清晰可见的信息属于已提供证据，不能仅因图注文字没有重复数字便判作未提供。模糊、遮挡或图中不可见的关键内容仍须明确未确认，不据图补造精确值。其他来源有图注不等于本轮提供了其他图片；不把这张原图当成导出的PPT页面。"
-            : "")
+            : "") +
+          (input.evaluatorVersion ===
+          "explanation-and-reading-images-v2-known-panels-visible-text"
+            ? "\n图片是本轮带读实际提供的图件资料板，imageSourceIds绑定完整原图，imagePanelIds如有则绑定同板实际展示的已有局部；标签只定位来源和选区。figures中的绑定元数据使界面把选区放在相应小节，仍须检查该区域是否保留解释必需的轴、组别及图例。逐图结合对应文字检查分组、坐标、数值和结论，不将某一图的内容当作另一图。图像保持完整但可能缩放，无法读清的数字不补造；未列入绑定的其他图注不代表其图像已提供。这是原图资料板，不是导出的PPT页面。"
+            : input.evaluatorVersion ===
+                "explanation-and-reading-images-v1-visible-text"
+              ? "\n图片是本轮带读实际提供的多图资料板，imageSourceIds依次绑定各图标签；标签只定位来源。逐图结合对应文字检查分组、坐标、数值和结论，不将某一图的内容当作另一图。图像保持完整但可能缩放，无法读清的数字不补造；未列入绑定的其他图注不代表其图像已提供。这是原图资料板，不是导出的PPT页面。"
+              : "")
         : reviewInstructions),
     input,
     reviewSchema.extend({
-      checks: z.array(
-        reviewSchema.shape.checks.element.extend({
-          criterion: z.enum(input.criteria as [string, ...string[]]),
-        }),
-      ).length(input.criteria.length),
+      checks: z
+        .array(
+          reviewSchema.shape.checks.element.extend({
+            criterion: z.enum(input.criteria as [string, ...string[]]),
+          }),
+        )
+        .length(input.criteria.length),
     }),
     signal,
     image,
@@ -351,9 +401,7 @@ export async function reviewArtifact(
     input.artifact,
     input.sources.map((s) => s.id),
     result.output,
-    input.evaluatorVersion?.endsWith("visible-text")
-      ? "visible-text"
-      : "all-text",
+    visibleText ? "visible-text" : "all-text",
   );
 }
 

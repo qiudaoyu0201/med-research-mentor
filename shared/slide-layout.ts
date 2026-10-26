@@ -19,6 +19,19 @@ export type SlideShape = {
   w: number;
   h: number;
   fill: string;
+  kind?: "rect" | "roundRect" | "chevron" | "downArrow" | "ellipse";
+  role?: "table-row" | "table-rule";
+};
+export type SlideTable = {
+  rows: string[][];
+  cellLines: string[][][];
+  x: number;
+  y: number;
+  w: number;
+  h: number;
+  widths: number[];
+  rowHeights: number[];
+  fontSize: number;
 };
 export const slideSize = { width: 13.333333, height: 7.5 };
 // Explicit point advances keep SVG, capacity checks, and PowerPoint in sync.
@@ -26,7 +39,15 @@ export const slideLineHeight = 1.18;
 
 const slideWordSegmenter = new Intl.Segmenter("zh", { granularity: "word" });
 
-export function wrapSlideText(text: string, width: number, fontSize: number) {
+export function wrapSlideText(
+  text: string,
+  width: number,
+  fontSize: number,
+  bold = false,
+) {
+  // Bold CJK glyphs need slightly more room in Office than regular body text.
+  const glyphUnits = (c: string) =>
+    c.charCodeAt(0) < 128 ? 0.62 : bold ? 1.04 : 1;
   // Reserve room for Office glyph placement. Mixed Latin/CJK labels such as
   // repeated acronyms overflowed the former 0.52-em Latin estimate in PowerPoint.
   const limit = (width * 72 * 0.95) / fontSize,
@@ -36,9 +57,10 @@ export function wrapSlideText(text: string, width: number, fontSize: number) {
       length = 0;
     // Keep clinical measurements, signed estimates, and scientific identifiers intact.
     // Match known units before identifiers; an arbitrary English word is not a unit.
+    // Short parenthesized category labels and CI expressions also stay together.
     const tokens = (
       paragraph.match(
-        /\d+(?:[∶:]\d+)+|(?:[+−±-][ \t\u00a0]*)?\d[\d,.]*(?:[–—−-][+−-]?\d[\d,.]*)?[ \t\u00a0]*(?:(?:mEq|[mµμ]?mol|[mµμ]?g)\/(?:dL|mL|L|kg)|(?:mm|cm)[ \t\u00a0]*(?:Hg|H2O))(?![A-Za-z0-9_./+-])|(?:mm|cm)[ \t\u00a0]+(?:Hg|H2O)\b|[0-9]+[A-Za-z\u0370-\u03ff][A-Za-z0-9\u0370-\u03ff_./+-]*|(?:[+−±-][ \t\u00a0]*)?\d[\d,.]*(?:[–—−-][+−-]?\d[\d,.]*)?(?:%|％|‰)?|[A-Za-z\u0370-\u03ff][A-Za-z0-9\u0370-\u03ff_./+-]*|\p{Script=Han}+|[^\x00-\x7f]|\s+|./gu,
+        /[（(]\p{Script=Han}{1,6}\d+[）)]|\d+(?:\.\d+)?(?:%|％)[ \t]*CI\b|\d+(?:[∶:]\d+)+|\d+(?:\.\d+)?(?:[ \t]*\/[ \t]*\d+(?:\.\d+)?)+|(?:[+−±-][ \t\u00a0]*)?\d[\d,.]*(?:[–—−-][+−-]?\d[\d,.]*)?[ \t\u00a0]*(?:(?:mEq|[mµμ]?mol|[npµμm]?g)\/(?:dL|mL|L|kg)|[µμm]?L(?:\/(?:min|h))?|°[CF]|(?:mm|cm)[ \t\u00a0]*(?:Hg|H2O))(?![A-Za-z0-9_./+-])|(?:mm|cm)[ \t\u00a0]+(?:Hg|H2O)\b|[0-9]+[A-Za-z\u0370-\u03ff][A-Za-z0-9\u0370-\u03ff_./+-]*|(?:[+−±-][ \t\u00a0]*)?\d[\d,.]*(?:(?:%|％|‰)?[ \t\u00a0]*[–—−-][ \t\u00a0]*[+−-]?\d[\d,.]*)?(?:%|％|‰)?|[A-Za-z\u0370-\u03ff][A-Za-z0-9\u0370-\u03ff_./+-]*|\p{Script=Han}+|[^\x00-\x7f]|\s+|./gu,
       ) ?? []
     ).flatMap((token) =>
       /^\p{Script=Han}+$/u.test(token)
@@ -58,16 +80,15 @@ export function wrapSlideText(text: string, width: number, fontSize: number) {
       }
       if (
         words.length &&
-        /^[，。；：！？、）》」』】”’…,.!?;:)\]]+$/.test(token)
+        /^[，。；：！？、）》」』】”’…,.!?;:)\]＊*†‡⁎⁑⁂¹²³⁴⁵⁶⁷⁸⁹⁰]+$/.test(
+          token,
+        )
       )
         words[words.length - 1] += token;
       else words.push(token);
     }
     for (const word of words) {
-      const units = [...word].reduce(
-        (n, c) => n + (/[\x00-\x7f]/.test(c) ? 0.62 : 1),
-        0,
-      );
+      const units = [...word].reduce((n, c) => n + glyphUnits(c), 0);
       if (length + units > limit && line) {
         lines.push(line.trimEnd());
         line = "";
@@ -75,7 +96,7 @@ export function wrapSlideText(text: string, width: number, fontSize: number) {
       }
       if (units > limit) {
         for (const c of word) {
-          const u = /[\x00-\x7f]/.test(c) ? 0.62 : 1;
+          const u = glyphUnits(c);
           if (length + u > limit && line) {
             lines.push(line);
             line = "";
@@ -115,7 +136,10 @@ export function citationLabel(sources: Source[]) {
               ? `PDF p. ${s.page}`
               : s.kind === "foundation"
                 ? "方法参考"
-                : s.title.slice(0, 35),
+                : (/^(?:Table|表)\s*\d+[A-Za-z]?\b/i.exec(s.title)?.[0] ??
+                  (s.title.length > 35
+                    ? s.title.slice(0, 34).trimEnd() + "…"
+                    : s.title)),
         ),
     ),
   ].join("  ·  ");
@@ -127,6 +151,7 @@ export function slideLayout(
 ) {
   const text: TextBox[] = [];
   const shapes: SlideShape[] = [];
+  let table: SlideTable | undefined;
   let composition = "standard";
   let titleSize = 32,
     titleLines = wrapSlideText(slide.title, 11.8, titleSize);
@@ -214,11 +239,43 @@ export function slideLayout(
     count <= 3 &&
     imageSize.width / imageSize.height >= 1.65
   ) {
-    const width = (11.9 - (count - 1) * 0.38) / count;
-    const blocks = slide.bullets.map((value) => {
-      const lines = wrapSlideText(value, width, 20);
+    const availableWidth = 11.9 - (count - 1) * 0.38;
+    let widths = slide.bullets.map(() => availableWidth / count);
+    let blocks = slide.bullets.map((value, i) => {
+      const lines = wrapSlideText(value, widths[i], 20);
       return { lines, h: (lines.length * 20 * slideLineHeight) / 72 + 0.09 };
     });
+    // Give a long numerical claim more width than a short interpretation.
+    // Search line capacity without changing the claims or shrinking the font.
+    for (let rows = 1; rows <= 4; rows++) {
+      const minimum = slide.bullets.map((value) => {
+        let low = 2.4,
+          high = availableWidth - (count - 1) * 2.4;
+        if (wrapSlideText(value, high, 20).length > rows) return Infinity;
+        for (let pass = 0; pass < 18; pass++) {
+          const middle = (low + high) / 2;
+          if (wrapSlideText(value, middle, 20).length <= rows) high = middle;
+          else low = middle;
+        }
+        return high;
+      });
+      const spare =
+        availableWidth - minimum.reduce((sum, width) => sum + width, 0);
+      if (spare < 0 || !Number.isFinite(spare)) continue;
+      const candidateWidths = minimum.map((width) => width + spare / count);
+      const candidate = slide.bullets.map((value, i) => {
+        const lines = wrapSlideText(value, candidateWidths[i], 20);
+        return { lines, h: (lines.length * 20 * slideLineHeight) / 72 + 0.09 };
+      });
+      if (
+        Math.max(...candidate.map((b) => b.h)) <
+        Math.max(...blocks.map((b) => b.h))
+      ) {
+        widths = candidateWidths;
+        blocks = candidate;
+      }
+      break;
+    }
     const bandHeight = Math.max(...blocks.map((b) => b.h));
     const area = {
       x: 0.72,
@@ -233,7 +290,7 @@ export function slideLayout(
     );
     if (
       blocks.every((block) => block.lines.length <= 4) &&
-      scale >= previousScale * 1.12
+      scale >= previousScale * 1.05
     ) {
       const w = imageSize.width * scale,
         h = imageSize.height * scale;
@@ -245,9 +302,11 @@ export function slideLayout(
           h,
         },
         text: blocks.map((block, i) => ({
-          x: 0.72 + i * (width + 0.38),
+          x:
+            0.72 +
+            widths.slice(0, i).reduce((sum, width) => sum + width + 0.38, 0),
           y: 6.68 - bandHeight,
-          w: width,
+          w: widths[i],
           h: block.h,
           fontSize: 20,
           lines: block.lines,
@@ -258,8 +317,498 @@ export function slideLayout(
       };
     }
   }
+  let evidenceColumnWidth = 3.5;
+  if (imageSize && imageSize.width / imageSize.height >= 1.65 && count <= 3) {
+    for (let tenths = 28; tenths < 35; tenths++) {
+      const width = tenths / 10;
+      const height =
+        slide.bullets.reduce(
+          (sum, value) =>
+            sum +
+            (wrapSlideText(value, width, 20).length * 20 * slideLineHeight) /
+              72 +
+            0.09,
+          0,
+        ) +
+        Math.max(0, count - 1) * 0.22;
+      const gain =
+        Math.min(
+          (7.95 + 3.5 - width) / imageSize.width,
+          5.18 / imageSize.height,
+        ) / Math.min(7.95 / imageSize.width, 5.18 / imageSize.height);
+      if (height <= 6.68 - 1.7 && gain >= 1.05) {
+        evidenceColumnWidth = width;
+        break;
+      }
+    }
+  }
   let custom = false;
-  if (wideEvidence) {
+  const requested = slide.layout ?? "auto";
+  if (requested !== "auto" && hasImage)
+    throw new Error(
+      "流程、对照、重点或表格版式与原图页应分开，请为本页保留一种主要表达。",
+    );
+  if (requested === "table") {
+    // Rows are explicit model-authored cells. Never infer values from prose or
+    // fill a short row: a missing measure must be stated by its author.
+    const rows = slide.bullets.map((row) =>
+      row.split("|").map((cell) => cell.trim()),
+    );
+    const columns = rows[0]?.length ?? 0;
+    if (
+      count < 2 ||
+      count > 5 ||
+      columns < 2 ||
+      columns > 5 ||
+      rows.some(
+        (row) =>
+          row.length !== columns ||
+          row.some((cell) => !cell || /^:?-{3,}:?$/.test(cell)),
+      )
+    )
+      throw new Error(
+        "表格需要表头及一至四行数据，每行二至五个非空单元格，以 | 分隔；不添加Markdown分隔行，缺失指标须明确标注。",
+      );
+    composition = "table";
+    const units = (value: string, bold = false) =>
+      [...value].reduce(
+        (n, c) => n + (c.charCodeAt(0) < 128 ? 0.62 : bold ? 1.04 : 1),
+        0,
+      );
+    const weights = rows[0].map((_, col) =>
+      Math.max(
+        6,
+        Math.min(24, Math.max(...rows.map((row) => units(row[col])))),
+      ),
+    );
+    // Reserve more space for the longest label/value in each column, with a
+    // bounded weight so one long condition cannot starve the other measures.
+    const totalWeight = weights.reduce((sum, weight) => sum + weight, 0);
+    const proportionalWidths = weights.map(
+      (weight) => (11.9 * weight) / totalWeight,
+    );
+    let widths = proportionalWidths;
+    let fontSize = 23;
+    const measure = () => {
+      // Padding takes a larger share of short columns. If every column can fit
+      // without wrapping, reserve its measured width before sharing spare room.
+      const naturalWidths = rows[0].map((_, col) =>
+        Math.max(
+          1.1,
+          (Math.max(
+            ...rows.flatMap((row, index) =>
+              row[col]
+                .split("\n")
+                .map((cell) => units(cell, index === 0 || col === 0)),
+            ),
+          ) *
+            fontSize) /
+            (72 * 0.95) +
+            0.325,
+        ),
+      );
+      const spare = 11.9 - naturalWidths.reduce((sum, width) => sum + width, 0);
+      widths =
+        spare >= 0
+          ? naturalWidths.map((width) => width + spare / columns)
+          : [...proportionalWidths];
+      if (spare < 0) {
+        // Reserve short headers, scientific intervals and denominators before distributing
+        // spare space by prose length. A long header must not split 3/1000
+        // or leave a confidence interval's closing bracket on its own line.
+        let minimumWidths = rows[0].map((_, col) =>
+          Math.max(
+            1.1,
+            (Math.max(
+              0,
+              ...rows.flatMap((row, index) =>
+                [
+                  ...(index === 0 && units(row[col], true) <= 8
+                    ? [row[col]]
+                    : []),
+                  ...(row[col].match(
+                    /[（(][+−±-]?\d[\d,.]*(?:%|％)?\s*[–—−-]\s*[+−±-]?\d[\d,.]*(?:%|％)?[）)]|\d+(?:\.\d+)?(?:[ \t]*\/[ \t]*\d+(?:\.\d+)?)+|[A-Za-z][A-Za-z0-9_./+-]*/g,
+                  ) ?? []),
+                ].map((atom) =>
+                  /^[A-Za-z]/.test(atom)
+                    ? atom.length * (index === 0 || col === 0 ? 0.7 : 0.62)
+                    : units(atom, index === 0 || col === 0),
+                ),
+              ),
+            ) *
+              fontSize) /
+              (72 * 0.95) +
+              0.325,
+          ),
+        );
+        // Reserve the row label with its following separator, before a time
+        // or other qualifier. Longer labels may wrap within an equal share
+        // of the table rather than crowding every result column.
+        const labelWidth = Math.min(
+          11.9 / columns,
+          (Math.max(
+            ...rows
+              .slice(1)
+              .flatMap((row) =>
+                row[0]
+                  .split("\n")
+                  .map((label) =>
+                    units(
+                      /^[^，,;；]*(?:[，,;；]|$)/.exec(label)?.[0] ?? label,
+                      true,
+                    ),
+                  ),
+              ),
+          ) *
+            fontSize) /
+            (72 * 0.95) +
+            0.325,
+        );
+        const withLabels = minimumWidths.map((width, col) =>
+          col === 0 ? Math.max(width, labelWidth) : width,
+        );
+        if (withLabels.reduce((sum, width) => sum + width, 0) <= 11.9)
+          minimumWidths = withLabels;
+        if (minimumWidths.reduce((sum, width) => sum + width, 0) <= 11.9) {
+          const flexible = new Set(weights.map((_, col) => col));
+          let available = 11.9;
+          while (flexible.size) {
+            const weight = [...flexible].reduce(
+              (sum, col) => sum + weights[col],
+              0,
+            );
+            const constrained = [...flexible].filter(
+              (col) => (available * weights[col]) / weight < minimumWidths[col],
+            );
+            if (!constrained.length) {
+              for (const col of flexible)
+                widths[col] = (available * weights[col]) / weight;
+              break;
+            }
+            for (const col of constrained) {
+              widths[col] = minimumWidths[col];
+              available -= widths[col];
+              flexible.delete(col);
+            }
+          }
+        }
+      }
+      return rows.map((row, index) =>
+        row.map((cell, col) =>
+          wrapSlideText(
+            cell,
+            widths[col] - 0.32,
+            fontSize,
+            index === 0 || col === 0,
+          ),
+        ),
+      );
+    };
+    let blocks = measure();
+    const heights = () =>
+      blocks.map((row) =>
+        Math.max(
+          0.74,
+          (Math.max(...row.map((lines) => lines.length)) *
+            fontSize *
+            slideLineHeight) /
+            72 +
+            0.32,
+        ),
+      );
+    let rowHeights = heights();
+    while (rowHeights.reduce((sum, h) => sum + h, 0) > 4.9 && fontSize > 20) {
+      fontSize--;
+      blocks = measure();
+      rowHeights = heights();
+    }
+    const totalHeight = rowHeights.reduce((sum, h) => sum + h, 0);
+    if (totalHeight > 4.9)
+      throw new Error(
+        "表格过密，请取舍指标或拆页；不能缩小字号或删除关键区间来容纳。",
+      );
+    let y = 1.65 + (4.98 - totalHeight) / 2;
+    table = {
+      rows,
+      cellLines: blocks,
+      x: 0.72,
+      y,
+      w: 11.9,
+      h: totalHeight,
+      widths: [...widths],
+      rowHeights: [...rowHeights],
+      fontSize,
+    };
+    rows.forEach((row, index) => {
+      const h = rowHeights[index];
+      shapes.push({
+        x: 0.72,
+        y,
+        w: 11.9,
+        h,
+        fill: index === 0 ? "12384A" : index % 2 ? "EDF4F3" : "FFFFFF",
+        role: "table-row",
+      });
+      let x = 0.72;
+      row.forEach((_, col) => {
+        const lines = blocks[index][col];
+        const textHeight =
+          (lines.length * fontSize * slideLineHeight) / 72 + 0.09;
+        customText.push({
+          x: x + 0.16,
+          y: y + 0.12,
+          w: widths[col] - 0.32,
+          h: textHeight,
+          fontSize,
+          lines,
+          color: index === 0 ? "FFFFFF" : "26384A",
+          bold: index === 0 || col === 0,
+          role: "bullet",
+          sourceIndex: index,
+        });
+        x += widths[col];
+      });
+      shapes.push({
+        x: 0.72,
+        y: y + h - 0.012,
+        w: 11.9,
+        h: 0.012,
+        fill: "DCE7E5",
+        role: "table-rule",
+      });
+      y += h;
+    });
+    custom = true;
+  } else if (requested === "flow" && count >= 5 && count <= 6) {
+    // A longer route needs wide, short nodes rather than six narrow cards.
+    // All steps and their order come from the author; no branch is inferred.
+    composition = "flow";
+    let fontSize = 24;
+    const measure = () =>
+      slide.bullets.map((value) => {
+        const lines = wrapSlideText(value, 9.7, fontSize);
+        const textH = (lines.length * fontSize * slideLineHeight) / 72 + 0.09;
+        return { lines, textH, h: Math.max(0.62, textH + 0.18) };
+      });
+    let rows = measure();
+    const height = () =>
+      rows.reduce((sum, row) => sum + row.h, 0) + (count - 1) * 0.18;
+    while (height() > 4.9 && fontSize > 20) {
+      fontSize--;
+      rows = measure();
+    }
+    if (height() > 4.9)
+      throw new Error("流程文字过密，请精简节点或拆页，不能缩小关键条件。");
+    let y = 1.7 + (4.9 - height()) / 2;
+    rows.forEach((row, i) => {
+      const dark = i === 0 || i === count - 1;
+      shapes.push({
+        x: 1.08,
+        y,
+        w: 11.1,
+        h: row.h,
+        kind: "roundRect",
+        fill: i === 0 ? "12384A" : dark ? "146A71" : "EDF4F3",
+      });
+      customText.push({
+        x: 1.8,
+        y: y + (row.h - row.textH) / 2,
+        w: 9.7,
+        h: row.textH,
+        lines: row.lines,
+        fontSize,
+        color: dark ? "FFFFFF" : "26384A",
+        role: "bullet",
+        sourceIndex: i,
+      });
+      if (i < count - 1)
+        shapes.push({
+          x: 6.5,
+          y: y + row.h + 0.025,
+          w: 0.28,
+          h: 0.13,
+          kind: "downArrow",
+          fill: "177E7D",
+        });
+      y += row.h + 0.18;
+    });
+    custom = true;
+  } else if (requested === "comparison" && count === 2) {
+    composition = "comparison";
+    // A short author-supplied label can head a column. Preserve its punctuation
+    // and the full comparison text instead of inventing labels or takeaways.
+    shapes.push({ x: 6.65, y: 1.9, w: 0.018, h: 4.45, fill: "DCE7E5" });
+    slide.bullets.forEach((value, i) => {
+      const x = i === 0 ? 0.98 : 7.1;
+      const parts = /^([^：:\n]{1,18}[：:])\s*(.+)$/s.exec(value);
+      shapes.push({ x, y: 1.82, w: 0.6, h: 0.055, fill: "177E7D" });
+      if (parts) {
+        if (
+          !put(i, parts[1], x, 2.1, 5.2, 0.92, 29, "12384A", true) ||
+          !put(i, value.slice(parts[1].length), x, 3.12, 5.2, 3.05, 26)
+        )
+          throw new Error("对照文字过密，请保留必要差异并展开较长解释。");
+      } else if (!put(i, value, x, 2.25, 5.2, 3.9, 27))
+        throw new Error("对照文字过密，请保留必要差异并展开较长解释。");
+    });
+    custom = true;
+  } else if (requested === "flow" || requested === "comparison") {
+    const flow = requested === "flow";
+    if ((flow && (count < 2 || count > 4)) || (!flow && count !== 2))
+      throw new Error(
+        flow ? "流程页需要二至六个有序步骤。" : "对照页需要两项并列内容。",
+      );
+    composition = requested;
+    const gap = flow ? 0.5 : 0.55;
+    const cardW = (11.9 - (count - 1) * gap) / count;
+    const innerW = cardW - 0.6;
+    let fontSize = flow ? 24 : 27;
+    const measure = () =>
+      slide.bullets.map((value) => {
+        const lines = wrapSlideText(value, innerW, fontSize);
+        return {
+          lines,
+          h: (lines.length * fontSize * slideLineHeight) / 72 + 0.09,
+        };
+      });
+    let blocks = measure();
+    while (blocks.some((block) => block.h > 2.9) && fontSize > 20) {
+      fontSize--;
+      blocks = measure();
+    }
+    // Long procedures read as a sequence of wide rows rather than narrow cards.
+    // Use the original text and order; the layout never extracts or rewrites steps.
+    const rowW = 10.65;
+    const rows = slide.bullets.map((value) => {
+      const lines = wrapSlideText(value, rowW, 24);
+      return { lines, h: (lines.length * 24 * slideLineHeight) / 72 + 0.09 };
+    });
+    const rowGap = 0.22;
+    const rowHeights = rows.map((row) => Math.max(0.8, row.h + 0.12));
+    const totalHeight =
+      rowHeights.reduce((sum, h) => sum + h, 0) + rowGap * (count - 1);
+    const vertical =
+      flow &&
+      blocks.some(
+        (block) =>
+          block.lines.length > 3 ||
+          (block.lines.length >= 3 &&
+            /^\p{Script=Han}[）)。，；：、]*$/u.test(block.lines.at(-1)!)),
+      ) &&
+      totalHeight <= 4.9;
+    if (vertical) {
+      let y = 1.7 + (4.9 - totalHeight) / 2;
+      shapes.push({
+        x: 0.88,
+        y: y + 0.16,
+        w: 0.018,
+        h: totalHeight - rowHeights.at(-1)!,
+        fill: "B9D9D3",
+      });
+      rows.forEach((row, i) => {
+        shapes.push({
+          x: 0.82,
+          y: y + 0.1,
+          w: 0.14,
+          h: 0.14,
+          kind: "ellipse",
+          fill: i === 0 ? "12384A" : "177E7D",
+        });
+        customText.push({
+          x: 1.55,
+          y,
+          w: rowW,
+          h: row.h,
+          fontSize: 24,
+          lines: row.lines,
+          color: "26384A",
+          role: "bullet",
+          marker: String(i + 1).padStart(2, "0"),
+          sourceIndex: i,
+        });
+        y += rowHeights[i] + rowGap;
+      });
+    } else {
+      if (blocks.some((block) => block.h > 2.9))
+        throw new Error("图解文字过密，请拆分步骤或比较，保留关键条件与判断。");
+      const cardH = Math.max(2.75, ...blocks.map((block) => block.h + 1.05));
+      const top = 2.05 + (3.9 - cardH) / 2;
+      blocks.forEach((block, i) => {
+        const x = 0.72 + i * (cardW + gap);
+        shapes.push({
+          x,
+          y: top,
+          w: cardW,
+          h: cardH,
+          fill: flow && i === 0 ? "12384A" : "EDF4F3",
+          kind: "roundRect",
+        });
+        shapes.push({
+          x: x + 0.3,
+          y: top + 0.35,
+          w: 0.42,
+          h: 0.05,
+          fill: flow && i === 0 ? "62C4B1" : "177E7D",
+        });
+        customText.push({
+          x: x + 0.3,
+          y: top + 0.66,
+          w: innerW,
+          h: block.h,
+          fontSize,
+          lines: block.lines,
+          color: flow && i === 0 ? "FFFFFF" : "26384A",
+          role: "bullet",
+          sourceIndex: i,
+        });
+        if (flow && i < count - 1)
+          shapes.push({
+            x: x + cardW + 0.13,
+            y: top + cardH / 2 - 0.11,
+            w: 0.24,
+            h: 0.22,
+            fill: "177E7D",
+            kind: "chevron",
+          });
+      });
+    }
+    custom = true;
+  } else if (requested === "spotlight") {
+    if (count > 3)
+      throw new Error(
+        "重点页保留一个核心问题及至多两项解释，较复杂的背景请展开。",
+      );
+    composition = "spotlight";
+    const panelW = count === 1 ? 11.9 : 7.1;
+    shapes.push({
+      x: 0.72,
+      y: 1.85,
+      w: panelW,
+      h: 4.65,
+      fill: "12384A",
+      kind: "roundRect",
+    });
+    shapes.push({ x: 1.08, y: 2.22, w: 0.56, h: 0.06, fill: "62C4B1" });
+    custom = put(
+      0,
+      slide.bullets[0],
+      1.08,
+      2.65,
+      panelW - 0.76,
+      3.1,
+      33,
+      "FFFFFF",
+      true,
+    );
+    slide.bullets.slice(1).forEach((value, i) => {
+      custom =
+        put(i + 1, value, 8.35, 2.08 + i * 2.22, 4.0, 1.88, 24) && custom;
+    });
+    if (!custom)
+      throw new Error(
+        "重点页文字过密，请将核心问题与必要解释展开，不能缩成小字。",
+      );
+  } else if (wideEvidence) {
     composition = "evidence-wide";
     customText.push(...wideEvidence.text);
     custom = true;
@@ -460,7 +1009,7 @@ export function slideLayout(
       );
     const columns = hasImage ? 1 : steps ? 3 : count >= 4 ? 2 : 1;
     const bulletW = hasImage
-        ? 3.5
+        ? evidenceColumnWidth
         : columns === 3
           ? 3.35
           : columns === 2
@@ -468,7 +1017,7 @@ export function slideLayout(
             : 10.65,
       startY = columns > 1 ? 2.1 : 1.7,
       gap = hasImage ? 0.22 : columns > 1 ? 0.68 : 0.36,
-      bodyX = hasImage ? 9.05 : columns > 1 ? 0.9 : 1.35;
+      bodyX = hasImage ? 12.55 - evidenceColumnWidth : columns > 1 ? 0.9 : 1.35;
     // Fit the whole column at one font size instead of shrinking each bullet or
     // spreading a short sentence over a fixed, mostly empty slot.
     let fontSize = hasImage ? 20 : columns > 1 ? 24 : 25;
@@ -521,13 +1070,19 @@ export function slideLayout(
         y += rowHeights()[Math.floor(i / columns)] + gap;
     }
   }
-  const footer = wrapSlideText(citationLabel(sources), 11.2, 11).slice(0, 1);
+  // Shared quiet page frame keeps preview and native export consistent.
+  shapes.push({ x: 0.75, y: 1.39, w: 0.56, h: 0.045, fill: "177E7D" });
+  shapes.push({ x: 0.9, y: 6.91, w: 11.75, h: 0.009, fill: "E2E9E8" });
+  const footerLines = wrapSlideText(citationLabel(sources), 11.2, 10);
+  const footer = footerLines.slice(0, 2);
+  if (footerLines.length > 2)
+    footer[1] = footer[1].slice(0, -1).trimEnd() + "…";
   text.push({
     x: 0.9,
-    y: 7.02,
+    y: 7.0,
     w: 11.2,
-    h: 0.22,
-    fontSize: 11,
+    h: 0.37,
+    fontSize: 10,
     lines: footer,
     color: "65656F",
     role: "footer",
@@ -536,7 +1091,12 @@ export function slideLayout(
   if (wideEvidence) {
     image = wideEvidence.image;
   } else if (imageSize) {
-    const area = { x: 0.72, y: 1.53, w: 7.95, h: 5.18 },
+    const area = {
+        x: 0.72,
+        y: 1.53,
+        w: 7.95 + (3.5 - evidenceColumnWidth),
+        h: 5.18,
+      },
       scale = Math.min(area.w / imageSize.width, area.h / imageSize.height),
       w = imageSize.width * scale,
       h = imageSize.height * scale;
@@ -547,5 +1107,5 @@ export function slideLayout(
       h,
     };
   }
-  return { text, image, shapes, composition, background: "FFFFFF" };
+  return { text, image, shapes, composition, background: "FFFFFF", table };
 }

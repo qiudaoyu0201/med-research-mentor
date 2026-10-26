@@ -109,6 +109,7 @@ export interface Section {
   text: string;
   kind: SourceKind | "background";
   citations: string[];
+  figures?: { sourceId: string; panelId?: string }[];
 }
 export interface LearningUnit {
   title: string;
@@ -149,6 +150,7 @@ export interface Slide {
   citations: string[];
   imageSource?: string;
   imageCrop?: import("./image-region.ts").ImageRegion;
+  layout?: "auto" | "flow" | "comparison" | "spotlight" | "table";
 }
 export interface DeckOutline {
   slides: Slide[];
@@ -270,6 +272,11 @@ export interface TaskRun {
   error?: string;
   budget?: BudgetState;
   cacheHit?: string;
+  readingImageEvidence?: {
+    sourceIds: string[];
+    imageHash: string;
+    panelIds?: string[];
+  };
   materials?: MaterialSnapshot[];
   materialRequests?: MaterialRequest[];
   evaluationBudget?: BudgetState;

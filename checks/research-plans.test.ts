@@ -8,6 +8,7 @@ import { unzipSync, strFromU8 } from "fflate";
 import type { PlanContent, ResearchPlan } from "../shared/research-plan.ts";
 import type { PaperBundle } from "../shared/types.ts";
 import type { PlanJobInput } from "../server/research-plan-schemas.ts";
+import { planContentSchema } from "../server/research-plan-schemas.ts";
 const content = {
   title: "测量与对照草案",
   sections: [
@@ -540,6 +541,67 @@ test("核对返回非法定位或阻断问题时保留草稿，但禁止导出",
   await h2.store.restore([result], [legacy]);
   assert.equal(h2.store.job(j2.id).status, "failed");
 });
+test("修订生成与核对可追溯已保存的历史条件，且当前条件保持独立", async () => {
+  const revised = structuredClone(content);
+  revised.sections[0].text =
+    "当前按8周、双人各5例每周执行；历史初版为16周、双人各20例每周。";
+  const h = harness([content, review, revised, review]);
+  const initial = await h.store.create({
+    ...topic,
+    conditions: "240例，16周；两名医师各20例/周，有第三裁决者。",
+  });
+  const initialJob = await h.store.start(initial.id, input(initial));
+  assert.equal((await h.store.wait(initialJob.id)).status, "completed");
+  const saved = h.store.get(initial.id);
+  const firstVersion = structuredClone(saved.versions[0]);
+  const changed = await h.store.updateTopic(initial.id, saved.topic.version, {
+    ...topic,
+    conditions: "120例，8周；两名医师各5例/周，无第三裁决者。",
+  });
+  const revisionJob = await h.store.start(
+    initial.id,
+    input(changed, { action: "revise" }),
+  );
+  assert.equal((await h.store.wait(revisionJob.id)).status, "completed");
+  const current = h.store.get(initial.id);
+  assert.deepEqual(current.versions[0], firstVersion);
+  assert.deepEqual(h.calls[0].input.versionHistory.ancestors, []);
+  assert.equal(h.calls[1].input.versionHistory.previousContent, null);
+  for (const call of h.calls.slice(2)) {
+    assert.equal(call.input.topic.conditions, changed.topic.conditions);
+    assert.equal(
+      call.input.versionHistory.ancestors[0].versionId,
+      firstVersion.id,
+    );
+    assert.equal(
+      call.input.versionHistory.ancestors[0].topic.conditions,
+      initial.topic.conditions,
+    );
+    assert.equal(
+      call.input.versionHistory.ancestors[0].topic.version,
+      initial.topic.version,
+    );
+    assert.deepEqual(
+      call.input.versionHistory.previousContent,
+      call.input.artifactVersion
+        ? {
+            versionId: firstVersion.id,
+            content: plain(firstVersion.content),
+          }
+        : null,
+    );
+    assert.equal(call.input.versionHistory.unresolvedAncestorId, null);
+    assert.equal(
+      call.input.versionHistory.ancestors.some(
+        (entry: any) => entry.versionId === current.currentVersion,
+      ),
+      false,
+    );
+  }
+  assert.deepEqual(h.calls[2].input.original, plain(firstVersion.content));
+  assert.equal(h.calls[3].input.artifactVersion, current.currentVersion);
+  assert.match(h.calls[3].instructions, /历史条件不覆盖当前条件/);
+});
 test("单节改写保留其它章节和用户归属", async () => {
   const revised = structuredClone(content);
   revised.sections[0].text = "不应改到这里";
@@ -1050,4 +1112,254 @@ test("professional plan exports include only cited sources and preserve the save
   assert.equal(before.versions.at(-1)!.topic.question, rawQuestion);
   assert.equal(before.versions.at(-1)!.topic.sources.length, 2);
   assert.deepEqual(h.store.get(p.id), before);
+});
+
+test("local plan citations freeze parent paper context in both exports without borrowing live metadata", async () => {
+  const outputs: unknown[] = [];
+  const h = harness(outputs);
+  h.papers[0].title = "A parent cohort paper";
+  h.papers[0].sources[0].title = "PDF 第 4 页";
+  const p = await h.store.create({
+    ...topic,
+    sources: [{ paperId: "a", sourceVersion: "1", sourceId: "duplicate" }],
+  });
+  const ref = p.topic.sources[0];
+  assert.equal(ref.paperTitle, "A parent cohort paper");
+  outputs.push(
+    {
+      ...content,
+      sections: content.sections.map((s) => ({ ...s, sourceRefs: [ref.id] })),
+    },
+    { ...review, checkedSourceRefs: [ref.id] },
+  );
+  const job = await h.store.start(p.id, input(p));
+  const done = await h.store.wait(job.id);
+  assert.equal(done.status, "completed", done.error);
+  const saved = h.store.get(p.id);
+  h.papers[0].title = "Changed live paper title";
+  const restored = new ResearchPlans(
+    h.provider,
+    async () => h.papers[0],
+    new TaskScheduler(),
+    h.persist,
+    h.erase,
+  );
+  await restored.restore(
+    [saved],
+    [structuredClone(h.records.get(`research-plan-jobs/${job.id}`))],
+  );
+  for (const text of [
+    restored.exportMarkdown(p.id, done.resultVersion!),
+    strFromU8(
+      unzipSync(restored.exportDocx(p.id, done.resultVersion!))[
+        "word/document.xml"
+      ],
+    ),
+  ]) {
+    assert.match(text, /A parent cohort paper · PDF 第 4 页/);
+    assert.doesNotMatch(text, /Changed live paper title/);
+  }
+  await assert.rejects(
+    restored.start(p.id, input(restored.get(p.id))),
+    /来源内容/,
+  );
+  assert.equal(h.calls.length, 2);
+});
+
+test("legacy local references without parent titles still reopen and generate while real text changes remain blocked", async () => {
+  const h = harness();
+  const p = await h.store.create({
+    ...topic,
+    sources: [{ paperId: "a", sourceVersion: "1", sourceId: "duplicate" }],
+  });
+  for (const ref of p.topic.sources) delete ref.paperTitle;
+  const restored = new ResearchPlans(
+    h.provider,
+    async () => h.papers[0],
+    new TaskScheduler(),
+    h.persist,
+    h.erase,
+  );
+  await restored.restore([p], []);
+  const job = await restored.start(p.id, input(restored.get(p.id)));
+  const done = await restored.wait(job.id);
+  assert.equal(done.status, "completed", done.error);
+  assert.equal(
+    restored.get(p.id).versions[0].topic.sources[0].paperTitle,
+    undefined,
+  );
+  h.papers[0].sources[0].text += " changed";
+  await assert.rejects(
+    restored.start(p.id, input(restored.get(p.id))),
+    /来源内容/,
+  );
+  assert.equal(h.calls.length, 2);
+});
+
+test("plan exports share a paper citation across frozen excerpts while retaining locations and distinct papers", async () => {
+  const outputs: unknown[] = [];
+  const h = harness(outputs);
+  h.papers[0].title = h.papers[1].title = "Shared paper title";
+  h.papers[0].sources[0].title = "Page 3";
+  h.papers[0].sources[0].locator = "PDF page 3";
+  h.papers[0].sources.push(
+    {
+      ...h.papers[0].sources[0],
+      id: "page-4",
+      title: "Page 4",
+      locator: "PDF page 4",
+    },
+    {
+      ...h.papers[0].sources[0],
+      id: "unused",
+      title: "Unused page",
+      locator: "PDF page 99",
+    },
+  );
+  h.papers[1].sources[0].title = "Other paper result";
+  const p = await h.store.create({
+    ...topic,
+    sources: h.papers.flatMap((paper) =>
+      paper.sources.map((source) => ({
+        paperId: paper.id,
+        sourceVersion: paper.version,
+        sourceId: source.id,
+      })),
+    ),
+  });
+  const refs = p.topic.sources;
+  const draft = {
+    ...structuredClone(content),
+    sections: content.sections.map((s) => ({
+      ...structuredClone(s),
+      sourceRefs: [] as string[],
+    })),
+  };
+  draft.sections[0].sourceRefs = [refs[0].id, refs[1].id];
+  draft.sections[1].sourceRefs = [refs[1].id, refs[3].id];
+  outputs.push(draft, { ...review, checkedSourceRefs: refs.map((r) => r.id) });
+  const job = await h.store.start(p.id, input(p));
+  const done = await h.store.wait(job.id);
+  assert.equal(done.status, "completed", done.error);
+  const saved = h.store.get(p.id);
+  const md = h.store.exportMarkdown(p.id, done.resultVersion!);
+  const document = strFromU8(
+    unzipSync(h.store.exportDocx(p.id, done.resultVersion!))[
+      "word/document.xml"
+    ],
+  );
+  for (const text of [md, document]) {
+    assert.equal(
+      (text.match(/Shared paper title/g) ?? []).length,
+      2,
+      "same title in distinct papers cannot collapse their identities",
+    );
+    assert.match(text, /Page 3 · PDF page 3；Page 4 · PDF page 4/);
+    assert.match(text, /Other paper result/);
+    assert.doesNotMatch(text, /Unused page|PDF page 99|\[3\]|\[1\] \[1\]/);
+    assert.match(text, /\[1\] \[2\]/);
+  }
+  assert.deepEqual(
+    h.store.get(p.id),
+    saved,
+    "export must not rewrite saved section source bindings",
+  );
+});
+
+test("plan exports omit empty optional sections and preserve nonempty saved content", async () => {
+  for (const [assumptions, questions, limitations] of [
+    [[], [], []],
+    [["新增设计假设"], [], []],
+    [[], ["需导师选择的取舍"], []],
+    [[], [], ["尚未交代的解释边界"]],
+  ]) {
+    const draft = {
+      ...structuredClone(content),
+      assumptions,
+      questions,
+      limitations,
+    };
+    const h = harness([draft, review]);
+    const p = await h.store.create(topic);
+    const j = await h.store.start(p.id, input(p, { maxCalls: 2 }));
+    const done = await h.store.wait(j.id);
+    assert.equal(done.status, "completed", done.error);
+    const before = h.store.get(p.id);
+    const id = before.currentVersion!;
+    const md = h.store.exportMarkdown(p.id, id);
+    const doc = strFromU8(
+      unzipSync(h.store.exportDocx(p.id, id))["word/document.xml"],
+    );
+    assert.equal(
+      md.includes("## 假设与待确认"),
+      Boolean(assumptions.length || questions.length),
+    );
+    assert.equal(
+      doc.includes(">假设与待确认<"),
+      Boolean(assumptions.length || questions.length),
+    );
+    assert.equal(md.includes("## 研究局限"), Boolean(limitations.length));
+    assert.equal(doc.includes(">研究局限<"), Boolean(limitations.length));
+    for (const text of [md, doc]) {
+      for (const item of [...assumptions, ...questions, ...limitations])
+        assert.ok(text.includes(item));
+      assert.ok(text.includes(content.sections[0].text));
+      assert.ok(
+        text.includes("对象待确认"),
+        "section-level unknowns must remain",
+      );
+    }
+    assert.deepEqual(
+      h.store.get(p.id),
+      before,
+      "export must not alter saved versions",
+    );
+  }
+});
+
+test("plan rationale may be empty when reasoning is in the body, and survives save, restore and export", async () => {
+  const draft = structuredClone(content);
+  draft.sections[0].text =
+    "拟按患者汇总测量，因为同一患者的多次读数并非独立样本。";
+  draft.sections[0].rationale = "   ";
+  const h = harness([draft, review]);
+  const p = await h.store.create(topic);
+  const job = await h.store.start(p.id, input(p, { maxCalls: 2 }));
+  const done = await h.store.wait(job.id);
+  assert.equal(done.status, "completed", done.error);
+  const saved = h.store.get(p.id);
+  const version = saved.versions.at(-1)!;
+  assert.equal(version.content.sections[0].rationale, "");
+  assert.equal(
+    version.content.sections[1].rationale,
+    content.sections[1].rationale,
+  );
+  const restored = harness();
+  await restored.store.restore(
+    [saved],
+    [...h.records.entries()]
+      .filter(([key]) => key.startsWith("research-plan-jobs/"))
+      .map(([, value]) => value),
+  );
+  for (const store of [h.store, restored.store]) {
+    const before = store.get(p.id);
+    const md = store.exportMarkdown(p.id, version.id);
+    const doc = strFromU8(
+      unzipSync(store.exportDocx(p.id, version.id))["word/document.xml"],
+    );
+    for (const text of [md, doc]) {
+      assert.equal((text.match(/设计理由：/g) ?? []).length, 1);
+      assert.ok(text.includes(draft.sections[0].text));
+      assert.ok(text.includes(content.sections[1].rationale));
+      assert.ok(text.includes("对象待确认"));
+    }
+    assert.deepEqual(store.get(p.id), before);
+  }
+  const parsed = planContentSchema.parse(draft);
+  assert.equal(parsed.sections[0].rationale, "");
+  for (const invalid of [undefined, null, "x".repeat(3001)]) {
+    const broken = structuredClone(draft) as any;
+    broken.sections[0].rationale = invalid;
+    assert.equal(planContentSchema.safeParse(broken).success, false);
+  }
 });

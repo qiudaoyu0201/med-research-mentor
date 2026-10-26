@@ -64,6 +64,7 @@ function entry(
   readScope: string,
   prerequisites: string[] = [],
   version = "1.0.0",
+  verifiedDate = date,
 ): Source {
   const references = Array.isArray(reference) ? reference : [reference];
   return {
@@ -84,7 +85,7 @@ function entry(
       status: "available",
       references,
       claims: [{ text, referenceIds: references.map((r) => r.id) }],
-      verification: { date, readScope, supportedClaims: [text] },
+      verification: { date: verifiedDate, readScope, supportedClaims: [text] },
     },
   };
 }
@@ -94,8 +95,9 @@ const hewitt = {
     "Hewitt et al. Telomeres are favoured targets of a persistent DNA damage response in ageing and stress-induced senescence. Nature Communications 3, 708 (2012)",
   doi: "10.1038/ncomms1708",
   pmid: "22426229",
-  url: "https://pubmed.ncbi.nlm.nih.gov/22426229/",
-  locator: "Abstract; Results; Figure 1 caption; Methods / Immuno-FISH",
+  url: "https://europepmc.org/articles/PMC3292717",
+  locator:
+    "Introduction / DDR and cell-cycle arrest; Results / TAF are persistent in stress-induced senescence, TAF are longer-lived than non-TAF; Figures 1, 4; Methods / Immuno-FISH",
 };
 export const foundationSources: Source[] = [
   ...existing,
@@ -263,9 +265,12 @@ export const foundationSources: Source[] = [
     "senescence-basics",
     "细胞衰老与增殖停滞",
     ["senescence", "senescent", "衰老细胞", "细胞衰老"],
-    "细胞衰老是一种稳定的增殖停滞状态，即细胞不再像原来那样继续分裂；这描述细胞状态，不等于细胞已经死亡，也不等于整个个体的年龄。Hewitt 研究讨论复制及应激诱导的衰老，用细胞增殖相关读数和损伤相关读数共同支持判断。各读数提供不同侧面，实验判断应结合诱导条件、对照与时间。",
+    "细胞衰老是一种稳定的增殖停滞状态，即细胞不再像原来那样继续分裂；这描述细胞状态，不等于细胞已经死亡，也不等于整个个体的年龄。一般机制上，持续的 DNA 损伤反应可通过细胞周期检查点（限制细胞继续分裂的调控环节）帮助维持增殖停滞。Hewitt 研究在辐射诱导的成纤维细胞衰老中报告增殖消失、BrdU／Ki67 增殖标记降低及 SA-βgal 活性增加，并观察损伤反应焦点的持续性。这里的通用机制和该研究观察是理解读数的基础，不表示当前论文已测定这些调控环节；不同读数要结合对象、处理与时间理解。",
     hewitt,
-    "PubMed 摘要及本地开放全文 PDF 第 2–3 页结果与图注、第 8 页方法。",
+    "2026-10-25 读取 Europe PMC 开放全文 Introduction 中 DDR／检查点机制段、Results 首段的增殖与衰老读数及 Figure 1；原文将增殖／BrdU／Ki67 与 SA-βgal 结果注明为 results not shown，不能说成该图直接展示。",
+    [],
+    "1.0.1",
+    "2026-10-25",
   ),
   entry(
     "sa-beta-gal",
@@ -312,11 +317,12 @@ export const foundationSources: Source[] = [
     "taf-basics",
     "TAF：端粒相关 DNA 损伤反应焦点",
     ["TAF", "telomere-associated foci", "telomere associated foci", "端粒相关"],
-    "TAF 是 telomere-associated foci，指与端粒共定位的 DNA 损伤反应焦点。端粒是染色体末端的保护性结构；焦点是显微图像中局部集中的信号。共定位指两类信号对应同一空间位置：观察一个损伤反应焦点是否与端粒信号重合，据其空间重合识别端粒相关焦点，而不是把任意两个亮点算作 TAF。Hewitt 的免疫荧光原位杂交（immuno-FISH）同时显示 γH2AX 损伤反应信号和端粒信号。它测的是损伤反应信号所在位置，不直接测端粒长度，也不凭单张图证明损伤持续存在；持续性需要不同时间的比较。TAF／非 TAF 数量与比例的变化支持该研究中的推理，不能单独证明整个细胞或个体已衰老。当前论文具体检测用哪种信号、怎样计数和共定位距离阈值，仍需依据该论文方法。",
+    "TAF 是 telomere-associated foci，指与端粒共定位的 DNA 损伤反应焦点。端粒是染色体末端的保护性结构；焦点是显微图像中局部集中的信号。Hewitt 的免疫荧光原位杂交（immuno-FISH）同时显示 γH2AX 损伤反应信号和端粒信号，据两者的空间重合识别 TAF，不是把任意亮点算作 TAF。为什么它与衰老有关？持续的 DNA 损伤反应可激活限制细胞分裂的检查点，帮助维持衰老中的增殖停滞。该研究在辐射诱导的成纤维细胞衰老模型中观察到：非端粒焦点随时间减少，而端粒相关焦点较持久；活细胞追踪中，持续超过 3 小时的焦点均与端粒共定位。这把 TAF 与持续损伤反应联系起来，因此它可作为衰老相关线索。通用机制不是当前论文已经测得的机制；一张 TAF 图只显示取样时的损伤信号位置，不能单独证明持续性或判定细胞衰老，也不直接测端粒长度。当前论文的检测信号、计数和共定位阈值另依其方法。",
     hewitt,
-    "PubMed 摘要、Figure 1 完整图注；本地开放全文第 2–3 页 Results、第 8 页 Immuno-FISH。",
+    "2026-10-25 读取 Europe PMC 开放全文 Introduction 的 DDR／增殖停滞机制段，Results / TAF are persistent in stress-induced senescence 与 TAF are longer-lived than non-TAF、Figures 1 和 4 及 Immuno-FISH。持续超过 3 小时为该研究活细胞追踪观察，不是所有论文的通用 TAF 判定阈值。",
     ["senescence-basics"],
-    "1.0.1",
+    "1.0.2",
+    "2026-10-25",
   ),
 ];
 

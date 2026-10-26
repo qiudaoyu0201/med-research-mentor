@@ -5,9 +5,13 @@ import {
   figurePanels,
   clearPanelBoundaries,
   applyDeckPanels,
+  panelSelectionIds,
 } from "../server/figure-panels.ts";
 import { groundedTeachingSchema } from "../server/schemas.ts";
-import { pptDeckImagePacket } from "../server/ppt-image-packet.ts";
+import {
+  pptDeckImagePacket,
+  pptSelectionImagePacket,
+} from "../server/ppt-image-packet.ts";
 import type { Source, DeckOutline } from "../shared/types.ts";
 const box = { left: 0, top: 0, right: 500, bottom: 400 };
 const point = (text: string, left: number, top: number, font = "labels") => ({
@@ -226,4 +230,125 @@ test("review image uses the actual selected crop instead of the whole original",
     [255, 0, 0, 255],
   );
   await assert.rejects(pptDeckImagePacket(d, []));
+});
+
+test("selection board shows the complete original and real candidate crop without changing saved evidence", async () => {
+  const s = source(),
+    before = structuredClone(s);
+  const rendered = await loadImage((await pptSelectionImagePacket([s]))!);
+  assert.equal(rendered.width, 1800);
+  assert.equal(rendered.height, 620);
+  const c = createCanvas(1800, 620),
+    ctx = c.getContext("2d");
+  ctx.drawImage(rendered, 0, 0);
+  const pixel = (x: number, y: number) => [
+    ...ctx.getImageData(x, y, 1, 1).data,
+  ];
+  assert.ok(pixel(200, 300)[0] > 240 && pixel(200, 300)[2] < 15);
+  assert.ok(pixel(700, 300)[2] > 240 && pixel(700, 300)[0] < 15);
+  assert.ok(pixel(1100, 300)[0] > 240 && pixel(1100, 300)[2] < 15);
+  assert.deepEqual(s, before);
+  assert.equal(
+    await pptSelectionImagePacket([{ ...s, imagePanels: undefined }]),
+    s.image,
+  );
+  // Review still receives only the actual selected crop, never the option board.
+  const d = deck({ imagePanel: "figure:a" });
+  applyDeckPanels(d, [s]);
+  const review = await loadImage((await pptDeckImagePacket(d, [s]))!);
+  assert.equal(review.width, 50);
+  assert.equal(review.height, 60);
+});
+test("candidate pictures do not displace whole originals and total board size stays bounded", async () => {
+  const s = source(),
+    many = Array.from({ length: 10 }, (_, i) => ({
+      ...s,
+      id: "figure-" + i,
+      imagePanels: Array.from({ length: 8 }, (_, j) => ({
+        ...s.imagePanels![0],
+        label: String.fromCharCode(97 + j),
+      })),
+    }));
+  const board = await loadImage((await pptSelectionImagePacket(many))!);
+  assert.equal(board.width, 1800);
+  assert.equal(board.height, 620 * 8);
+  assert.equal(await pptSelectionImagePacket([]), undefined);
+});
+
+test("grounded crop selection rejects candidates outside the actual visual board", () => {
+  const s = source();
+  const many = Array.from({ length: 10 }, (_, i) => ({
+    ...s,
+    id: "figure-" + i,
+    imagePanels: Array.from({ length: 8 }, (_, j) => ({
+      ...s.imagePanels![0],
+      label: String.fromCharCode(97 + j),
+    })),
+  }));
+  const before = structuredClone(many);
+  assert.deepEqual(
+    panelSelectionIds(many),
+    many.slice(0, 8).map((s) => s.id + ":a"),
+  );
+  const slides = groundedTeachingSchema(many).shape.deck.unwrap().shape.slides;
+  slides.parse(
+    deck({
+      imageSource: "figure-7",
+      imagePanel: "figure-7:a",
+      citations: ["figure-7"],
+    }).slides,
+  );
+  for (const id of ["figure-0:b", "figure-8:a"]) {
+    assert.throws(() =>
+      slides.parse(
+        deck({
+          imageSource: id.split(":")[0],
+          citations: [id.split(":")[0]],
+          imagePanel: id,
+        }).slides,
+      ),
+    );
+  }
+  assert.deepEqual(many, before);
+  assert.deepEqual(panelSelectionIds([s]), ["figure:a"]);
+});
+
+test("source review retains cited full originals beside crops without exposing them in page-only review", async () => {
+  const s = source(),
+    d = deck({ imagePanel: "figure:a" });
+  applyDeckPanels(d, [s]);
+  const before = structuredClone({ s, d });
+  const review = await loadImage((await pptDeckImagePacket(d, [s], true))!);
+  assert.equal(review.width, 1800);
+  assert.equal(review.height, 620);
+  const canvas = createCanvas(review.width, review.height),
+    ctx = canvas.getContext("2d");
+  ctx.drawImage(review, 0, 0);
+  const blue = [...ctx.getImageData(1700, 300, 1, 1).data];
+  assert.ok(
+    blue[2] > 240 && blue[0] < 15,
+    "the uncropped source panel is available for fact checking",
+  );
+  const page = await loadImage((await pptDeckImagePacket(d, [s]))!);
+  assert.equal(page.width, 50);
+  assert.equal(page.height, 60);
+  const table = deck({ imageSource: "", layout: "table" });
+  assert.equal(await pptDeckImagePacket(table, [s]), undefined);
+  const tableReview = await loadImage(
+    (await pptDeckImagePacket(table, [s], true))!,
+  );
+  assert.equal(
+    tableReview.width,
+    1800,
+    "a table-only source image is labelled as original evidence",
+  );
+  assert.equal(
+    await pptDeckImagePacket(
+      deck({ citations: [], imageSource: "" }),
+      [s],
+      true,
+    ),
+    undefined,
+  );
+  assert.deepEqual({ s, d }, before);
 });

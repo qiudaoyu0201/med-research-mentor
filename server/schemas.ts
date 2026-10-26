@@ -53,6 +53,15 @@ export const unitSchema = z.object({
         text: z.string().min(1).max(4000),
         kind: z.enum(["paper", "foundation", "interpretation", "background"]),
         citations,
+        figures: z
+          .array(
+            z.object({
+              sourceId: z.string().min(1),
+              panelId: z.string().optional(),
+            }),
+          )
+          .max(2)
+          .optional(),
       }),
     )
     .min(1)
@@ -97,11 +106,17 @@ export const reviewSchema = z.object({
 });
 export const slideSchema = z.object({
   title: z.string().min(1).max(65),
-  bullets: z.array(z.string().max(140)).min(1).max(5),
+  bullets: z.array(z.string().max(140)).min(1).max(6),
   notes: z.string().min(1).max(2000),
   citations,
   imageSource: z.string().optional(),
   imageCrop: imageRegionSchema.optional(),
+  layout: z
+    .enum(["auto", "flow", "comparison", "spotlight", "table"])
+    .optional()
+    .describe(
+      "页面表达：auto常规图文；flow仅用于来源支持的2–6步有序流程，5–6步用简短节点展开；comparison用于2项并列比较，不暗示先后；spotlight突出研究问题或目的并补充至多2项解释。table用于有共同指标的2–5列表格，bullets首项为表头、其余为数据行，每行以 | 分隔且列数一致，表头占一项，数据行数服从bullets长度上限；不加Markdown分隔行，缺失值明确写未报告，不猜值。需要按组并列时必须保留每个请求组和每个阈值，不能只展示其中一组。非auto版式不同时选择imageSource。",
+    ),
 });
 export const deckSchema = z.object({
   slides: z.array(slideSchema).min(1).max(16),
@@ -115,7 +130,11 @@ export const groundingContractVersion = "grounded-output-v4-source-kinds";
 export function groundedTeachingSchema(
   sources: Source[],
   speechScript = false,
-  options: { compactUnit?: boolean } = {},
+  options: {
+    compactUnit?: boolean;
+    readingFigureSourceIds?: string[];
+    readingFigurePanelIds?: string[];
+  } = {},
 ) {
   const ids = z.array(z.enum(sources.map((s) => s.id))).max(20);
   const kinds = [
@@ -126,7 +145,31 @@ export function groundedTeachingSchema(
       ? ["foundation" as const]
       : []),
   ] as const;
+  const figureSources = sources.filter((s) =>
+    options.readingFigureSourceIds?.includes(s.id),
+  );
   const sections = unitSchema.shape.sections.element.extend({
+    figures: z
+      .array(
+        z.object({
+          sourceId: figureSources.length
+            ? z.enum(figureSources.map((s) => s.id))
+            : z.string().min(1),
+          panelId: z
+            .enum([
+              "",
+              ...panelSelectionIds(figureSources).filter((id) =>
+                options.readingFigurePanelIds?.includes(id),
+              ),
+            ])
+            .optional(),
+        }),
+      )
+      .max(figureSources.length ? 2 : 0)
+      .optional()
+      .describe(
+        "仅在本节实质讲图时选择已引用的图；sourceId须为本节citations中的可见原图ID，panelId选择资料板中实际展示且匹配该图的局部ID，空字符串表示全图。图就近显示，不为每个段落重复全图；需要完整轴、组别或图例时选全图，不能猜裁剪坐标。无图时省略或返回空数组。",
+      ),
     citations: ids,
     kind: z
       .enum(kinds)
@@ -137,13 +180,13 @@ export function groundedTeachingSchema(
   const slides = slideSchema.omit({ imageCrop: true }).extend({
     // The rendered evidence layout reserves a narrow text column. Keep generated
     // bullets compact enough to survive the actual PowerPoint export.
-    bullets: z.array(z.string().trim().min(1).max(120)).min(1).max(4),
+    bullets: z.array(z.string().trim().min(1).max(120)).min(1).max(6),
     citations: ids,
     imagePanel: z
       .enum(["", ...panelSelectionIds(sources)])
       .optional()
       .describe(
-        "可选当前imageSource已有的面板ID；空字符串表示全图。不能猜坐标。",
+        "可选当前imageSource已有的选区ID；资料板whole显示完整原图，带选区ID的画面显示对应真实裁剪；未展示的选区不据名称推断内容。band-N为从上到下分开的整行图组，band-N-col-M为该行从左到右分开的列，band-N-col-M-band-K为该列内部从上到下的图组；边界来自完整留白或已核对封闭网格的细分隔线；均只代表空间位置，不代表原图面板字母或科学含义，整行仍可能含多个子图。只选择完整支持本页判断且保留必要轴与图例的选区；空字符串表示全图。不能猜坐标。",
       ),
     imageSource: z
       .enum([
@@ -161,6 +204,17 @@ export function groundedTeachingSchema(
     .max(16)
     .superRefine((items, ctx) => {
       for (const [index, slide] of items.entries()) {
+        const maximum =
+          slide.layout === "flow" ? 6 : slide.layout === "table" ? 5 : 4;
+        if (slide.bullets.length > maximum)
+          ctx.addIssue({
+            code: "too_big",
+            origin: "array",
+            maximum,
+            inclusive: true,
+            path: [index, "bullets"],
+            message: "普通页面最多四项；流程最多六步，表格最多表头及四行。",
+          });
         if (slide.imageSource && slide.bullets.length > 3)
           ctx.addIssue({
             code: "too_big",

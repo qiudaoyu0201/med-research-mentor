@@ -435,3 +435,121 @@ test("reading review receives the original image and source binding; absent or m
   assert.equal(calls, 2);
   assert.equal(receivedImage, undefined);
 });
+
+test("reading multi-figure review requires all source bindings and forwards the actual packet", async () => {
+  let calls = 0;
+  const provider: Provider = {
+    model: "fixture",
+    async generate(rules, input: any, schema, _signal, image) {
+      calls++;
+      assert.match(rules, /资料板/);
+      assert.match(rules, /imageSourceIds/);
+      assert.equal(image, "actual-reading-packet");
+      assert.deepEqual(input.imageSourceIds, ["figure-a", "figure-b"]);
+      return {
+        output: schema.parse({
+          checks: [
+            {
+              criterion: "compare",
+              passed: true,
+              location: "comparison",
+              sourceIds: ["figure-a", "figure-b"],
+              explanation: "source binding fixture",
+            },
+          ],
+        }),
+      };
+    },
+  };
+  const input = {
+    question: "compare",
+    conditions: "two figures",
+    criteria: ["compare"],
+    artifact: { title: "comparison" },
+    sources: [
+      { id: "figure-a", text: "a", locator: "a" },
+      { id: "figure-b", text: "b", locator: "b" },
+    ],
+    evaluatorVersion: "explanation-and-reading-images-v1-visible-text" as const,
+    imageSourceIds: ["figure-a", "figure-b"],
+  };
+  const signal = new AbortController().signal;
+  for (const bad of [
+    undefined,
+    [],
+    ["figure-a", "other"],
+    ["figure-a", "figure-a"],
+  ])
+    await assert.rejects(
+      reviewArtifact(
+        provider,
+        { ...input, imageSourceIds: bad },
+        signal,
+        "actual-reading-packet",
+      ),
+      /未派发/,
+    );
+  await assert.rejects(reviewArtifact(provider, input, signal), /未派发/);
+  assert.equal(calls, 0);
+  assert.equal(
+    (await reviewArtifact(provider, input, signal, "actual-reading-packet"))
+      .valid,
+    true,
+  );
+  assert.equal(calls, 1);
+});
+
+test("PPT renderer review distinguishes Office output from previews and requires page images", async () => {
+  let calls = 0;
+  const provider: Provider = {
+    model: "fixture",
+    async generate(instructions, _input, schema, _signal, image) {
+      calls++;
+      assert.equal(image, "actual-page-board");
+      assert.match(instructions, /renderer为powerpoint/);
+      assert.match(instructions, /layout-preview仅为布局预览/);
+      assert.match(instructions, /结构化元数据/);
+      return {
+        output: schema.parse({
+          checks: [
+            {
+              criterion: "页面可读",
+              passed: true,
+              location: "两组阈值比较",
+              sourceIds: ["s"],
+              explanation: "依据本轮实际页面和宿主导出记录核对。",
+            },
+          ],
+        }),
+      };
+    },
+  };
+  const input = {
+    question: "检查汇报",
+    conditions: "只检查实际页面",
+    criteria: ["页面可读"],
+    artifact: {
+      deck: {
+        slides: [
+          {
+            title: "两组阈值比较",
+            bullets: ["阈值改变排除能力"],
+            notes: "结果解释",
+            citations: ["s"],
+          },
+        ],
+      },
+      renderAudit: { renderer: "powerpoint" },
+    },
+    sources: [{ id: "s", text: "原文结果", locator: "p8" }],
+    evaluatorVersion:
+      "explanation-and-deck-images-v4-renderer-labelled" as const,
+  };
+  const signal = new AbortController().signal;
+  await assert.rejects(reviewArtifact(provider, input, signal), /未派发/);
+  assert.equal(calls, 0);
+  assert.equal(
+    (await reviewArtifact(provider, input, signal, "actual-page-board")).passed,
+    true,
+  );
+});

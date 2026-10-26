@@ -3,7 +3,7 @@ import { dirname, join } from "node:path";
 
 const require = createRequire(import.meta.url);
 const root = dirname(require.resolve("pdfjs-dist/package.json"));
-export const pdfExtractionVersion = "pdf-figures-v8-caption-line-start";
+export const pdfExtractionVersion = "pdf-figures-v15-tabular-labels";
 // Node factories read local paths; no network download or process-CWD reliance.
 export const pdfRuntime = {
   wasmUrl: join(root, "wasm").replaceAll("\\", "/") + "/",

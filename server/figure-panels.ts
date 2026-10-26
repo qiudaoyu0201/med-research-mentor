@@ -1,4 +1,5 @@
 import type { Source, DeckOutline } from "../shared/types.ts";
+import { ruledFigureRegions } from "./raster-ruled-grid.ts";
 import {
   validRegion,
   cropPixels,
@@ -151,6 +152,26 @@ export function clearPanelBoundaries(
   panels: FigurePanel[],
 ): boolean {
   if (!panels.length || width <= 0 || height <= 0) return false;
+  // A printed divider is acceptable only when the entire closed grid and
+  // clear padding have been rechecked. Labels cannot bypass the
+  // raster check, and arbitrary coordinates beside a rule remain ineligible.
+  let ruled: FigurePanel[] | undefined;
+  const matchesRuledGrid = () => {
+    ruled ??= ruledFigureRegions(ctx, width, height);
+    return panels.every((panel) => {
+      if (!validRegion(panel.region)) return false;
+      const actual = cropPixels(panel.region, width, height);
+      return ruled!.some((candidate) => {
+        const expected = cropPixels(candidate.region, width, height);
+        return (
+          actual.left === expected.left &&
+          actual.top === expected.top &&
+          actual.width === expected.width &&
+          actual.height === expected.height
+        );
+      });
+    });
+  };
   const clear = (x: number, y: number, w: number, h: number) => {
     const pixels = ctx.getImageData(x, y, w, h).data;
     let ink = 0;
@@ -164,23 +185,43 @@ export function clearPanelBoundaries(
     const b = cropPixels(p.region, width, height);
     for (const x of [b.left, b.left + b.width])
       if (x > 2 && x < width - 2 && !clear(x - 1, b.top, 3, b.height))
-        return false;
+        return matchesRuledGrid();
     for (const y of [b.top, b.top + b.height])
       if (y > 2 && y < height - 2 && !clear(b.left, y - 1, b.width, 3))
-        return false;
+        return matchesRuledGrid();
   }
   return true;
 }
 
+// Keep the selection schema and visual board on the same bounded set.
+// A region not shown individually must not be selected from its position ID.
+export function pptSelectionCandidates(sources: Source[]) {
+  const originals = sources.filter((s) => s.image).slice(0, 8);
+  const panels = originals.map((s) =>
+    (s.imagePanels ?? []).filter((p) => validRegion(p.region)),
+  );
+  const candidates: { source: Source; panel: FigurePanel }[] = [];
+  for (let position = 0; candidates.length < 8; position++) {
+    let found = false;
+    for (const [index, source] of originals.entries()) {
+      const panel = panels[index][position];
+      if (!panel || candidates.length === 8) continue;
+      found = true;
+      candidates.push({ source, panel });
+    }
+    if (!found) break;
+  }
+  return candidates;
+}
+
 export function panelSelectionIds(sources: Source[]) {
-  return sources.flatMap((s) =>
-    ((s.image && s.imagePanels) || [])
-      .filter((p) => validRegion(p.region))
-      .map((p) => s.id + ":" + p.label),
+  return pptSelectionCandidates(sources).map(
+    ({ source, panel }) => source.id + ":" + panel.label,
   );
 }
-// Model selects an existing panel ID. Coordinates are resolved from PDF geometry,
-// never inferred from model-generated fractions or copied from another source.
+// Model selects an existing region ID. Coordinates come from printed PDF labels
+// clear raster gutters or a verified closed grid, never model-generated
+// fractions or another source.
 export function applyDeckPanels(
   deck: DeckOutline | null | undefined,
   sources: Source[],

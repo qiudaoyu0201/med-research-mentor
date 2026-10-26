@@ -1,11 +1,18 @@
 // A new bounded pilot. Never resumes or modifies a stopped historical cycle.
-import { readFile, mkdir, open, unlink, access } from "node:fs/promises";
+import {
+  readFile,
+  mkdir,
+  open,
+  unlink,
+  access,
+  writeFile,
+} from "node:fs/promises";
 import { resolve, join } from "node:path";
 import { digest } from "../server/materials.ts";
 import { hashFile, trainingEngine } from "../server/training-engine.ts";
 import {
   diagnosticManifest,
-  diagnosticLimit,
+  diagnosticCallLimit,
   diagnosticTiming,
   diagnosticReadingImage,
   diagnosticVisibleSources,
@@ -16,7 +23,12 @@ import {
   type DiagnosticManifest,
   type ParentEvidence,
 } from "../server/model-diagnostic.ts";
-import type { PaperBundle } from "../shared/types.ts";
+import type {
+  DeckOutline,
+  LearningUnit,
+  PaperBundle,
+  Source,
+} from "../shared/types.ts";
 import type { TrainingBatch } from "../server/internal-training.ts";
 import type { RuleSnapshot } from "../server/skills.ts";
 
@@ -165,7 +177,7 @@ try {
     rulesHash: digest(rules),
     provider: fingerprint,
     timing: diagnosticTiming,
-    limit: diagnosticLimit,
+    limit: diagnosticCallLimit(value),
     engineHash: digest(await trainingEngine()),
     planHash: await hashFile("docs/ITERATION.md"),
     parentHash: await hashFile(resolve(value.parentReport)),
@@ -180,7 +192,7 @@ try {
       await claim.writeFile(
         JSON.stringify({
           id,
-          limit: diagnosticLimit,
+          limit: diagnosticCallLimit(manifest!),
           createdAt: new Date().toISOString(),
         }),
       );
@@ -220,13 +232,13 @@ try {
       undefined,
       diagnosticTiming.taskMs,
     ).state;
-    budget.limit = budget.groupLimit = diagnosticLimit;
+    budget.limit = budget.groupLimit = diagnosticCallLimit(manifest!);
     budget.timing = diagnosticTiming;
     const batch: TrainingBatch = {
       id,
       phase: "M1",
       status: "awaiting-continuation",
-      cycleLimit: diagnosticLimit,
+      cycleLimit: diagnosticCallLimit(manifest!),
       budget,
     };
     await store.save("freeze", "inputs", {
@@ -245,14 +257,14 @@ try {
       parentEvidence,
       priorDiagnosticCalls,
       scope:
-        "独立八次诊断；父周期调用保持原状，不使用旧余额，不构成候选发布、盲测或真人效果证据。",
+        "独立诊断；调用额度由本次清单冻结，默认八次，可按实验规模配置。父周期调用保持原状，不使用旧余额，不构成候选发布、盲测或真人效果证据。",
     });
     console.log(
       JSON.stringify({
         id,
         modelCalls: 0,
         contractHash: digest(contract),
-        limit: diagnosticLimit,
+        limit: diagnosticCallLimit(manifest!),
       }),
     );
   } else {
@@ -268,6 +280,7 @@ try {
       report.batch,
       frozen.contractHash,
       digest(await bindings(frozen.manifest, frozen.paper, frozen.rules)),
+      diagnosticCallLimit(frozen.manifest),
     );
     const parent = JSON.parse(
       await readFile(resolve(frozen.manifest.parentReport), "utf8"),
@@ -352,6 +365,8 @@ try {
       let sources: { id: string; text: string; locator: string }[];
       let image: string | undefined;
       let imageSourceId: string | undefined;
+      let imageSourceIds: string[] | undefined;
+      let imagePanelIds: string[] | undefined;
       if (frozen.manifest.module === "research-plan") {
         const { runDiagnosticPlan } =
           await import("../server/diagnostic-plan.ts");
@@ -425,23 +440,196 @@ try {
           ),
         };
         await persist();
-        if (run.status !== "completed" || !run.result)
+        // A failed internal run may still contain a complete candidate in the
+        // last generation/revision role. Keep that candidate available for the
+        // host-delivery audit; content acceptance must remain failed until its
+        // blocking issues are resolved.
+        const candidate =
+          frozen.manifest.module === "ppt"
+            ? [...run.roles]
+                .reverse()
+                .map((role) => {
+                  if (!role.output || typeof role.output !== "object")
+                    return undefined;
+                  const output = role.output as {
+                    unit?: LearningUnit;
+                    deck?: DeckOutline;
+                  };
+                  return output.unit && output.deck ? output : undefined;
+                })
+                .find((value) => value !== undefined)
+            : undefined;
+        const candidateUnit = run.result ?? candidate?.unit;
+        const candidateDeck = run.deck ?? candidate?.deck;
+        if (
+          !candidateUnit ||
+          (frozen.manifest.module === "ppt" && !candidateDeck) ||
+          (frozen.manifest.module !== "ppt" && run.status !== "completed")
+        )
           throw new Error(run.error ?? run.status);
-        const material = materialSources(run, frozen.paper);
+        const artifactRun = {
+          ...run,
+          result: candidateUnit,
+          ...(candidateDeck ? { deck: candidateDeck } : {}),
+        };
+        const material = materialSources(artifactRun, frozen.paper);
         sources = diagnosticVisibleSources(run.roles);
         const { pptDeckImagePacket } =
           await import("../server/ppt-image-packet.ts");
         if (frozen.manifest.module === "ppt") {
-          image = await pptDeckImagePacket(run.deck, material);
+          image = await pptDeckImagePacket(candidateDeck!, material);
         } else {
           const evidence = diagnosticReadingImage(
             run.input.visibleImage,
             material,
+            run.readingImageEvidence,
           );
           image = evidence?.image;
           imageSourceId = evidence?.imageSourceId;
+          imageSourceIds = evidence?.imageSourceIds;
+          imagePanelIds = evidence?.imagePanelIds;
         }
-        artifact = { unit: run.result, deck: run.deck ?? null };
+        artifact = { unit: candidateUnit, deck: candidateDeck ?? null };
+        if (frozen.manifest.module === "ppt" && candidateDeck) {
+          const { exportDeck } = await import("../server/export.ts");
+          const {
+            trainingGuidance,
+            verifyTrainingDeliveryFiles,
+            missingPptDeliveryClaim,
+          } = await import("../server/training-delivery.ts");
+          const { renderExportedDeckPages } =
+            await import("../server/ppt-render.ts");
+          // Export the same validated final materials used by grounding and
+          // image review, including foundations added during the run.
+          const deliveryPaper = { ...frozen.paper, sources: material };
+          const exportPath = await exportDeck(
+            candidateDeck,
+            deliveryPaper,
+            `${id}-${run.id}`,
+          );
+          const deliveryDirectory = join(directory, "records", "delivery");
+          await mkdir(deliveryDirectory, { recursive: true });
+          const guidancePath = join(deliveryDirectory, "guidance.md");
+          await writeFile(guidancePath, trainingGuidance(candidateDeck));
+          const delivery = {
+            version: "separate-guidance-v1" as const,
+            guidancePath,
+          };
+          const product = {
+            id,
+            side: "candidate" as const,
+            status: "generated" as const,
+            exportPath,
+            artifact: { deck: candidateDeck },
+            delivery,
+          };
+          const exportAudit = await verifyTrainingDeliveryFiles(
+            product,
+            deliveryPaper,
+          );
+          const nativeTablesVerified =
+            exportAudit.nativeTableCount > 0 &&
+            exportAudit.nativeTableCount ===
+              candidateDeck.slides.filter((slide) => slide.layout === "table")
+                .length;
+          const renderDirectory = join(deliveryDirectory, "rendered");
+          const renderAudit = await renderExportedDeckPages(
+            exportPath,
+            candidateDeck,
+            deliveryPaper.sources,
+            renderDirectory,
+          );
+          const { pptImagePacket } =
+            await import("../server/ppt-image-packet.ts");
+          const renderedPages: Source[] = await Promise.all(
+            renderAudit.pages.map(async (path, index) => ({
+              id: `第${index + 1}页 | ${renderAudit.renderer}`,
+              title: `第${index + 1}页${renderAudit.renderer === "powerpoint" ? "实际PPTX渲染" : "布局预览（非PPTX渲染）"}`,
+              kind: "interpretation",
+              text: "",
+              locator: path,
+              verified: true,
+              imagePurpose: "page",
+              image: `data:image/png;base64,${(await readFile(path)).toString("base64")}`,
+            })),
+          );
+          // Label the renderer honestly: a canvas layout preview is not evidence
+          // that the exported PPTX fits in Office.
+          image = await pptImagePacket(renderedPages, 16);
+          const audit = {
+            exportPath,
+            exportAudit,
+            renderAudit,
+          };
+          await writeFile(
+            join(deliveryDirectory, "export-audit.json"),
+            JSON.stringify(audit, null, 2),
+          );
+          artifact = {
+            unit: candidateUnit,
+            deck: candidateDeck,
+            delivery: { exportPath, ...delivery },
+            exportAudit,
+            renderAudit,
+          };
+          // Host-delivery issues have changed IDs across review versions. Use
+          // their meaning, not one historical identifier, and resolve them
+          // only after the actual exported bytes and every page render pass.
+          if (
+            run.review &&
+            exportAudit.slides === candidateDeck.slides.length &&
+            renderAudit.pageCount === candidateDeck.slides.length &&
+            renderAudit.renderer === "powerpoint"
+          ) {
+            run.review = {
+              ...run.review,
+              issues: run.review.issues.map((issue) => {
+                const reviewText = `${issue.location} ${issue.suggestion}`;
+                const hostDeliveryIssue =
+                  issue.type === "material" &&
+                  missingPptDeliveryClaim(reviewText, nativeTablesVerified);
+                return hostDeliveryIssue && !issue.resolved
+                  ? {
+                      ...issue,
+                      resolved: true,
+                      evidence: [...issue.evidence, "server-export-audit"],
+                    }
+                  : issue;
+              }),
+            };
+            // The simulated novice may have recorded the same missing-host-
+            // delivery breakpoint before the diagnostic script exported the
+            // candidate. Once the real PPTX bytes and every page render pass,
+            // resolve only those stale delivery claims; scientific or teaching
+            // breakpoints remain untouched.
+            if (run.novice) {
+              run.novice = {
+                ...run.novice,
+                breakpoints: run.novice.breakpoints.map((point) => {
+                  const breakpointText = `${point.sentence} ${point.missingConcept} ${point.question}`;
+                  const hostDeliveryBreakpoint = missingPptDeliveryClaim(
+                    breakpointText,
+                    nativeTablesVerified,
+                  );
+                  return hostDeliveryBreakpoint && point.status !== "resolved"
+                    ? { ...point, status: "resolved" as const }
+                    : point;
+                }),
+              };
+            }
+          }
+          const reviewedRun = { ...artifactRun, review: run.review };
+          report.assessment = {
+            runStatus: run.status,
+            mainlinePassed: mainlineDevelopmentAcceptance(reviewedRun),
+            strictPassed: strictDevelopmentAcceptance(reviewedRun),
+            unresolvedIssues: run.review?.issues.filter((i) => !i.resolved),
+            breakpoints: run.novice?.breakpoints.filter(
+              (p) => p.status !== "resolved",
+            ),
+          };
+          await persist();
+        }
       }
       if (
         report.batch.budget.attempts.some((a: any) => a.status !== "succeeded")
@@ -458,14 +646,20 @@ try {
           sources,
           evaluatorVersion:
             frozen.manifest.module === "ppt"
-              ? "explanation-and-deck-images-v3-visible-text"
-              : imageSourceId
-                ? "explanation-and-original-image-v1-visible-text"
-                : "explanation-v2-visible-text",
+              ? "explanation-and-deck-images-v4-renderer-labelled"
+              : imagePanelIds?.length
+                ? "explanation-and-reading-images-v2-known-panels-visible-text"
+                : imageSourceIds
+                  ? "explanation-and-reading-images-v1-visible-text"
+                  : imageSourceId
+                    ? "explanation-and-original-image-v1-visible-text"
+                    : "explanation-v2-visible-text",
           ...(frozen.manifest.module !== "research-plan"
             ? { sourceExposure: "actual-generation-packets-v1" as const }
             : {}),
           ...(imageSourceId ? { imageSourceId } : {}),
+          ...(imageSourceIds ? { imageSourceIds } : {}),
+          ...(imagePanelIds ? { imagePanelIds } : {}),
         },
         controller.signal,
         image,

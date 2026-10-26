@@ -10,7 +10,9 @@ import {
   SelectionActions,
   type ObjectAction,
 } from "./research-menu.tsx";
+import { readingFiguresBySection } from "../shared/reading-figures.ts";
 import { ResearchImage } from "./research-image.tsx";
+import { ReadingSectionFigure } from "./reading-section-figure.tsx";
 import { focusLabels, verbosityLabels } from "../shared/learning-intent.ts";
 
 export interface ResearchSelection {
@@ -424,6 +426,20 @@ export function ResearchDiscussion({
           Date.parse(turn.preparedDisplayAt ?? "") > Date.now();
         const unit = preparing ? undefined : turn.reply?.content;
         const complete = turn.status === "completed";
+        const figureSections =
+          unit && paper && paper.version === turn.sourceVersion
+            ? readingFiguresBySection(
+                unit,
+                (turn.run?.materials?.at(-1)?.sources ?? paper.sources).map(
+                  (s) => ({
+                    ...s,
+                    image:
+                      paper.sources.find((p) => p.id === s.id)?.image ??
+                      s.image,
+                  }),
+                ),
+              )
+            : [];
         const actions: ObjectAction[] =
           complete && unit
             ? [
@@ -517,37 +533,24 @@ export function ResearchDiscussion({
                 {unit && (
                   <>
                     <h2>{unit.title}</h2>
-                    {paper &&
-                      paper.version === turn.sourceVersion &&
-                      [...new Set(unit.sections.flatMap((s) => s.citations))]
-                        .map((id) => paper.sources.find((s) => s.id === id))
-                        .filter(
-                          (s): s is Source =>
-                            !!s?.figure &&
-                            !!(s.image || (s.page && paper.pdfUrl)),
-                        )
-                        .map((source) => (
-                          <figure key={source.id} className="rw-answer-figure">
-                            <ResearchImage
-                              url={
-                                source.image ??
-                                `/api/papers/${encodeURIComponent(paper.id)}/sources/${encodeURIComponent(source.id)}/image`
-                              }
-                              title={source.title}
-                              caption={source.caption}
-                              thumbnail
-                              onPage={() => onCitation(source.id, source)}
-                            />
-                            <figcaption>
-                              {source.title} ·{" "}
-                              {source.page ? `PDF 第 ${source.page} 页 · ` : ""}
-                              点击放大查看
-                            </figcaption>
-                          </figure>
-                        ))}
                     {unit.sections.map((section, i) => (
                       <section key={i}>
                         <h3>{section.title}</h3>
+                        {paper &&
+                          (figureSections[i] ?? []).map((figure, index) => (
+                            <ReadingSectionFigure
+                              key={
+                                figure.source.id +
+                                ":" +
+                                (figure.panel?.label ?? "whole") +
+                                ":" +
+                                index
+                              }
+                              figure={figure}
+                              paper={paper}
+                              onCitation={(id) => onCitation(id, figure.source)}
+                            />
+                          ))}
                         <div
                           className="rw-selectable"
                           onMouseUp={(e) => {
@@ -648,6 +651,12 @@ export function ResearchDiscussion({
                           ?.at(-1)
                           ?.sources.find((s) => s.id === id);
                       if (!source?.image) return null;
+                      if (
+                        figureSections.some((figures) =>
+                          figures.some((f) => f.source.id === id),
+                        )
+                      )
+                        return null;
                       if (paper?.pdfUrl && source.page && !source.attachmentId)
                         return null;
                       if (

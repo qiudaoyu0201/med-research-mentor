@@ -1,10 +1,8 @@
 {
   "id": "medical-paper-guide",
   "title": "论文带读",
-  "version": "1.2.6",
-  "dependencies": [
-    "shared"
-  ],
+  "version": "1.2.15",
+  "dependencies": ["shared"],
   "origin": "project-original",
   "referenceRecord": "docs/ARCHITECTURE.md"
 }
