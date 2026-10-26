@@ -12,6 +12,8 @@ import {
 import { groundedTeachingSchema } from "../server/schemas.ts";
 import { cropPixels } from "../shared/image-region.ts";
 import type { Source, DeckOutline } from "../shared/types.ts";
+import { validRecordShape } from "../server/record-shapes.ts";
+import { pdfExtractionVersion } from "../server/pdf-runtime.ts";
 
 function figure() {
   const canvas = createCanvas(800, 1500),
@@ -309,4 +311,119 @@ test("four-column ruled grids retain full rows without producing unsupported col
   );
   assert.equal(clearPanelBoundaries(ctx, 1200, 800, regions), true);
   assert.ok(regions.every((p) => p.region.left === 0 && p.region.width === 1));
+});
+
+function staggeredColumns() {
+  const canvas = createCanvas(1200, 900),
+    ctx = canvas.getContext("2d");
+  ctx.fillStyle = "white";
+  ctx.fillRect(0, 0, 1200, 900);
+  ctx.fillStyle = "black";
+  // The right-hand plot spans the left-hand gap; there is no full-width row cut.
+  ctx.fillRect(650, 20, 500, 860);
+  for (const y of [20, 470]) {
+    ctx.fillRect(20, y, 18, 18); // printed label
+    ctx.fillRect(70, y + 45, 460, 265); // plot and axes
+    ctx.fillRect(70, y + 325, 460, 55); // attached risk/distribution rows
+  }
+  return { canvas, ctx };
+}
+
+test("staggered raster columns expose complete local rows without cutting attached risk rows", () => {
+  const { ctx } = staggeredColumns();
+  const regions = rasterFigureRegions(ctx, 1200, 900);
+  const parent = regions.find((p) => p.label === "band-1-col-1")!;
+  const children = regions.filter((p) =>
+    p.label.startsWith("band-1-col-1-band-"),
+  );
+  assert.equal(children.length, 2);
+  assert.ok(
+    regions.some((p) => p.label === "band-1-col-2"),
+    "whole-column fallback remains available",
+  );
+  assert.equal(
+    regions.filter((p) => p.label.startsWith("band-1-col-2-band-")).length,
+    0,
+  );
+  assert.equal(clearPanelBoundaries(ctx, 1200, 900, regions), true);
+  const boxes = children.map((p) => cropPixels(p.region, 1200, 900));
+  assert.ok(
+    boxes[0].top + boxes[0].height >= 400,
+    "first attached risk rows stay with their plot",
+  );
+  assert.ok(boxes[1].top <= 470, "second printed label stays inside its row");
+  assert.ok(
+    boxes[1].top + boxes[1].height >= 850,
+    "second attached rows stay inside",
+  );
+  const coverage = new Uint8Array(900);
+  for (const b of boxes)
+    for (let y = b.top; y < b.top + b.height; y++) coverage[y]++;
+  assert.ok(
+    [...coverage].every((n) => n >= 1),
+    "local rows retain every original pixel vertically",
+  );
+  assert.ok(
+    children.every(
+      (p) =>
+        p.region.left === parent.region.left &&
+        p.region.width === parent.region.width,
+    ),
+  );
+  const source: Source = {
+    id: "staggered",
+    kind: "paper",
+    title: "Original figure",
+    text: "Figure caption",
+    locator: "Figure 1",
+    verified: false,
+    image: ctx.canvas.toDataURL("image/png"),
+    imagePanels: regions,
+  };
+  assert.ok(
+    validRecordShape(
+      "material-cache",
+      {
+        pages: ["Original text"],
+        parseStatus: "ready",
+        figures: [{ ...source, suffix: "-p1-fig1-1" }],
+      },
+      "hash-" + pdfExtractionVersion,
+    ),
+  );
+  const parsed = groundedTeachingSchema([source])
+    .shape.deck.unwrap()
+    .shape.slides.parse([
+      {
+        title: "Local evidence",
+        bullets: ["Complete plot and attached rows"],
+        notes: "Keep the original axes and legend.",
+        citations: [source.id],
+        imageSource: source.id,
+        imagePanel: source.id + ":" + children[1].label,
+      },
+    ]);
+  const deck = { slides: parsed } as DeckOutline;
+  applyDeckPanels(deck, [source]);
+  assert.deepEqual(deck.slides[0].imageCrop, children[1].region);
+});
+
+test("local raster rows reject a faint connector and do not split a short attached result strip", () => {
+  const { ctx } = staggeredColumns();
+  ctx.fillStyle = "#ffb4b4";
+  ctx.fillRect(300, 395, 2, 80);
+  const crossed = rasterFigureRegions(ctx, 1200, 900);
+  assert.ok(crossed.some((p) => p.label === "band-1-col-1"));
+  assert.equal(
+    crossed.some((p) => p.label.includes("-col-1-band-")),
+    false,
+    JSON.stringify(crossed),
+  );
+  const original = figure();
+  assert.equal(
+    rasterFigureRegions(original.ctx, 800, 1500).some((p) =>
+      /-col-\d+-band-/.test(p.label),
+    ),
+    false,
+  );
 });

@@ -312,3 +312,43 @@ test("grounded crop selection rejects candidates outside the actual visual board
   assert.deepEqual(many, before);
   assert.deepEqual(panelSelectionIds([s]), ["figure:a"]);
 });
+
+test("source review retains cited full originals beside crops without exposing them in page-only review", async () => {
+  const s = source(),
+    d = deck({ imagePanel: "figure:a" });
+  applyDeckPanels(d, [s]);
+  const before = structuredClone({ s, d });
+  const review = await loadImage((await pptDeckImagePacket(d, [s], true))!);
+  assert.equal(review.width, 1800);
+  assert.equal(review.height, 620);
+  const canvas = createCanvas(review.width, review.height),
+    ctx = canvas.getContext("2d");
+  ctx.drawImage(review, 0, 0);
+  const blue = [...ctx.getImageData(1700, 300, 1, 1).data];
+  assert.ok(
+    blue[2] > 240 && blue[0] < 15,
+    "the uncropped source panel is available for fact checking",
+  );
+  const page = await loadImage((await pptDeckImagePacket(d, [s]))!);
+  assert.equal(page.width, 50);
+  assert.equal(page.height, 60);
+  const table = deck({ imageSource: "", layout: "table" });
+  assert.equal(await pptDeckImagePacket(table, [s]), undefined);
+  const tableReview = await loadImage(
+    (await pptDeckImagePacket(table, [s], true))!,
+  );
+  assert.equal(
+    tableReview.width,
+    1800,
+    "a table-only source image is labelled as original evidence",
+  );
+  assert.equal(
+    await pptDeckImagePacket(
+      deck({ citations: [], imageSource: "" }),
+      [s],
+      true,
+    ),
+    undefined,
+  );
+  assert.deepEqual({ s, d }, before);
+});

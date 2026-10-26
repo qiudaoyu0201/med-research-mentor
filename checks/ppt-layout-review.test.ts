@@ -2,7 +2,7 @@ import test from "node:test";
 import assert from "node:assert/strict";
 import { readFile, writeFile, unlink } from "node:fs/promises";
 import { randomUUID } from "node:crypto";
-import { createCanvas } from "@napi-rs/canvas";
+import { createCanvas, loadImage } from "@napi-rs/canvas";
 import { unzipSync, zipSync, strFromU8, strToU8 } from "fflate";
 import {
   verifyTrainingDeliveryFiles,
@@ -1391,4 +1391,100 @@ test("native-table audit clears a verification-only claim but retains missing da
   assert.equal(missingPptDeliveryClaim(claim), false);
   assert.equal(missingPptDeliveryClaim(claim, true), true);
   assert.equal(missingPptDeliveryClaim(claim + "遗漏无房颤组。", true), false);
+});
+
+test("grounding receives full cited evidence while novice sees only the selected panel", async () => {
+  const evidence = createCanvas(100, 60),
+    ctx = evidence.getContext("2d");
+  ctx.fillStyle = "red";
+  ctx.fillRect(0, 0, 50, 60);
+  ctx.fillStyle = "blue";
+  ctx.fillRect(50, 0, 50, 60);
+  const scopedPaper = {
+    ...paper,
+    sources: paper.sources.map((s) =>
+      s.id === "xu-fig1"
+        ? {
+            ...s,
+            image: evidence.toDataURL("image/png"),
+            imagePanels: [
+              {
+                label: "a",
+                region: { left: 0, top: 0, width: 0.5, height: 1 },
+              },
+            ],
+          }
+        : s,
+    ),
+  };
+  const outputs = [
+    {
+      unit,
+      deck: { slides: [{ ...compact.slides[0], imagePanel: "xu-fig1:a" }] },
+    },
+    { understood: ["Selected panel"], breakpoints: [] },
+    clear,
+  ];
+  const received: {
+    width: number;
+    height: number;
+    instructions: string;
+    input: any;
+  }[] = [];
+  const scopedProvider: Provider = {
+    model: "fixture-test-only",
+    async generate<T>(
+      instructions: string,
+      input: unknown,
+      schema: import("zod").z.ZodType<T>,
+      signal: AbortSignal,
+      image?: string,
+    ) {
+      signal.throwIfAborted();
+      assert.ok(image);
+      const visible = await loadImage(image);
+      received.push({
+        width: visible.width,
+        height: visible.height,
+        instructions,
+        input,
+      });
+      assert.ok(outputs.length, "unexpected extra model request");
+      return { output: schema.parse(outputs.shift()) };
+    },
+  };
+  const manager = new TaskManager(scopedProvider, async () => {}, "online");
+  const run = await manager.start(
+    {
+      paperId: scopedPaper.id,
+      module: "ppt",
+      mode: "live",
+      profileId: "beginner",
+      question: "工程验证裁图页面与表格来源核验",
+      sourceIds: scopedPaper.sources.map((s) => s.id),
+      taughtConcepts: [],
+      slideCount: 1,
+    },
+    scopedPaper,
+  );
+  await manager.wait(run.id);
+  assert.equal(run.status, "completed", run.error);
+  assert.deepEqual(
+    run.roles.map((r) => r.role),
+    ["teaching", "novice", "grounding"],
+  );
+  assert.equal(received[1].width, 50);
+  assert.equal(received[1].height, 60);
+  assert.equal(received[1].input.pptImageEvidence, undefined);
+  assert.equal(received[2].width, 1800);
+  assert.equal(received[2].height, 620);
+  assert.equal(
+    received[2].input.pptImageEvidence,
+    "ppt-grounding-images-v1-cited-originals",
+  );
+  assert.match(received[2].instructions, /来源原图（非页面展示）/);
+  assert.match(
+    received[2].instructions,
+    /不能用完整来源图替代页面裁切或可读性检查/,
+  );
 });

@@ -25,11 +25,14 @@ const source = object({
   imagePanels: z
     .array(
       object({
-        label: z.string().regex(/^(?:[a-p]|band-[1-4](?:-col-[1-3])?)$/),
+        label: z
+          .string()
+          .regex(/^(?:[a-p]|band-[1-4](?:-col-[1-3](?:-band-[1-4])?)?)$/),
         region: imageRegionSchema,
       }),
     )
-    .max(16)
+    // At most 4 full rows + 12 columns + 48 local rows from the detector.
+    .max(64)
     .refine(
       (panels) => new Set(panels.map((p) => p.label)).size === panels.length,
     )
@@ -445,7 +448,7 @@ shapes.sessions = object({
 export function validRecordShape(group: string, value: unknown, id?: string) {
   if (
     group === "material-cache" &&
-    /-pdf-figures-v(?:2|3|4-panels|5-caption-anchors|6-caption-width|7-panel-labels|8-caption-line-start|9-raster-bands|10-raster-columns|11-ruled-grid|12-caption-table)$/.test(
+    /-pdf-figures-v(?:2|3|4-panels|5-caption-anchors|6-caption-width|7-panel-labels|8-caption-line-start|9-raster-bands|10-raster-columns|11-ruled-grid|12-caption-table|13-column-rows)$/.test(
       id ?? "",
     )
   )

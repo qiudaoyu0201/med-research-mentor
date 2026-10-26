@@ -10,7 +10,16 @@ export function rasterFigureBands(
   height: number,
 ): FigurePanel[] {
   if (width < 400 || height < width * 0.95) return [];
-  const pixels = ctx.getImageData(0, 0, width, height).data;
+  return pixelBands(ctx.getImageData(0, 0, width, height).data, width, height);
+}
+
+function pixelBands(
+  pixels: Uint8ClampedArray,
+  width: number,
+  height: number,
+  minimumGap = Math.max(12, height * 0.018),
+): FigurePanel[] {
+  if (height < width * 0.95) return [];
   const gaps: { middle: number; size: number }[] = [];
   const inkRows = new Uint32Array(height);
   let start = -1;
@@ -28,7 +37,7 @@ export function rasterFigureBands(
     }
     if (clear && start < 0) start = y;
     if (!clear && start >= 0) {
-      if (y - start >= Math.max(12, height * 0.018))
+      if (y - start >= minimumGap)
         gaps.push({ middle: Math.floor((start + y) / 2), size: y - start });
       start = -1;
     }
@@ -154,5 +163,33 @@ export function rasterFigureRegions(
       }),
     );
   }
-  return [...bands, ...columns];
+  // Staggered columns can have local row gutters that do not cross the whole
+  // figure. Reuse the same pixel checks once within each column; keep the
+  // parent choices, and reject short strips that could be attached tables.
+  const localRows: FigurePanel[] = [];
+  for (const column of columns) {
+    const b = cropPixels(column.region, width, height);
+    const children = pixelBands(
+      ctx.getImageData(b.left, b.top, b.width, b.height).data,
+      b.width,
+      b.height,
+      Math.max(16, b.width * 0.06),
+    );
+    if (
+      children.length < 2 ||
+      children.some((child) => child.region.height * b.height < b.width * 0.65)
+    )
+      continue;
+    for (const child of children)
+      localRows.push({
+        label: column.label + "-" + child.label,
+        region: {
+          left: column.region.left,
+          top: (b.top + child.region.top * b.height) / height,
+          width: column.region.width,
+          height: (child.region.height * b.height) / height,
+        },
+      });
+  }
+  return [...bands, ...columns, ...localRows];
 }

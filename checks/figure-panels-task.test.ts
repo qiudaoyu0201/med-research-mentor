@@ -6,7 +6,7 @@ import type { Provider } from "../server/provider.ts";
 import type { PaperBundle } from "../shared/types.ts";
 import { sample } from "../examples/bundle.ts";
 
-test("PPT generation and revision select panels after image redaction and review their actual crops", async () => {
+test("PPT generation and revision preserve page crops and separately ground complete originals", async () => {
   const canvas = createCanvas(100, 60),
     ctx = canvas.getContext("2d");
   ctx.fillStyle = "red";
@@ -91,27 +91,53 @@ test("PPT generation and revision select panels after image redaction and review
   let calls = 0;
   const provider: Provider = {
     model: "fixture-test-only",
-    async generate(_rules, value, schema, signal, image) {
+    async generate(rules, value, schema, signal, image) {
       signal.throwIfAborted();
       const index = calls++;
       const decoded = await loadImage(image!);
       const selecting = [0, 3].includes(index);
-      assert.equal(decoded.height, selecting ? 1240 : 60);
-      assert.equal(decoded.width, selecting ? 1800 : 50);
+      const grounding = [2, 5].includes(index);
+      assert.equal(decoded.height, selecting ? 1240 : grounding ? 620 : 60);
+      assert.equal(decoded.width, selecting || grounding ? 1800 : 50);
       if (selecting) {
         const board = createCanvas(1800, 1240),
           pixels = board.getContext("2d");
         pixels.drawImage(decoded, 0, 0);
         const pixel = (x: number, y: number) =>
           pixels.getImageData(x, y, 1, 1).data;
-        for (const [x, y] of [[200, 300], [1100, 300]]) {
+        for (const [x, y] of [
+          [200, 300],
+          [1100, 300],
+        ]) {
           const p = pixel(x, y); // Original red half and actual candidate a.
           assert.ok(p[0] > 240 && p[2] < 15);
         }
-        for (const [x, y] of [[700, 300], [200, 900]]) {
+        for (const [x, y] of [
+          [700, 300],
+          [200, 900],
+        ]) {
           const p = pixel(x, y); // Original blue half and actual candidate b.
           assert.ok(p[2] > 240 && p[0] < 15);
         }
+      } else if (grounding) {
+        const check = createCanvas(1800, 620),
+          pixels = check.getContext("2d");
+        pixels.drawImage(decoded, 0, 0);
+        const selected = pixels.getImageData(200, 300, 1, 1).data;
+        assert.ok(
+          index < 3
+            ? selected[0] > 240 && selected[2] < 15
+            : selected[2] > 240 && selected[0] < 15,
+        );
+        const originalRed = pixels.getImageData(1100, 300, 1, 1).data;
+        const originalBlue = pixels.getImageData(1700, 300, 1, 1).data;
+        assert.ok(originalRed[0] > 240 && originalRed[2] < 15);
+        assert.ok(originalBlue[2] > 240 && originalBlue[0] < 15);
+        assert.match(rules, /来源原图（非页面展示）/);
+        assert.equal(
+          (value as any).pptImageEvidence,
+          "ppt-grounding-images-v1-cited-originals",
+        );
       } else {
         const check = createCanvas(50, 60),
           pixels = check.getContext("2d");

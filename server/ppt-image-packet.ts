@@ -2,10 +2,14 @@ import { createCanvas, loadImage } from "@napi-rs/canvas";
 import { pptSelectionCandidates } from "./figure-panels.ts";
 import { validRegion, cropPixels } from "../shared/image-region.ts";
 import type { Source, DeckOutline } from "../shared/types.ts";
-export async function pptImagePacket(sources: Source[], limit = 8) {
+export async function pptImagePacket(
+  sources: Source[],
+  limit = 8,
+  labelSingle = false,
+) {
   const images = sources.filter((s) => s.image).slice(0, limit);
   if (!images.length) return undefined;
-  if (images.length === 1) return images[0].image;
+  if (images.length === 1 && !labelSingle) return images[0].image;
   const cols = 2,
     cellW = 900,
     cellH = 620,
@@ -68,10 +72,17 @@ export async function pptSelectionImagePacket(sources: Source[]) {
   return pptImagePacket(pictures, 16);
 }
 
-// Review the picture actually selected for each page, including its crop.
+export const pptGroundingImageVersion =
+  "ppt-grounding-images-v1-cited-originals";
+export const pptGroundingImageInstruction =
+  "图件核验资料板中，‘第N页’只展示该页实际选择的图件范围；‘来源原图（非页面展示）’是额外提供的完整来源证据，可用于核对表格或讲稿引用的其他面板读数，不代表这些面板已在页面显示。分别核对来源支持与当页图文定位，不能用完整来源图替代页面裁切或可读性检查。此资料板不是最终PPTX渲染。";
+
+// Page-only review keeps exactly the picture selected for each page. Grounding
+// may also receive up to eight cited originals, with a distinct evidence label.
 export async function pptDeckImagePacket(
   deck: DeckOutline | null | undefined,
   sources: Source[],
+  includeCitedOriginals = false,
 ) {
   const pictures: Source[] = [];
   for (const [index, slide] of (deck?.slides ?? []).entries()) {
@@ -105,5 +116,21 @@ export async function pptDeckImagePacket(
     }
     pictures.push({ ...source, id: `第${index + 1}页 | ${source.id}`, image });
   }
-  return pptImagePacket(pictures, 16);
+  if (includeCitedOriginals) {
+    const cited = new Set(
+      (deck?.slides ?? []).flatMap((slide) => [
+        ...slide.citations,
+        slide.imageSource,
+      ]),
+    );
+    for (const source of sources
+      .filter((s) => s.image && cited.has(s.id))
+      .slice(0, 8))
+      pictures.push({ ...source, id: "来源原图（非页面展示） | " + source.id });
+  }
+  return pptImagePacket(
+    pictures,
+    includeCitedOriginals ? 24 : 16,
+    includeCitedOriginals,
+  );
 }

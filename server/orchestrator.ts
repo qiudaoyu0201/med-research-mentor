@@ -21,6 +21,8 @@ import {
   pptSelectionImagePacket,
   pptSelectionImageVersion,
   pptDeckImagePacket,
+  pptGroundingImageVersion,
+  pptGroundingImageInstruction,
 } from "./ppt-image-packet.ts";
 import {
   assertPptLayout,
@@ -396,9 +398,11 @@ export class TaskManager {
         this.deliveryPolicy +
         (this.deliveryPolicy === "online" ? "-v3" : "-v1");
       skills.versions["visual-evidence-protocol"] = "endpoint-audit-v1";
-      if ((input.modules ?? [input.module]).includes("ppt"))
+      if ((input.modules ?? [input.module]).includes("ppt")) {
         skills.versions["ppt-selection-images"] = pptSelectionImageVersion;
-      else skills.versions["reading-image-packet"] = readingImagePacketVersion;
+        skills.versions["ppt-grounding-images"] = pptGroundingImageVersion;
+      } else
+        skills.versions["reading-image-packet"] = readingImagePacketVersion;
       if (input.workflow === "direct")
         skills.versions["medical-research-assistant"] = (
           await assistantRules()
@@ -597,6 +601,19 @@ export class TaskManager {
             ? { visibleImagePanelIds: run.readingImageEvidence.panelIds }
             : {}),
         };
+      const groundingDeck = /^grounding/.test(role)
+        ? (input as { deck?: DeckOutline | null }).deck
+        : undefined;
+      const groundingImage = groundingDeck
+        ? await pptDeckImagePacket(groundingDeck, illustratedSources(), true)
+        : undefined;
+      if (groundingImage) {
+        instructions += "\n" + pptGroundingImageInstruction;
+        input = {
+          ...(input as object),
+          pptImageEvidence: pptGroundingImageVersion,
+        };
+      }
       let record = {
         role,
         inputKeys: Object.keys(input as object),
@@ -604,9 +621,11 @@ export class TaskManager {
         durationMs: 0,
       } as TaskRun["roles"][number];
       const started = Date.now();
-      const image = /^(?:novice|grounding)/.test(role)
-        ? (reviewImage ?? run.input.visibleImage)
-        : run.input.visibleImage;
+      const image =
+        groundingImage ??
+        (/^(?:novice|grounding)/.test(role)
+          ? (reviewImage ?? run.input.visibleImage)
+          : run.input.visibleImage);
       try {
         const result = await ledger.call(
           this.provider,
