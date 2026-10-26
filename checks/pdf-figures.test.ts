@@ -499,3 +499,68 @@ test("out-of-order PDF text runs retain axis titles and the attached risk rows",
   assert.ok(bottom * 792 >= 607, "both attached risk rows must remain visible");
   assert.ok(bottom * 792 < 624, "the caption must not enter the crop");
 });
+
+test("forest plots retain detached row labels, treatment counts and column headers", async () => {
+  const rows = [420, 390, 360, 330].flatMap((y, i) => [
+    text("F1", 40, y, "Outcome " + (i + 1)),
+    text("F1", 160, y, "12 (2.4)"),
+    text("F1", 260, y, "18 (3.6)"),
+    text("F1", 450, y, "0.70 (0.50, 0.90)"),
+    text("F1", 550, y - 6, "0.60"),
+  ]);
+  const result = await extract(
+    [
+      text(
+        "F2",
+        36,
+        250,
+        "Fig. 2 | Effects on the study outcomes by randomized treatment group with event counts and confidence intervals.",
+      ),
+      text("F1", 160, 453, "Treatment"),
+      text("F1", 260, 453, "Control"),
+      text("F1", 450, 453, "HR (95% CI)"),
+      text("F1", 536, 453, "Interaction"),
+      text("F1", 550, 440, "P value"),
+      text("F1", 160, 440, "N = 500"),
+      ...rows,
+    ].join("\n"),
+    "300 300 150 125 re S",
+  );
+  assert.equal(result.sources.length, 1);
+  const r = result.sources[0].imageRegion!;
+  assert.ok(
+    r.left * 612 <= 40,
+    "left labels and treatment counts must remain visible",
+  );
+  assert.ok(
+    (r.left + r.width) * 612 >= 570,
+    "the interaction column and its header must remain visible",
+  );
+  assert.ok(r.top * 792 <= 331, "the detached headers must remain visible");
+  assert.ok(
+    (r.top + r.height) * 792 < 534,
+    "caption is outside the figure crop",
+  );
+});
+
+test("a neighboring prose column does not extend a plot through isolated matching baselines", async () => {
+  const result = await extract(
+    [
+      text("F2", 300, 250, "Fig. 2 | Effects on outcomes."),
+      text("F1", 20, 420, "An unrelated paragraph in the neighboring column."),
+      text(
+        "F1",
+        20,
+        409,
+        "The study population was described in this section.",
+      ),
+      text("F1", 20, 398, "These sentences continue the normal body text."),
+      text("F1", 450, 420, "0.70 (0.50, 0.90)"),
+      text("F1", 450, 390, "0.80 (0.60, 0.95)"),
+      text("F1", 450, 360, "0.90 (0.70, 1.10)"),
+    ].join("\n"),
+    "300 300 150 125 re S",
+  );
+  assert.equal(result.sources.length, 1);
+  assert.ok(result.sources[0].imageRegion!.left * 612 > 280);
+});

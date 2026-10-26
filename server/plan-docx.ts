@@ -109,9 +109,9 @@ export function planDocx(
     ...(v.content.assumptions.length || v.content.questions.length
       ? [
           paragraph("假设与待确认", "Heading1"),
-          ...[...new Set([...v.content.assumptions, ...v.content.questions])].map(
-            (s) => paragraph(s),
-          ),
+          ...[
+            ...new Set([...v.content.assumptions, ...v.content.questions]),
+          ].map((s) => paragraph(s)),
         ]
       : []),
     ...(v.content.limitations.length
@@ -129,8 +129,23 @@ export function planDocx(
       ),
   ].join("");
   const header = '<?xml version="1.0" encoding="UTF-8" standalone="yes"?>';
+  // Fit near-single-line titles to the real text width without orphaning a final
+  // character; longer subjects still wrap at a readable minimum of 14 points.
+  const titleUnits = [...v.content.title].reduce(
+    (n, c) => n + (c.charCodeAt(0) < 128 ? 0.62 : 1),
+    0,
+  );
+  const titleSize = String(
+    Math.min(
+      32,
+      Math.max(
+        28,
+        Math.floor(((9360 / 20) * 0.97 * 2) / Math.max(1, titleUnits)),
+      ),
+    ),
+  );
   const styles = `<w:styles xmlns:w="http://schemas.openxmlformats.org/wordprocessingml/2006/main"><w:docDefaults><w:rPrDefault><w:rPr><w:rFonts w:ascii="Calibri" w:hAnsi="Calibri" w:eastAsia="Microsoft YaHei"/><w:sz w:val="22"/><w:color w:val="000000"/><w:lang w:val="en-US" w:eastAsia="zh-CN"/></w:rPr></w:rPrDefault><w:pPrDefault><w:pPr><w:spacing w:after="120" w:line="330" w:lineRule="auto"/><w:widowControl/></w:pPr></w:pPrDefault></w:docDefaults><w:style w:type="paragraph" w:default="1" w:styleId="Normal"><w:name w:val="Normal"/></w:style>${[
-    ["Title", "32"],
+    ["Title", titleSize],
     ["Heading1", "27"],
     ["TableText", "20"],
   ]

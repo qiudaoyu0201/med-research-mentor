@@ -239,11 +239,43 @@ export function slideLayout(
     count <= 3 &&
     imageSize.width / imageSize.height >= 1.65
   ) {
-    const width = (11.9 - (count - 1) * 0.38) / count;
-    const blocks = slide.bullets.map((value) => {
-      const lines = wrapSlideText(value, width, 20);
+    const availableWidth = 11.9 - (count - 1) * 0.38;
+    let widths = slide.bullets.map(() => availableWidth / count);
+    let blocks = slide.bullets.map((value, i) => {
+      const lines = wrapSlideText(value, widths[i], 20);
       return { lines, h: (lines.length * 20 * slideLineHeight) / 72 + 0.09 };
     });
+    // Give a long numerical claim more width than a short interpretation.
+    // Search line capacity without changing the claims or shrinking the font.
+    for (let rows = 1; rows <= 4; rows++) {
+      const minimum = slide.bullets.map((value) => {
+        let low = 2.4,
+          high = availableWidth - (count - 1) * 2.4;
+        if (wrapSlideText(value, high, 20).length > rows) return Infinity;
+        for (let pass = 0; pass < 18; pass++) {
+          const middle = (low + high) / 2;
+          if (wrapSlideText(value, middle, 20).length <= rows) high = middle;
+          else low = middle;
+        }
+        return high;
+      });
+      const spare =
+        availableWidth - minimum.reduce((sum, width) => sum + width, 0);
+      if (spare < 0 || !Number.isFinite(spare)) continue;
+      const candidateWidths = minimum.map((width) => width + spare / count);
+      const candidate = slide.bullets.map((value, i) => {
+        const lines = wrapSlideText(value, candidateWidths[i], 20);
+        return { lines, h: (lines.length * 20 * slideLineHeight) / 72 + 0.09 };
+      });
+      if (
+        Math.max(...candidate.map((b) => b.h)) <
+        Math.max(...blocks.map((b) => b.h))
+      ) {
+        widths = candidateWidths;
+        blocks = candidate;
+      }
+      break;
+    }
     const bandHeight = Math.max(...blocks.map((b) => b.h));
     const area = {
       x: 0.72,
@@ -270,9 +302,11 @@ export function slideLayout(
           h,
         },
         text: blocks.map((block, i) => ({
-          x: 0.72 + i * (width + 0.38),
+          x:
+            0.72 +
+            widths.slice(0, i).reduce((sum, width) => sum + width + 0.38, 0),
           y: 6.68 - bandHeight,
-          w: width,
+          w: widths[i],
           h: block.h,
           fontSize: 20,
           lines: block.lines,
@@ -281,6 +315,31 @@ export function slideLayout(
           sourceIndex: i,
         })),
       };
+    }
+  }
+  let evidenceColumnWidth = 3.5;
+  if (imageSize && imageSize.width / imageSize.height >= 1.65 && count <= 3) {
+    for (let tenths = 28; tenths < 35; tenths++) {
+      const width = tenths / 10;
+      const height =
+        slide.bullets.reduce(
+          (sum, value) =>
+            sum +
+            (wrapSlideText(value, width, 20).length * 20 * slideLineHeight) /
+              72 +
+            0.09,
+          0,
+        ) +
+        Math.max(0, count - 1) * 0.22;
+      const gain =
+        Math.min(
+          (7.95 + 3.5 - width) / imageSize.width,
+          5.18 / imageSize.height,
+        ) / Math.min(7.95 / imageSize.width, 5.18 / imageSize.height);
+      if (height <= 6.68 - 1.7 && gain >= 1.05) {
+        evidenceColumnWidth = width;
+        break;
+      }
     }
   }
   let custom = false;
@@ -950,7 +1009,7 @@ export function slideLayout(
       );
     const columns = hasImage ? 1 : steps ? 3 : count >= 4 ? 2 : 1;
     const bulletW = hasImage
-        ? 3.5
+        ? evidenceColumnWidth
         : columns === 3
           ? 3.35
           : columns === 2
@@ -958,7 +1017,7 @@ export function slideLayout(
             : 10.65,
       startY = columns > 1 ? 2.1 : 1.7,
       gap = hasImage ? 0.22 : columns > 1 ? 0.68 : 0.36,
-      bodyX = hasImage ? 9.05 : columns > 1 ? 0.9 : 1.35;
+      bodyX = hasImage ? 12.55 - evidenceColumnWidth : columns > 1 ? 0.9 : 1.35;
     // Fit the whole column at one font size instead of shrinking each bullet or
     // spreading a short sentence over a fixed, mostly empty slot.
     let fontSize = hasImage ? 20 : columns > 1 ? 24 : 25;
@@ -1032,7 +1091,12 @@ export function slideLayout(
   if (wideEvidence) {
     image = wideEvidence.image;
   } else if (imageSize) {
-    const area = { x: 0.72, y: 1.53, w: 7.95, h: 5.18 },
+    const area = {
+        x: 0.72,
+        y: 1.53,
+        w: 7.95 + (3.5 - evidenceColumnWidth),
+        h: 5.18,
+      },
       scale = Math.min(area.w / imageSize.width, area.h / imageSize.height),
       w = imageSize.width * scale,
       h = imageSize.height * scale;

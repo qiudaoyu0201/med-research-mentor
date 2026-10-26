@@ -278,6 +278,69 @@ export async function pageFigures(
       top = Math.min(top, t.top);
       bottom = Math.max(bottom, t.bottom);
     }
+    // Text columns in a forest plot can be far outside its drawing operators.
+    // Extend only through repeated short row labels aligned with numeric fields
+    // already attached to the plot; neighboring prose is not a crop boundary.
+    const numericField = (value: string) =>
+      /\d/.test(value) && /^[\s\d.,%;:(){}\[\]\/+−–—=<>≤≥±×*\-]+$/.test(value);
+    const numericRows = texts.filter(
+      (t) =>
+        t.top >= top &&
+        t.bottom <= bottom &&
+        t.left >= left &&
+        t.right <= right &&
+        numericField(t.text),
+    );
+    const outsideLabels = texts.filter(
+      (t) =>
+        t.top >= top - 18 &&
+        t.bottom <= bottom + 1 &&
+        t.left >= column.left &&
+        t.right <= column.right &&
+        (t.right < left - 24 || t.left > right + 1) &&
+        t.right - t.left <= W * 0.32 &&
+        t.text.trim().length <= 90 &&
+        numericRows.some(
+          (n) =>
+            Math.abs(n.bottom - t.bottom) <=
+            Math.max(n.height, t.height) * (numericField(t.text) ? 1.5 : 0.65),
+        ),
+    );
+    const labelColumns = outsideLabels.filter((label) => {
+      const aligned = outsideLabels.filter(
+        (other) => Math.abs(other.left - label.left) <= 3,
+      );
+      const baselines = [
+        ...new Set(aligned.map((t) => Math.round(t.bottom / 3))),
+      ];
+      return (
+        baselines.length >= 3 &&
+        Math.max(...aligned.map((t) => t.top)) -
+          Math.min(...aligned.map((t) => t.top)) >=
+          label.height * 3
+      );
+    });
+    if (labelColumns.length) {
+      left = Math.min(left, ...labelColumns.map((t) => t.left));
+      right = Math.max(right, ...labelColumns.map((t) => t.right));
+      // The table's labels, counts and headers share this horizontal envelope.
+      // Walk upward from the plot, not PDF stream order, across only small gaps.
+      for (const t of texts
+        .filter(
+          (t) =>
+            t.top >= Math.max(topLimit, top - 36) &&
+            t.bottom < cap.top - 1 &&
+            t.left >= left - 1 &&
+            t.right <= right + 24 &&
+            t.top <= bottom &&
+            t.bottom >= top - 36,
+        )
+        .sort((a, b) => b.bottom - a.bottom)) {
+        if (t.bottom < top - 18) continue;
+        top = Math.min(top, t.top);
+        right = Math.max(right, t.right);
+      }
+    }
     left = Math.max(0, left - 7);
     right = Math.min(W, right + 7);
     top = Math.max(topLimit, top - 7);

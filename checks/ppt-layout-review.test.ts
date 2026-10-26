@@ -279,19 +279,25 @@ test("four-line figure captions keep a wider original when it still gains usable
     height: 1000,
   });
   assert.equal(noGain.composition, "evidence");
-  assert.equal(noGain.image!.w, 7.95);
-  const tooLong = slideLayout(
-    {
-      ...slide,
-      bullets: [
-        bullets[0] + "这项比较仍需较长的额外说明，不能继续压缩图件来容纳文字。",
-        bullets[1],
-      ],
-    },
-    paper.sources,
-    { width: 2700, height: 1000 },
+  assert.ok(noGain.image!.w >= 7.95);
+  assert.throws(
+    () =>
+      slideLayout(
+        {
+          ...slide,
+          bullets: [
+            bullets[0] +
+              "这项比较仍需较长的额外说明，不能继续压缩图件来容纳文字。".repeat(
+                4,
+              ),
+            bullets[1],
+          ],
+        },
+        paper.sources,
+        { width: 2700, height: 1000 },
+      ),
+    /过密/,
   );
-  assert.equal(tooLong.composition, "evidence");
 });
 
 test("actual PPT export preserves a selected crop and rejects changed image placement", async () => {
@@ -1486,5 +1492,64 @@ test("grounding receives full cited evidence while novice sees only the selected
   assert.match(
     received[2].instructions,
     /不能用完整来源图替代页面裁切或可读性检查/,
+  );
+});
+
+test("a short interpretation gives its wider numerical claim room without reducing the font", () => {
+  const bullets = [
+    "A｜登记起点→事件完成：中位数12.0 vs 15.0小时；调整后风险比（aHR）1.50（95% CI，1.10–2.10），干预组 vs 对照组。这项比较需保留统计口径。",
+    "区间较宽，不能据点估计断言差异。",
+  ];
+  const layout = slideLayout({ ...compact.slides[0], bullets }, paper.sources, {
+    width: 2700,
+    height: 1000,
+  });
+  assert.equal(layout.composition, "evidence-wide");
+  const boxes = layout.text.filter((b) => b.role === "bullet");
+  assert.ok(boxes[0].w > boxes[1].w);
+  assert.deepEqual(
+    boxes.map((b) => b.lines.join("").replace(/\s/g, "")),
+    bullets.map((b) => b.replace(/\s/g, "")),
+  );
+  assert.ok(boxes.every((b) => b.fontSize === 20 && b.y + b.h <= 6.68 + 1e-9));
+  assert.ok(boxes[0].x + boxes[0].w + 0.3 <= boxes[1].x);
+  assert.ok(layout.image!.w > 8.5);
+});
+
+test("moderately wide figures gain space from a fitted sidebar while all claims stay readable", () => {
+  const bullets = [
+    "104周eGFR治疗差：＋0.75 ml/min/1.73 m²（95% CI 0.43–1.06），P＜0.001。",
+    "总体效应是相对安慰剂下降较少，不是总体肾功能持续上升。",
+  ];
+  const slide = { ...compact.slides[0], bullets };
+  const layout = slideLayout(slide, paper.sources, {
+    width: 1459,
+    height: 737,
+  });
+  assert.equal(layout.composition, "evidence");
+  assert.ok(layout.image!.w >= 8.6);
+  assert.ok(Math.abs(layout.image!.w / layout.image!.h - 1459 / 737) < 1e-9);
+  const boxes = layout.text.filter((b) => b.role === "bullet");
+  assert.deepEqual(
+    boxes.map((b) => b.lines.join("").replace(/\s/g, "")),
+    bullets.map((b) => b.replace(/\s/g, "")),
+  );
+  assert.ok(
+    boxes.every(
+      (b) =>
+        b.fontSize === 20 &&
+        b.x >= layout.image!.x + layout.image!.w + 0.3 &&
+        b.x + b.w <= 12.55 + 1e-9 &&
+        b.y + b.h <= 6.68 + 1e-9,
+    ),
+  );
+  for (let i = 1; i < boxes.length; i++)
+    assert.ok(boxes[i].y >= boxes[i - 1].y + boxes[i - 1].h + 0.2);
+  const portrait = slideLayout(slide, paper.sources, {
+    width: 700,
+    height: 1400,
+  });
+  assert.ok(
+    portrait.text.filter((b) => b.role === "bullet").every((b) => b.w === 3.5),
   );
 });
