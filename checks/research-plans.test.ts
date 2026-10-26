@@ -541,6 +541,67 @@ test("核对返回非法定位或阻断问题时保留草稿，但禁止导出",
   await h2.store.restore([result], [legacy]);
   assert.equal(h2.store.job(j2.id).status, "failed");
 });
+test("修订生成与核对可追溯已保存的历史条件，且当前条件保持独立", async () => {
+  const revised = structuredClone(content);
+  revised.sections[0].text =
+    "当前按8周、双人各5例每周执行；历史初版为16周、双人各20例每周。";
+  const h = harness([content, review, revised, review]);
+  const initial = await h.store.create({
+    ...topic,
+    conditions: "240例，16周；两名医师各20例/周，有第三裁决者。",
+  });
+  const initialJob = await h.store.start(initial.id, input(initial));
+  assert.equal((await h.store.wait(initialJob.id)).status, "completed");
+  const saved = h.store.get(initial.id);
+  const firstVersion = structuredClone(saved.versions[0]);
+  const changed = await h.store.updateTopic(initial.id, saved.topic.version, {
+    ...topic,
+    conditions: "120例，8周；两名医师各5例/周，无第三裁决者。",
+  });
+  const revisionJob = await h.store.start(
+    initial.id,
+    input(changed, { action: "revise" }),
+  );
+  assert.equal((await h.store.wait(revisionJob.id)).status, "completed");
+  const current = h.store.get(initial.id);
+  assert.deepEqual(current.versions[0], firstVersion);
+  assert.deepEqual(h.calls[0].input.versionHistory.ancestors, []);
+  assert.equal(h.calls[1].input.versionHistory.previousContent, null);
+  for (const call of h.calls.slice(2)) {
+    assert.equal(call.input.topic.conditions, changed.topic.conditions);
+    assert.equal(
+      call.input.versionHistory.ancestors[0].versionId,
+      firstVersion.id,
+    );
+    assert.equal(
+      call.input.versionHistory.ancestors[0].topic.conditions,
+      initial.topic.conditions,
+    );
+    assert.equal(
+      call.input.versionHistory.ancestors[0].topic.version,
+      initial.topic.version,
+    );
+    assert.deepEqual(
+      call.input.versionHistory.previousContent,
+      call.input.artifactVersion
+        ? {
+            versionId: firstVersion.id,
+            content: plain(firstVersion.content),
+          }
+        : null,
+    );
+    assert.equal(call.input.versionHistory.unresolvedAncestorId, null);
+    assert.equal(
+      call.input.versionHistory.ancestors.some(
+        (entry: any) => entry.versionId === current.currentVersion,
+      ),
+      false,
+    );
+  }
+  assert.deepEqual(h.calls[2].input.original, plain(firstVersion.content));
+  assert.equal(h.calls[3].input.artifactVersion, current.currentVersion);
+  assert.match(h.calls[3].instructions, /历史条件不覆盖当前条件/);
+});
 test("单节改写保留其它章节和用户归属", async () => {
   const revised = structuredClone(content);
   revised.sections[0].text = "不应改到这里";

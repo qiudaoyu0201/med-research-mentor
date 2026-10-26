@@ -16,7 +16,7 @@ import { groundedTeachingSchema } from "../server/schemas.ts";
 import { TaskManager } from "../server/orchestrator.ts";
 import { ResultCache } from "../server/cache.ts";
 import { exportDeck } from "../server/export.ts";
-import { slideLayout } from "../shared/slide-layout.ts";
+import { wrapSlideText, slideLayout } from "../shared/slide-layout.ts";
 import {
   pptLayoutIssues,
   withPptLayoutReview,
@@ -575,7 +575,7 @@ test("long ordered procedures use wide rows without rewriting or dropping any st
   );
 });
 
-test("numeric comparison tables preserve every cell, align columns and export editable text", async () => {
+test("numeric comparison tables preserve every cell, align columns and export native editable tables", async () => {
   const { deckSchema } = await import("../server/schemas.ts");
   const rows = [
     "阈值（pg/mL） | 敏感度（95% CI） | 特异度（95% CI）",
@@ -627,6 +627,10 @@ test("numeric comparison tables preserve every cell, align columns and export ed
     const zip = unzipSync(await readFile(output));
     const xml = strFromU8(zip["ppt/slides/slide1.xml"]);
     assert.equal(xml.includes("完整讲述提示另行交付"), false);
+    assert.equal((xml.match(/<a:tbl>/g) ?? []).length, 1);
+    assert.equal((xml.match(/<a:tr\b/g) ?? []).length, 3);
+    assert.equal((xml.match(/<a:tc>/g) ?? []).length, 9);
+    assert.equal((xml.match(/<a:t>125<\/a:t>/g) ?? []).length, 1);
     for (const cell of rows.flatMap((row) =>
       row.split("|").map((value) => value.trim()),
     ))
@@ -646,6 +650,67 @@ test("numeric comparison tables preserve every cell, align columns and export ed
           side: "candidate",
           status: "generated",
           artifact: { deck: parsed },
+          exportPath: output,
+          delivery: { version: "separate-guidance-v1", guidancePath },
+        },
+        paper,
+      );
+    } finally {
+      await unlink(guidancePath);
+    }
+  } finally {
+    await unlink(output);
+  }
+});
+
+test("five-column threshold tables retain both groups and every confidence interval", async () => {
+  const rows = [
+    "指标，%（95% CI） | 房颤125 | 房颤400 | 无房颤125 | 无房颤400",
+    "敏感度 | 98.8（98.5–99.1） | 93.2（92.4–93.9） | 92.9（92.4–93.4） | 77.1（76.3–77.9）",
+    "特异度 | 13.2（12.6–13.7） | 35.5（34.7–36.3） | 53.8（53.6–54.1） | 84.9（84.7–85.1）",
+    "阴性预测值 | 97.3（96.5–98.0） | 94.3（93.6–94.9） | 98.9（98.9–99.0） | 97.8（97.8–97.9）",
+  ];
+  const deck: DeckOutline = {
+    slides: [
+      {
+        title: "两组在125与400 pg/mL阈值的取舍",
+        bullets: rows,
+        notes: "每列含组别与阈值，所有数值为百分比。",
+        citations: [paper.sources[0].id],
+        layout: "table",
+      },
+    ],
+  };
+  const layout = slideLayout(deck.slides[0], paper.sources);
+  assert.ok(layout.table);
+  assert.equal(layout.table.widths.length, 5);
+  assert.ok(layout.table.fontSize >= 20);
+  assert.ok(layout.table.y + layout.table.h <= 6.7);
+  const output = await exportDeck(
+    deck,
+    paper,
+    "five-column-table-" + randomUUID(),
+  );
+  try {
+    const zip = unzipSync(await readFile(output));
+    const xml = strFromU8(zip["ppt/slides/slide1.xml"]);
+    assert.equal((xml.match(/<a:gridCol\b/g) ?? []).length, 5);
+    assert.equal((xml.match(/<a:tr\b/g) ?? []).length, 4);
+    assert.equal((xml.match(/<a:tc>/g) ?? []).length, 20);
+    const text = xml.replace(/<[^>]+>/g, "").replace(/\s/g, "");
+    for (const cell of rows.flatMap((row) =>
+      row.split("|").map((cell) => cell.trim()),
+    ))
+      assert.ok(text.includes(cell.replace(/\s/g, "")), cell);
+    const guidancePath = output.replace(/\.pptx$/, ".md");
+    await writeFile(guidancePath, trainingGuidance(deck));
+    try {
+      await verifyTrainingDeliveryFiles(
+        {
+          id: "five-column",
+          side: "candidate",
+          status: "generated",
+          artifact: { deck },
           exportPath: output,
           delivery: { version: "separate-guidance-v1", guidancePath },
         },
@@ -1188,4 +1253,142 @@ test("four-step procedures use wide rows when narrow cards strand a final CJK ch
   boxes.forEach((b, i) => {
     if (i) assert.ok(b.y > boxes[i - 1].y + boxes[i - 1].h);
   });
+});
+
+test("footnote markers stay attached to outcome labels in narrow table cells", () => {
+  for (const marker of ["＊", "*", "†", "‡", "¹"]) {
+    const text = "有创通气或死亡" + marker;
+    const lines = wrapSlideText(text, 1.9, 24);
+    assert.equal(lines.join(""), text);
+    assert.ok(
+      lines.every((line) => !/^[＊*†‡¹]/.test(line)),
+      JSON.stringify(lines),
+    );
+  }
+});
+
+test("identical figure regions require purpose review, while distinct verified crops remain available", () => {
+  const crop = { left: 0, top: 0, width: 0.5, height: 1 };
+  const deck: DeckOutline = {
+    slides: [
+      { ...compact.slides[0], title: "总体结果", imageSource: "xu-fig1" },
+      { ...compact.slides[0], title: "重复整图", imageSource: "xu-fig1" },
+      {
+        ...compact.slides[0],
+        title: "左侧证据",
+        imageSource: "xu-fig1",
+        imageCrop: crop,
+      },
+      {
+        ...compact.slides[0],
+        title: "右侧证据",
+        imageSource: "xu-fig1",
+        imageCrop: { left: 0.5, top: 0, width: 0.5, height: 1 },
+      },
+      {
+        ...compact.slides[0],
+        title: "重复左侧证据",
+        imageSource: "xu-fig1",
+        imageCrop: { ...crop, left: 0.00001 },
+      },
+    ],
+  };
+  const reuseIssues = pptLayoutIssues(deck, paper.sources).filter((issue) =>
+    issue.id.startsWith("ppt-image-reuse-"),
+  );
+  assert.deepEqual(
+    reuseIssues.map((issue) => issue.id),
+    ["ppt-image-reuse-2", "ppt-image-reuse-5"],
+  );
+  assert.equal(reuseIssues[0].severity, "warning");
+  assert.match(reuseIssues[0].suggestion, /第 1 页/);
+});
+
+test("image reuse review closes only after the repeated slide changes", () => {
+  const deck: DeckOutline = {
+    slides: [
+      { ...compact.slides[0], title: "第一处", imageSource: "xu-fig1" },
+      { ...compact.slides[0], title: "重复处", imageSource: "xu-fig1" },
+    ],
+  };
+  const first = withPptLayoutReview(clear, deck, paper.sources);
+  assert.equal(
+    first.issues.find((issue) => issue.id === "ppt-image-reuse-2")?.resolved,
+    false,
+  );
+  const repaired: DeckOutline = {
+    slides: [deck.slides[0], { ...deck.slides[1], imageSource: "" }],
+  };
+  const final = withPptLayoutReview(clear, repaired, paper.sources, first);
+  assert.equal(
+    final.issues.find((issue) => issue.id === "ppt-image-reuse-2")?.resolved,
+    true,
+  );
+});
+test("a reviewer can accept purposeful image reuse without clearing layout errors", async () => {
+  const { assertPptLayout } = await import("../server/ppt-layout-review.ts");
+  const deck: DeckOutline = {
+    slides: [
+      { ...compact.slides[0], title: "总体结果", imageSource: "xu-fig1" },
+      {
+        ...compact.slides[0],
+        title: "返回同图解释适用边界",
+        imageSource: "xu-fig1",
+      },
+    ],
+  };
+  assert.doesNotThrow(() => assertPptLayout(deck, paper.sources));
+  const reviewed = withPptLayoutReview(
+    {
+      ...clear,
+      issues: [
+        {
+          id: "ppt-image-reuse-2",
+          location: "第2页",
+          type: "scope",
+          severity: "warning",
+          resolved: true,
+          evidence: ["xu-fig1"],
+          suggestion: "本页回到同图解释前页结论的条件，讲述任务不同。",
+        },
+      ],
+    },
+    deck,
+    paper.sources,
+  );
+  assert.equal(
+    reviewed.issues.find((issue) => issue.id === "ppt-image-reuse-2")?.resolved,
+    true,
+  );
+  const crowded = {
+    slides: [{ ...deck.slides[0], title: "研究结果".repeat(50) }],
+  };
+  assert.throws(() => assertPptLayout(crowded, paper.sources), /PPT/);
+});
+
+test("actual PPT delivery does not clear scientific or visual content defects", async () => {
+  const { missingPptDeliveryClaim } =
+    await import("../server/training-delivery.ts");
+  assert.equal(
+    missingPptDeliveryClaim("尚未提供PPTX文件和逐页渲染，无法验证成品"),
+    true,
+  );
+  for (const text of [
+    "PPTX缺少95%置信区间",
+    "PPTX数值错误",
+    "逐页视觉检查存在裁切溢出",
+    "PPTX未提供同页引用来源",
+    "表序错误，未完成逐页审计",
+  ])
+    assert.equal(missingPptDeliveryClaim(text), false, text);
+});
+
+test("native-table audit clears a verification-only claim but retains missing data", async () => {
+  const { missingPptDeliveryClaim } =
+    await import("../server/training-delivery.ts");
+  const claim =
+    "两组阈值和区间与原文一致，但不能据此确认PowerPoint原生单元格可编辑。此项为交付验证缺口，不是数值事实错误。";
+  assert.equal(missingPptDeliveryClaim(claim), false);
+  assert.equal(missingPptDeliveryClaim(claim, true), true);
+  assert.equal(missingPptDeliveryClaim(claim + "遗漏无房颤组。", true), false);
 });

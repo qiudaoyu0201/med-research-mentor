@@ -20,6 +20,18 @@ export type SlideShape = {
   h: number;
   fill: string;
   kind?: "rect" | "roundRect" | "chevron" | "downArrow" | "ellipse";
+  role?: "table-row" | "table-rule";
+};
+export type SlideTable = {
+  rows: string[][];
+  cellLines: string[][][];
+  x: number;
+  y: number;
+  w: number;
+  h: number;
+  widths: number[];
+  rowHeights: number[];
+  fontSize: number;
 };
 export const slideSize = { width: 13.333333, height: 7.5 };
 // Explicit point advances keep SVG, capacity checks, and PowerPoint in sync.
@@ -68,7 +80,9 @@ export function wrapSlideText(
       }
       if (
         words.length &&
-        /^[，。；：！？、）》」』】”’…,.!?;:)\]]+$/.test(token)
+        /^[，。；：！？、）》」』】”’…,.!?;:)\]＊*†‡⁎⁑⁂¹²³⁴⁵⁶⁷⁸⁹⁰]+$/.test(
+          token,
+        )
       )
         words[words.length - 1] += token;
       else words.push(token);
@@ -137,6 +151,7 @@ export function slideLayout(
 ) {
   const text: TextBox[] = [];
   const shapes: SlideShape[] = [];
+  let table: SlideTable | undefined;
   let composition = "standard";
   let titleSize = 32,
     titleLines = wrapSlideText(slide.title, 11.8, titleSize);
@@ -285,7 +300,7 @@ export function slideLayout(
       count < 2 ||
       count > 5 ||
       columns < 2 ||
-      columns > 4 ||
+      columns > 5 ||
       rows.some(
         (row) =>
           row.length !== columns ||
@@ -293,7 +308,7 @@ export function slideLayout(
       )
     )
       throw new Error(
-        "表格需要表头及一至四行数据，每行二至四个非空单元格，以 | 分隔；不添加Markdown分隔行，缺失指标须明确标注。",
+        "表格需要表头及一至四行数据，每行二至五个非空单元格，以 | 分隔；不添加Markdown分隔行，缺失指标须明确标注。",
       );
     composition = "table";
     const units = (value: string, bold = false) =>
@@ -454,6 +469,17 @@ export function slideLayout(
         "表格过密，请取舍指标或拆页；不能缩小字号或删除关键区间来容纳。",
       );
     let y = 1.65 + (4.98 - totalHeight) / 2;
+    table = {
+      rows,
+      cellLines: blocks,
+      x: 0.72,
+      y,
+      w: 11.9,
+      h: totalHeight,
+      widths: [...widths],
+      rowHeights: [...rowHeights],
+      fontSize,
+    };
     rows.forEach((row, index) => {
       const h = rowHeights[index];
       shapes.push({
@@ -462,6 +488,7 @@ export function slideLayout(
         w: 11.9,
         h,
         fill: index === 0 ? "12384A" : index % 2 ? "EDF4F3" : "FFFFFF",
+        role: "table-row",
       });
       let x = 0.72;
       row.forEach((_, col) => {
@@ -488,6 +515,7 @@ export function slideLayout(
         w: 11.9,
         h: 0.012,
         fill: "DCE7E5",
+        role: "table-rule",
       });
       y += h;
     });
@@ -1015,5 +1043,5 @@ export function slideLayout(
       h,
     };
   }
-  return { text, image, shapes, composition, background: "FFFFFF" };
+  return { text, image, shapes, composition, background: "FFFFFF", table };
 }

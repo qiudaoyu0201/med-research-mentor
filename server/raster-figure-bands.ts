@@ -1,4 +1,5 @@
 import type { SKRSContext2D } from "@napi-rs/canvas";
+import { ruledFigureRegions } from "./raster-ruled-grid.ts";
 import { cropPixels, type FigurePanel } from "../shared/image-region.ts";
 
 // Full-width spatial groups for raster figures without reliable PDF panel labels.
@@ -77,6 +78,8 @@ export function rasterFigureRegions(
   height: number,
 ): FigurePanel[] {
   if (width < 400 || height < 180) return [];
+  const ruled = ruledFigureRegions(ctx, width, height);
+  if (ruled.length) return ruled;
   const bands = rasterFigureBands(ctx, width, height);
   const rows: FigurePanel[] = bands.length
     ? bands

@@ -292,3 +292,38 @@ test("raster columns expose whole-height paired plots through the PDF extraction
   assert.equal(regions[0].region.width, regions[1].region.left);
   assert.ok(regions.every((p) => p.region.top === 0 && p.region.height === 1));
 });
+
+test("closed ruled figure grids survive PDF extraction with full-cell region choices", async () => {
+  const graphics = [
+    "0.5 w 90 220 400 400 re S",
+    "290 220 m 290 620 l S 90 420 m 490 420 l S",
+    ...[90, 290].flatMap((x) =>
+      [220, 420].flatMap((y) => [
+        `${x + 30} ${y + 45} 140 120 re S`,
+        `${x + 15} ${y + 15} 170 15 re f`,
+      ]),
+    ),
+  ].join("\n");
+  const result = await extract(
+    text("F1", 36, 160, "Figure 7. Outcomes in four study groups."),
+    graphics,
+  );
+  assert.equal(result.sources.length, 1);
+  const regions = result.sources[0].imagePanels!;
+  assert.deepEqual(
+    regions?.map((p) => p.label),
+    [
+      "band-1",
+      "band-2",
+      "band-1-col-1",
+      "band-1-col-2",
+      "band-2-col-1",
+      "band-2-col-2",
+    ],
+  );
+  const lowerRight = regions.at(-1)!.region;
+  assert.ok(lowerRight.top > 0.49 && lowerRight.top < 0.51);
+  assert.ok(lowerRight.left > 0.49 && lowerRight.left < 0.51);
+  assert.ok(lowerRight.left + lowerRight.width >= 0.999);
+  assert.ok(lowerRight.top + lowerRight.height >= 0.999);
+});

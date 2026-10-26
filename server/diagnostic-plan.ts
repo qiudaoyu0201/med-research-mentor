@@ -43,7 +43,13 @@ export function diagnosticPlanAssessment(plan: ResearchPlan, jobs: PlanJob[]) {
         terminalVersions[index].id,
     ) &&
     plan.versions.at(-1)?.id === terminalVersions[1].id;
-  const issues = terminalVersions.flatMap((v) => v.review?.issues ?? []);
+  const finalVersion = terminalVersions.at(-1);
+  const issues = finalVersion?.review?.issues ?? [];
+  const finalIssueIds = new Set(issues.map((issue) => issue.id));
+  const supersededIssues = terminalVersions
+    .slice(0, -1)
+    .flatMap((version) => version.review?.issues ?? [])
+    .filter((issue) => !finalIssueIds.has(issue.id));
   const mainlinePassed =
     complete && bound && terminalVersions.every(planVersionReady);
   return {
@@ -51,6 +57,7 @@ export function diagnosticPlanAssessment(plan: ResearchPlan, jobs: PlanJob[]) {
     mainlinePassed,
     strictPassed: mainlinePassed && issues.length === 0,
     unresolvedIssues: issues,
+    supersededIssues,
     breakpoints: null,
     scope:
       "方案生成、条件变更、修订及来源核验；没有模拟新手复读，不声称真人效果。",
@@ -158,7 +165,7 @@ export async function runDiagnosticPlan(options: {
     await stage(
       "generate",
       settings.requestedScope === "full-plan"
-        ? "按当前资源写可供导师评阅的完整研究方案，展开背景缺口、目标与设计、测量与分析、可行性及实施安排；说明必要选择理由，缺条件保留未知，不补造参数或结果。"
+        ? "只按本阶段的原始条件写可供导师评阅的完整研究方案；本次是初版，必须保留题面给出的原始样本、时长、人员、资源和目标，不能提前使用后续条件变更。展开背景缺口、目标与设计、测量与分析、可行性及实施安排；说明必要选择理由，缺条件保留未知，不补造参数或结果。后续修订阶段才使用条件变更，并保留初版作为可比较的历史版本。"
         : settings.requestedScope === "direction"
           ? "给出聚焦的研究方向与可行性取舍，保留下一步所需的关键条件，不展开尚未选定路线的完整方案。"
           : "给出能用于讨论的简短设计草案，说明必要测量与对照的作用，以及结论边界。缺条件保留未知，不补造参数或结果。",

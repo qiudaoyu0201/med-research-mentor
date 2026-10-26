@@ -65,7 +65,12 @@ export async function exportDeck(
       ),
       slide = pptx.addSlide();
     slide.background = { color: layout.background };
-    for (const shape of layout.shapes)
+    for (const shape of layout.shapes) {
+      if (
+        layout.table &&
+        (shape.role === "table-row" || shape.role === "table-rule")
+      )
+        continue;
       slide.addShape(pptx.ShapeType[shape.kind ?? "rect"], {
         x: shape.x,
         y: shape.y,
@@ -78,7 +83,10 @@ export async function exportDeck(
         fill: { color: shape.fill },
         line: { color: shape.fill, transparency: 100 },
       });
+    }
     for (const b of layout.text) {
+      if (layout.table && b.role === "bullet" && b.sourceIndex !== undefined)
+        continue;
       if (b.role === "bullet" && b.marker) {
         slide.addText(b.marker, {
           x: b.markerAbove ? b.x : b.x - 0.42,
@@ -107,6 +115,46 @@ export async function exportDeck(
         valign: "top",
         fontFace: "Microsoft YaHei",
       });
+    }
+    if (layout.table) {
+      slide.addTable(
+        layout.table.rows.map((row, rowIndex) =>
+          row.map((_, colIndex) => ({
+            text: layout.table!.cellLines[rowIndex][colIndex].join("\n"),
+            options: {
+              bold: rowIndex === 0 || colIndex === 0,
+              color: rowIndex === 0 ? "FFFFFF" : "26384A",
+              fill: {
+                color:
+                  rowIndex === 0
+                    ? "12384A"
+                    : rowIndex % 2
+                      ? "EDF4F3"
+                      : "FFFFFF",
+              },
+              margin: [0.12, 0.16, 0.12, 0.16],
+              valign: "top",
+              fontFace: "Microsoft YaHei",
+              fontSize: layout.table!.fontSize,
+              border: { type: "solid", color: "DCE7E5", pt: 0.5 },
+            },
+          })),
+        ),
+        {
+          x: layout.table.x,
+          y: layout.table.y,
+          w: layout.table.w,
+          h: layout.table.h,
+          colW: layout.table.widths,
+          rowH: layout.table.rowHeights,
+          margin: [0.12, 0.16, 0.12, 0.16],
+          border: { type: "solid", color: "DCE7E5", pt: 0.5 },
+          fontFace: "Microsoft YaHei",
+          fontSize: layout.table.fontSize,
+          color: "26384A",
+          valign: "top",
+        },
+      );
     }
     if (image && layout.image) slide.addImage({ data: image, ...layout.image });
     slide.addText(`${i + 1} / ${deck.slides.length}`, {

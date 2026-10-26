@@ -212,3 +212,101 @@ test("raster columns reject even faint connectors and narrow label gaps, and sup
   w.fillRect(440, 50, 120, 2);
   assert.deepEqual(rasterFigureRegions(w, 1000, 400), []);
 });
+
+function ruledFigure() {
+  const canvas = createCanvas(800, 800),
+    ctx = canvas.getContext("2d");
+  ctx.fillStyle = "white";
+  ctx.fillRect(0, 0, 800, 800);
+  ctx.fillStyle = "#666666";
+  for (const x of [0, 399, 798]) ctx.fillRect(x, 0, 2, 800);
+  for (const y of [0, 399, 798]) ctx.fillRect(0, y, 800, 2);
+  ctx.fillStyle = "black";
+  for (const x of [0, 400])
+    for (const y of [0, 400]) {
+      ctx.fillRect(x + 14, y + 14, 20, 16); // printed panel label
+      ctx.fillRect(x + 70, y + 65, 2, 230); // y axis
+      ctx.fillRect(x + 70, y + 295, 290, 2); // x axis
+      ctx.fillRect(x + 20, y + 330, 340, 40); // complete attached risk table
+    }
+  return { canvas, ctx };
+}
+test("closed thin ruled grids expose complete rows and cells, retaining labels, axes and risk tables", () => {
+  const { ctx } = ruledFigure();
+  const regions = rasterFigureRegions(ctx, 800, 800);
+  assert.deepEqual(
+    regions.map((p) => p.label),
+    [
+      "band-1",
+      "band-2",
+      "band-1-col-1",
+      "band-1-col-2",
+      "band-2-col-1",
+      "band-2-col-2",
+    ],
+  );
+  assert.equal(clearPanelBoundaries(ctx, 800, 800, regions), true);
+  const cells = regions.filter((p) => p.label.includes("-col-"));
+  const coverage = new Uint8Array(800 * 800);
+  for (const cell of cells) {
+    const b = cropPixels(cell.region, 800, 800);
+    for (let y = b.top; y < b.top + b.height; y++)
+      for (let x = b.left; x < b.left + b.width; x++) coverage[y * 800 + x]++;
+  }
+  assert.ok(
+    coverage.every((n) => n >= 1),
+    "every original pixel remains in at least one complete cell",
+  );
+  const first = cropPixels(cells[0].region, 800, 800);
+  assert.ok(first.width >= 399 && first.width <= 401);
+  assert.ok(first.height > 370, "risk table must remain with plot");
+  const forged = structuredClone(cells);
+  forged[0].region.width = 0.45;
+  assert.equal(
+    clearPanelBoundaries(ctx, 800, 800, forged),
+    false,
+    "rule ID does not authorize an arbitrary cut",
+  );
+});
+test("ruled-grid detection rejects crossed data, colored or thick dividers, incomplete frames and empty cells", () => {
+  const crossed = ruledFigure();
+  crossed.ctx.fillStyle = "#eeeeee";
+  crossed.ctx.fillRect(380, 185, 40, 3);
+  assert.deepEqual(rasterFigureRegions(crossed.ctx, 800, 800), []);
+  const colored = ruledFigure();
+  colored.ctx.fillStyle = "#ffb4b4";
+  colored.ctx.fillRect(399, 0, 2, 800);
+  assert.deepEqual(rasterFigureRegions(colored.ctx, 800, 800), []);
+  const thick = ruledFigure();
+  thick.ctx.fillStyle = "#666666";
+  thick.ctx.fillRect(390, 0, 20, 800);
+  assert.deepEqual(rasterFigureRegions(thick.ctx, 800, 800), []);
+  const open = ruledFigure();
+  open.ctx.fillStyle = "white";
+  open.ctx.fillRect(0, 0, 2, 800);
+  assert.deepEqual(rasterFigureRegions(open.ctx, 800, 800), []);
+  const empty = ruledFigure();
+  empty.ctx.fillStyle = "white";
+  empty.ctx.fillRect(406, 406, 386, 386);
+  assert.deepEqual(rasterFigureRegions(empty.ctx, 800, 800), []);
+});
+
+test("four-column ruled grids retain full rows without producing unsupported column IDs", () => {
+  const c = createCanvas(1200, 800),
+    ctx = c.getContext("2d");
+  ctx.fillStyle = "white";
+  ctx.fillRect(0, 0, 1200, 800);
+  ctx.fillStyle = "#666666";
+  for (const x of [0, 299, 599, 899, 1198]) ctx.fillRect(x, 0, 2, 800);
+  for (const y of [0, 399, 798]) ctx.fillRect(0, y, 1200, 2);
+  ctx.fillStyle = "black";
+  for (const x of [0, 300, 600, 900])
+    for (const y of [0, 400]) ctx.fillRect(x + 50, y + 60, 180, 280);
+  const regions = rasterFigureRegions(ctx, 1200, 800);
+  assert.deepEqual(
+    regions.map((p) => p.label),
+    ["band-1", "band-2"],
+  );
+  assert.equal(clearPanelBoundaries(ctx, 1200, 800, regions), true);
+  assert.ok(regions.every((p) => p.region.left === 0 && p.region.width === 1));
+});

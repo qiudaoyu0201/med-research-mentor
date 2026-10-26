@@ -445,7 +445,7 @@ shapes.sessions = object({
 export function validRecordShape(group: string, value: unknown, id?: string) {
   if (
     group === "material-cache" &&
-    /-pdf-figures-v(?:2|3|4-panels|5-caption-anchors|6-caption-width|7-panel-labels|8-caption-line-start|9-raster-bands|10-raster-columns)$/.test(
+    /-pdf-figures-v(?:2|3|4-panels|5-caption-anchors|6-caption-width|7-panel-labels|8-caption-line-start|9-raster-bands|10-raster-columns|11-ruled-grid)$/.test(
       id ?? "",
     )
   )

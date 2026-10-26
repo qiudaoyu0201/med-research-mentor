@@ -152,13 +152,28 @@ test("plan pilot uses real generation/review twice, binds sources, preserves his
     evidence: [],
     status: "open",
   });
+  const revisedAssessment = diagnosticPlanAssessment(warned, result.jobs);
+  assert.equal(revisedAssessment.mainlinePassed, true);
   assert.equal(
-    diagnosticPlanAssessment(warned, result.jobs).mainlinePassed,
+    revisedAssessment.strictPassed,
     true,
+    "A warning from an earlier version is superseded when the final version resolves it.",
   );
+  assert.equal(revisedAssessment.unresolvedIssues.length, 0);
+  assert.equal(revisedAssessment.supersededIssues.length, 1);
+  const finalWarning = structuredClone(result.plan);
+  finalWarning.versions[1].review!.issues.push({
+    id: "final-warning",
+    sectionId: "design",
+    severity: "warning",
+    message: "最终版本仍有缺口",
+    evidence: [],
+    status: "open",
+  });
   assert.equal(
-    diagnosticPlanAssessment(warned, result.jobs).strictPassed,
+    diagnosticPlanAssessment(finalWarning, result.jobs).strictPassed,
     false,
+    "An unresolved final-version warning still fails strict assessment.",
   );
   const unbound = structuredClone(result.plan);
   unbound.versions[1].jobId = "wrong";

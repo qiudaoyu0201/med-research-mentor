@@ -1,4 +1,5 @@
 import type { Source, DeckOutline } from "../shared/types.ts";
+import { ruledFigureRegions } from "./raster-ruled-grid.ts";
 import {
   validRegion,
   cropPixels,
@@ -151,6 +152,26 @@ export function clearPanelBoundaries(
   panels: FigurePanel[],
 ): boolean {
   if (!panels.length || width <= 0 || height <= 0) return false;
+  // A printed divider is acceptable only when the entire closed grid and
+  // clear padding have been rechecked. Labels cannot bypass the
+  // raster check, and arbitrary coordinates beside a rule remain ineligible.
+  let ruled: FigurePanel[] | undefined;
+  const matchesRuledGrid = () => {
+    ruled ??= ruledFigureRegions(ctx, width, height);
+    return panels.every((panel) => {
+      if (!validRegion(panel.region)) return false;
+      const actual = cropPixels(panel.region, width, height);
+      return ruled!.some((candidate) => {
+        const expected = cropPixels(candidate.region, width, height);
+        return (
+          actual.left === expected.left &&
+          actual.top === expected.top &&
+          actual.width === expected.width &&
+          actual.height === expected.height
+        );
+      });
+    });
+  };
   const clear = (x: number, y: number, w: number, h: number) => {
     const pixels = ctx.getImageData(x, y, w, h).data;
     let ink = 0;
@@ -164,10 +185,10 @@ export function clearPanelBoundaries(
     const b = cropPixels(p.region, width, height);
     for (const x of [b.left, b.left + b.width])
       if (x > 2 && x < width - 2 && !clear(x - 1, b.top, 3, b.height))
-        return false;
+        return matchesRuledGrid();
     for (const y of [b.top, b.top + b.height])
       if (y > 2 && y < height - 2 && !clear(b.left, y - 1, b.width, 3))
-        return false;
+        return matchesRuledGrid();
   }
   return true;
 }
@@ -199,7 +220,8 @@ export function panelSelectionIds(sources: Source[]) {
   );
 }
 // Model selects an existing region ID. Coordinates come from printed PDF labels
-// or clear raster gutters, never model-generated fractions or another source.
+// clear raster gutters or a verified closed grid, never model-generated
+// fractions or another source.
 export function applyDeckPanels(
   deck: DeckOutline | null | undefined,
   sources: Source[],
