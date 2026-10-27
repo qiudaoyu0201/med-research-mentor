@@ -105,14 +105,16 @@ export function ResearchNavigation({
           </button>
           <button
             aria-label="研究方案"
+            title="研究方案"
             aria-current={mode === "plan" ? "page" : undefined}
             onClick={onPlan}
           >
-            <ResearchIcon name="book" />
+            <ResearchIcon name="note" />
             <span>研究方案</span>
           </button>
           <button
             aria-label="PPT 汇报"
+            title="PPT 汇报"
             aria-current={mode === "ppt" ? "page" : undefined}
             onClick={onPpt}
           >
@@ -132,7 +134,7 @@ export function ResearchNavigation({
               onClick={onImport}
             >
               <ResearchIcon name="plus" />
-              <span>＋ 导入论文</span>
+              <span>导入论文</span>
             </button>
             <label className="rp-search">
               <ResearchIcon name="search" />
@@ -148,10 +150,11 @@ export function ResearchNavigation({
                 我的课题{" "}
                 <button
                   aria-label="新建课题"
+                  title="新建课题"
                   disabled={busy}
                   onClick={onCreateProject}
                 >
-                  ＋
+                  <ResearchIcon name="plus" />
                 </button>
               </div>
               {groups.map((group) => {

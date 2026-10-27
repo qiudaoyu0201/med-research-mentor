@@ -139,9 +139,14 @@ export function ResearchSettings({
     }
   }
   return (
-    <dialog ref={dialog} className="rp-settings rw-settings" onCancel={close}>
+    <dialog
+      ref={dialog}
+      className="rp-settings rw-settings"
+      aria-labelledby="research-settings-title"
+      onCancel={close}
+    >
       <header className="rp-modal-heading">
-        <h2>设置</h2>
+        <h2 id="research-settings-title">设置</h2>
         <button aria-label="关闭设置" onClick={close}>
           ×
         </button>

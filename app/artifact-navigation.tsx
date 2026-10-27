@@ -3,6 +3,7 @@ import { createPortal } from "react-dom";
 import type { ArtifactSummary, WorkspaceIndex } from "../shared/workspace.ts";
 import { researchApi } from "./research-api.ts";
 import { ObjectMenu } from "./research-menu.tsx";
+import { ResearchIcon } from "./research-icons.tsx";
 
 export function ArtifactNavigation({
   kind,
@@ -79,12 +80,16 @@ export function ArtifactNavigation({
     <>
       <button
         className="rp-new-task"
+        aria-label={`新建${label}`}
+        title={`新建${label}`}
         disabled={disabled || working}
         onClick={onNew}
       >
-        ＋ 新建{label}
+        <ResearchIcon name="plus" />
+        <span>新建{label}</span>
       </button>
       <label className="rp-search">
+        <ResearchIcon name="search" />
         <input
           aria-label={`搜索${label}`}
           placeholder={`搜索我的${label}`}
@@ -95,8 +100,12 @@ export function ArtifactNavigation({
       <div className="rp-sidebar-scroll">
         <div className="rp-section-label">
           我的课题{" "}
-          <button aria-label="新建课题" onClick={onCreateProject}>
-            ＋
+          <button
+            aria-label="新建课题"
+            title="新建课题"
+            onClick={onCreateProject}
+          >
+            <ResearchIcon name="plus" />
           </button>
         </div>
         {groups.map((group) => {

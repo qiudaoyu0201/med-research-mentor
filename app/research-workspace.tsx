@@ -1718,6 +1718,7 @@ export function ResearchWorkspace() {
         <dialog
           ref={dialog}
           className="rp-settings rw-management"
+          aria-labelledby="research-management-title"
           onCancel={() => setManagement(undefined)}
         >
           <form
@@ -1727,7 +1728,7 @@ export function ResearchWorkspace() {
             }}
           >
             <div className="rp-modal-heading">
-              <h2>
+              <h2 id="research-management-title">
                 {management.kind === "create"
                   ? "新建课题"
                   : management.kind === "paper"
@@ -1792,18 +1793,10 @@ export function ResearchWorkspace() {
               </label>
             )}
             <div className="rw-actions">
-              <button
-                type="submit"
-                className="rp-primary"
-                disabled={working || !management.name.trim()}
-              >
-                {management.kind === "paper" && management.archived
-                  ? "确认归档"
-                  : "保存"}
-              </button>
               {management.kind === "project" && (
                 <button
                   type="button"
+                  className="rw-management-secondary"
                   disabled={working}
                   onClick={() =>
                     void action(async () => {
@@ -1826,6 +1819,22 @@ export function ResearchWorkspace() {
                   {management.archived ? "恢复课题" : "归档课题"}
                 </button>
               )}
+              <button
+                type="button"
+                disabled={working}
+                onClick={() => setManagement(undefined)}
+              >
+                取消
+              </button>
+              <button
+                type="submit"
+                className="rp-primary"
+                disabled={working || !management.name.trim()}
+              >
+                {management.kind === "paper" && management.archived
+                  ? "确认归档"
+                  : "保存"}
+              </button>
             </div>
             {error && (
               <p className="rw-error" role="alert">
