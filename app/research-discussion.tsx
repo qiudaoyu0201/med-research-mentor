@@ -380,7 +380,11 @@ export function ResearchDiscussion({
                 (["queued", "running"].includes(start?.status ?? "") ? (
                   <button onClick={onCancelGuide}>停止整理研究起点</button>
                 ) : (
-                  <button disabled={busy} onClick={onGuide}>
+                  <button
+                    className="rp-primary"
+                    disabled={busy}
+                    onClick={onGuide}
+                  >
                     开始中文带读
                   </button>
                 ))}

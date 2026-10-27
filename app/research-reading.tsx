@@ -375,16 +375,35 @@ export function ResearchReading({
             tabIndex={panel === tab ? 0 : -1}
             onClick={() => onPanel(tab)}
             onKeyDown={(e) => {
-              if (e.key === "ArrowLeft" || e.key === "ArrowRight") {
-                e.preventDefault();
-                if (!notes.length) return;
-                onPanel(tab === "sources" ? "notes" : "sources");
-                (
-                  e.currentTarget.parentElement?.querySelector(
-                    `[aria-selected="false"]`,
-                  ) as HTMLElement
-                )?.focus();
+              const tabs = Array.from(
+                e.currentTarget.parentElement?.querySelectorAll<HTMLButtonElement>(
+                  '[role="tab"]',
+                ) ?? [],
+              );
+              const currentIndex = tabs.indexOf(e.currentTarget);
+              let nextIndex: number;
+              switch (e.key) {
+                case "ArrowLeft":
+                case "ArrowRight":
+                  if (tabs.length < 2) return;
+                  nextIndex =
+                    (currentIndex +
+                      (e.key === "ArrowRight" ? 1 : -1) +
+                      tabs.length) %
+                    tabs.length;
+                  break;
+                case "Home":
+                  nextIndex = 0;
+                  break;
+                case "End":
+                  nextIndex = tabs.length - 1;
+                  break;
+                default:
+                  return;
               }
+              e.preventDefault();
+              tabs[nextIndex]?.focus();
+              tabs[nextIndex]?.click();
             }}
           >
             {tab === "sources" ? "原文与图件" : "历史笔记"}

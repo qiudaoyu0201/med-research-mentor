@@ -637,6 +637,7 @@ export function ResearchPlanPanel({
             缺条件可先讨论草稿；所选文献支持设计依据，其结果不会成为新课题的实测结果。
           </p>
           <button
+            className="rp-primary"
             disabled={
               working ||
               (!!selected && !plan) ||
@@ -755,6 +756,7 @@ export function ResearchPlanPanel({
               </label>
               <div className="rplan-actions">
                 <button
+                  className="rp-primary"
                   disabled={
                     working ||
                     !!active ||
@@ -1145,6 +1147,7 @@ export function ResearchPlanPanel({
                       ))}
                     </details>
                     <button
+                      className="rp-primary"
                       disabled={working || !dirty || topicChanged}
                       onClick={() => void action(saveDraft)}
                     >
@@ -1243,6 +1246,7 @@ export function ResearchPlanPanel({
                 {!readOnly && dirty && (
                   <div className="rplan-actions">
                     <button
+                      className="rp-primary"
                       disabled={working || topicChanged}
                       onClick={() => void action(saveDraft)}
                     >
