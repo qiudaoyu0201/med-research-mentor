@@ -4,6 +4,7 @@ import {
   type ResearchAttachment,
 } from "../shared/attachments.ts";
 import { ResearchImage } from "./research-image.tsx";
+import { ResearchIcon } from "./research-icons.tsx";
 import { ObjectMenu } from "./research-menu.tsx";
 
 export interface PendingAttachment {
@@ -171,7 +172,7 @@ export function PendingAttachments({
             aria-label={`移除附件 ${item.file?.name ?? item.record?.name}`}
             onClick={() => remove(item.id)}
           >
-            ×
+            <ResearchIcon name="close" />
           </button>
           {/\.pdf$/i.test(item.file?.name ?? "") && (
             <small>发送后进入这篇论文的聊天</small>

@@ -12,6 +12,7 @@ import {
 } from "./research-menu.tsx";
 import { readingFiguresBySection } from "../shared/reading-figures.ts";
 import { ResearchImage } from "./research-image.tsx";
+import { ResearchIcon } from "./research-icons.tsx";
 import { ReadingSectionFigure } from "./reading-section-figure.tsx";
 import { focusLabels, verbosityLabels } from "../shared/learning-intent.ts";
 
@@ -340,7 +341,9 @@ export function ResearchDiscussion({
       )}
       {!turns.length && (
         <section className="rp-welcome">
-          <div className="rp-welcome-icon">◎</div>
+          <div className="rp-welcome-icon">
+            <ResearchIcon name="book" />
+          </div>
           <h2>{paper ? "中文带读，也可以直接提问" : "从一篇论文开始"}</h2>
           {paper ? (
             <>
@@ -380,7 +383,11 @@ export function ResearchDiscussion({
                 (["queued", "running"].includes(start?.status ?? "") ? (
                   <button onClick={onCancelGuide}>停止整理研究起点</button>
                 ) : (
-                  <button disabled={busy} onClick={onGuide}>
+                  <button
+                    className="rp-primary"
+                    disabled={busy}
+                    onClick={onGuide}
+                  >
                     开始中文带读
                   </button>
                 ))}
@@ -408,8 +415,14 @@ export function ResearchDiscussion({
           ) : (
             <>
               <p>导入后一起理解研究问题、方法和证据。课题整理可以稍后进行。</p>
-              <button disabled={busy} onClick={onImport}>
-                ＋ 导入论文
+              <button
+                className="rp-primary rw-welcome-import"
+                aria-label="＋ 导入论文"
+                disabled={busy}
+                onClick={onImport}
+              >
+                <ResearchIcon name="plus" />
+                <span>导入论文</span>
               </button>
             </>
           )}

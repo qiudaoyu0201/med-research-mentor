@@ -9,7 +9,7 @@
 .rplan-list {
   overflow: auto;
   padding: 18px 12px;
-  border-right: 1px solid var(--rw-line);
+  border-right: 1px solid var(--rw-line-soft);
 }
 .rplan-heading,
 .rplan-actions,
@@ -21,6 +21,8 @@
 }
 .rplan-heading {
   justify-content: space-between;
+  gap: 8px;
+  margin-bottom: 8px;
 }
 .rplan h2 {
   font-size: 20px;
@@ -29,26 +31,41 @@
 .rplan-list > button {
   display: flex;
   flex-direction: column;
+  align-items: flex-start;
   gap: 5px;
   text-align: left;
   width: 100%;
-  margin: 8px 0;
+  min-height: 56px;
+  margin: 6px 0;
+  padding: 10px 11px;
   border: 1px solid transparent;
+  border-radius: var(--rw-radius-control);
   background: transparent;
   color: var(--rw-text);
 }
+.rplan-list > button:hover:not(:disabled) {
+  background: var(--rw-hover);
+}
 .rplan-list > button[aria-current="page"] {
-  background: var(--rw-surface);
-  border-color: var(--rw-line);
-  box-shadow: 0 2px 8px #00000008;
+  background: var(--rw-accent-soft);
+  border-color: color-mix(in srgb, var(--rw-accent) 18%, transparent);
+}
+.rplan-list > button[aria-current="page"] strong {
+  color: var(--rw-accent);
 }
 .rplan-list strong {
   overflow-wrap: anywhere;
   font-size: 14px;
   font-weight: 550;
+  line-height: 1.45;
+}
+.rplan-list small {
+  color: var(--rw-secondary);
+  line-height: 1.4;
 }
 .rplan-main {
   overflow: auto;
+  min-width: 0;
   padding: 24px clamp(16px, 3vw, 44px);
   scroll-behavior: smooth;
 }
@@ -59,16 +76,17 @@
 }
 .rplan-card {
   background: var(--rw-surface);
-  border: 1px solid var(--rw-line);
-  border-radius: 18px;
-  padding: 20px;
+  border: 1px solid var(--rw-line-soft);
+  border-radius: var(--rw-radius-card);
+  padding: clamp(18px, 2vw, 24px);
   margin-bottom: 18px;
-  box-shadow: 0 4px 16px #00000004;
+  box-shadow: var(--rw-shadow-panel);
 }
 .rplan summary {
   cursor: pointer;
   font-weight: 550;
-  padding: 6px 0;
+  padding: 7px 2px;
+  border-radius: 7px;
 }
 .rplan label {
   display: flex;
@@ -77,32 +95,63 @@
   font-size: 14px;
   margin: 14px 0;
 }
-.rplan :is(textarea, input:not([type="checkbox"])) {
+.rplan :is(textarea, input:not([type="checkbox"]):not([type="radio"]), select) {
   width: 100%;
   box-sizing: border-box;
-  padding: 10px 12px;
+  min-height: 40px;
+  padding: 9px 11px;
   border: 1px solid var(--rw-line);
+  border-radius: var(--rw-radius-control);
+  background: var(--rw-surface);
+  color: var(--rw-text);
   line-height: 1.7;
+  transition:
+    border-color 120ms ease,
+    box-shadow 120ms ease;
+}
+.rplan
+  :is(
+    textarea,
+    input:not([type="checkbox"]):not([type="radio"]),
+    select
+  ):hover:not(:disabled) {
+  border-color: color-mix(in srgb, var(--rw-accent) 32%, var(--rw-line));
+}
+.rplan
+  :is(
+    textarea,
+    input:not([type="checkbox"]):not([type="radio"]),
+    select
+  ):focus-visible {
+  border-color: var(--rw-accent);
+  box-shadow: 0 0 0 3px color-mix(in srgb, var(--rw-accent) 12%, transparent);
 }
 .rplan textarea {
+  min-height: 88px;
   resize: vertical;
 }
 .rplan button {
-  color: var(--rw-accent);
+  min-height: 38px;
+  padding: 8px 13px;
+  border-radius: var(--rw-radius-control);
+  color: var(--rw-text);
   background: var(--rw-surface);
   border: 1px solid var(--rw-line);
 }
+.rplan button:hover:not(:disabled):not(.rp-primary) {
+  background: var(--rw-hover);
+  border-color: color-mix(in srgb, var(--rw-accent) 24%, var(--rw-line));
+}
 .rplan .rplan-actions {
   margin-bottom: 18px;
+  gap: 8px;
 }
 .rplan-fields label {
   flex: 1;
   min-width: 150px;
 }
 .rplan select {
-  padding: 8px;
   max-width: 100%;
-  border: 1px solid var(--rw-line);
 }
 .rplan-section {
   margin: 16px 0;
@@ -163,6 +212,7 @@
   padding: 12px;
   margin-top: 12px;
   border-radius: 12px;
+  border: 1px solid var(--rw-line-soft);
   background: var(--rw-background);
 }
 .rplan-job > small {
@@ -172,13 +222,34 @@
 .rplan-source-picker {
   max-height: 320px;
   overflow: auto;
+  padding: 4px 8px;
+  border: 1px solid var(--rw-line-soft);
+  border-radius: 12px;
+  background: var(--rw-background);
+}
+.rplan-source-picker > details + details {
+  border-top: 1px solid var(--rw-line-soft);
+}
+.rplan-source-picker summary {
+  padding: 9px 6px;
 }
 .rplan-source-picker label {
   flex-direction: row;
-  align-items: baseline;
+  align-items: flex-start;
+  gap: 9px;
+  padding: 7px 8px;
+  border-radius: 8px;
+  line-height: 1.5;
+  cursor: pointer;
+}
+.rplan-source-picker label:hover {
+  background: var(--rw-hover);
 }
 .rplan-source-picker input {
   width: auto;
+  min-height: auto;
+  margin: 3px 0 0;
+  flex: 0 0 auto;
 }
 @media (max-width: 1100px) {
   .rplan {

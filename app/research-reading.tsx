@@ -8,6 +8,7 @@ import type { ResearchNote } from "../shared/workspace.ts";
 import type { ResearchSelection } from "./research-discussion.tsx";
 import { SelectionActions } from "./research-menu.tsx";
 import { ResearchImage } from "./research-image.tsx";
+import { ResearchIcon } from "./research-icons.tsx";
 import { BilingualSource } from "./source-translation.tsx";
 
 function NoteEditor({
@@ -360,8 +361,9 @@ export function ResearchReading({
             {wide ? "返回资料" : "展开阅读"}
           </button>
         )}
-        <button aria-label={returnLabel} onClick={onClose}>
-          × {returnLabel}
+        <button aria-label={returnLabel} title={returnLabel} onClick={onClose}>
+          <ResearchIcon name="close" />
+          {returnLabel}
         </button>
       </header>
       <div className="rp-tabs" role="tablist" aria-label="阅读面板">
@@ -375,16 +377,35 @@ export function ResearchReading({
             tabIndex={panel === tab ? 0 : -1}
             onClick={() => onPanel(tab)}
             onKeyDown={(e) => {
-              if (e.key === "ArrowLeft" || e.key === "ArrowRight") {
-                e.preventDefault();
-                if (!notes.length) return;
-                onPanel(tab === "sources" ? "notes" : "sources");
-                (
-                  e.currentTarget.parentElement?.querySelector(
-                    `[aria-selected="false"]`,
-                  ) as HTMLElement
-                )?.focus();
+              const tabs = Array.from(
+                e.currentTarget.parentElement?.querySelectorAll<HTMLButtonElement>(
+                  '[role="tab"]',
+                ) ?? [],
+              );
+              const currentIndex = tabs.indexOf(e.currentTarget);
+              let nextIndex: number;
+              switch (e.key) {
+                case "ArrowLeft":
+                case "ArrowRight":
+                  if (tabs.length < 2) return;
+                  nextIndex =
+                    (currentIndex +
+                      (e.key === "ArrowRight" ? 1 : -1) +
+                      tabs.length) %
+                    tabs.length;
+                  break;
+                case "Home":
+                  nextIndex = 0;
+                  break;
+                case "End":
+                  nextIndex = tabs.length - 1;
+                  break;
+                default:
+                  return;
               }
+              e.preventDefault();
+              tabs[nextIndex]?.focus();
+              tabs[nextIndex]?.click();
             }}
           >
             {tab === "sources" ? "原文与图件" : "历史笔记"}

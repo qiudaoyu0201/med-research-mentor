@@ -19,6 +19,8 @@ import type { WorkspaceIndex, ArtifactSummary } from "../shared/workspace.ts";
 import { useArtifactIntake } from "./artifact-intake.ts";
 import { isPptPageCount, pptPageCounts } from "../shared/ppt-page-count.ts";
 import { slideImageKey } from "../shared/image-region.ts";
+import { ResearchIcon } from "./research-icons.tsx";
+import { generationFeedback } from "./generation-feedback.ts";
 
 const terminal = (status: string) =>
   [
@@ -122,43 +124,64 @@ function PaperPicker({
     [error, setError] = useState("");
   return (
     <div className="tg-papers">
-      <div>
-        <span>{multiple ? "参考论文（可选）" : "选择论文"}</span>
-        <div
-          className="tg-paper-picker"
-          role={multiple ? "group" : "radiogroup"}
-          aria-label={multiple ? "参考论文" : "选择论文"}
+      <div className="tg-paper-heading">
+        <span className="tg-field-label">
+          {multiple ? "参考论文" : "来源论文"}
+          {multiple && <span className="tg-field-optional">可选</span>}
+        </span>
+        <button
+          className="rw-control"
+          disabled={busy || disabled}
+          onClick={() => input.current?.click()}
         >
-          {!papers.length && (
-            <span className="hint">暂无可选论文，请先导入 PDF。</span>
-          )}
-          {papers.map((p) => {
-            const checked = selected.includes(p.id);
-            return (
-              <label
-                className={`tg-paper-option ${checked ? "is-selected" : ""}`}
-                key={p.id}
-              >
-                <input
-                  type={multiple ? "checkbox" : "radio"}
-                  name={multiple ? undefined : "generation-paper"}
-                  checked={checked}
-                  disabled={busy || disabled}
-                  onChange={() =>
-                    onSelect(
-                      multiple
-                        ? checked
-                          ? selected.filter((id) => id !== p.id)
-                          : [...selected, p.id]
-                        : [p.id],
-                    )
-                  }
-                />
-                <span>{p.title}</span>
-              </label>
-            );
-          })}
-        </div>
+          <ResearchIcon name="plus" />
+          {busy ? "正在导入…" : "导入 PDF"}
+        </button>
+      </div>
+      <div
+        className="tg-paper-picker"
+        role={multiple ? "group" : "radiogroup"}
+        aria-label={multiple ? "参考论文" : "选择论文"}
+      >
+        {!papers.length && (
+          <div className="tg-paper-empty">
+            <ResearchIcon name="book" />
+            <div>
+              <span>尚未导入论文</span>
+              <small>
+                {multiple
+                  ? "可以添加参考论文，也可以直接描述研究想法。"
+                  : "导入 PDF 后，在这里选择用于汇报的论文。"}
+              </small>
+            </div>
+          </div>
+        )}
+        {papers.map((p) => {
+          const checked = selected.includes(p.id);
+          return (
+            <label
+              className={`tg-paper-option ${checked ? "is-selected" : ""}`}
+              key={p.id}
+            >
+              <input
+                type={multiple ? "checkbox" : "radio"}
+                name={multiple ? undefined : "generation-paper"}
+                checked={checked}
+                disabled={busy || disabled}
+                onChange={() =>
+                  onSelect(
+                    multiple
+                      ? checked
+                        ? selected.filter((id) => id !== p.id)
+                        : [...selected, p.id]
+                      : [p.id],
+                  )
+                }
+              />
+              <span>{p.title}</span>
+            </label>
+          );
+        })}
       </div>
       {multiple && <small>可勾选多篇，也可以不选，由助手检索文献。</small>}
       <input
@@ -190,12 +213,6 @@ function PaperPicker({
           }
         }}
       />
-      <button
-        disabled={busy || disabled}
-        onClick={() => input.current?.click()}
-      >
-        {busy ? "正在导入…" : "导入 PDF"}
-      </button>
       {error && <p role="alert">{error}</p>}
     </div>
   );
@@ -256,6 +273,10 @@ export function PptGeneration({
   const current = versions.find((v) => v.id === selected) ?? versions.at(-1);
   const paper = current?.sourceSnapshot ?? papers.find((p) => p.id === paperId);
   const running = turn && !terminal(turn.status);
+  const feedback =
+    turn && terminal(turn.status) && turn.status !== "completed"
+      ? generationFeedback(turn.status, turn.error ?? turn.reply?.nextStep)
+      : undefined;
   useArtifactIntake(
     "ppt",
     artifactId,
@@ -616,84 +637,102 @@ export function PptGeneration({
           if (id === artifactId) newPpt();
         }}
       />
-      <header>
-        <h2>论文汇报</h2>
-        <p>选一篇论文，生成汇报 PPT 与独立讲述提示。下载后可自行修改。</p>
+      <header className="tg-intake-heading">
+        <h2>{artifactId && !draftOnly ? "调整汇报" : "新建论文汇报"}</h2>
+        <p>从论文到清晰的汇报，附独立讲述提示，下载后可继续编辑。</p>
       </header>
-      <div className="tg-card">
+      <div className="tg-intake tg-ppt-intake">
         {artifactId && paper && !papers.some((p) => p.id === paper.id) && (
           <p className="hint">
             来源论文已归档或移除，当前汇报继续使用保存的资料副本。
           </p>
         )}
-        {artifactId && !draftOnly && paper ? (
-          <p>来源：{paper.title}</p>
-        ) : (
-          <PaperPicker
-            papers={papers}
-            selected={paperId ? [paperId] : []}
+        <div className="tg-ppt-intake-grid">
+          <div className="tg-ppt-paper">
+            {artifactId && !draftOnly && paper ? (
+              <p>来源：{paper.title}</p>
+            ) : (
+              <PaperPicker
+                papers={papers}
+                selected={paperId ? [paperId] : []}
+                disabled={
+                  (!!artifactId && !draftOnly) ||
+                  loading ||
+                  busy ||
+                  awaiting ||
+                  !!running
+                }
+                onSelect={(ids) => setPaperId(ids[0] ?? "")}
+                onBusyChange={setImporting}
+                onImported={(p) => {
+                  setPapers((old) => [...old.filter((x) => x.id !== p.id), p]);
+                  onImported(p);
+                }}
+              />
+            )}
+          </div>
+          <section className="tg-ppt-options" aria-label="汇报设置">
+            <label className="tg-ppt-request">
+              <span className="tg-field-label">
+                补充要求 <span className="tg-field-optional">可选</span>
+              </span>
+              <textarea
+                disabled={busy || importing || awaiting || !!running}
+                value={request}
+                rows={3}
+                maxLength={1400}
+                onChange={(e) => setRequest(e.target.value)}
+                placeholder="例如：15 分钟组会，重点说明实验设计"
+              />
+            </label>
+            <label className="tg-option-row">
+              <span>
+                汇报页数
+                <small>也可以交给助手根据论文安排</small>
+              </span>
+              <select
+                aria-label="汇报页数"
+                disabled={busy || importing || awaiting || !!running}
+                value={count}
+                onChange={(e) => setCount(e.target.value)}
+              >
+                <option value="">根据论文安排</option>
+                {pptPageCounts.map((n) => (
+                  <option key={n} value={n}>
+                    {n} 页
+                  </option>
+                ))}
+              </select>
+            </label>
+          </section>
+        </div>
+        <div className="tg-ppt-controls">
+          <span className="tg-action-note">PPT 与讲述提示将一并生成</span>
+          <button
+            className="rp-primary"
             disabled={
-              (!!artifactId && !draftOnly) ||
+              !paper ||
               loading ||
+              restoreFailed ||
+              importing ||
               busy ||
-              awaiting ||
               !!running
             }
-            onSelect={(ids) => setPaperId(ids[0] ?? "")}
-            onBusyChange={setImporting}
-            onImported={(p) => {
-              setPapers((old) => [...old.filter((x) => x.id !== p.id), p]);
-              onImported(p);
-            }}
-          />
-        )}
-        <label>
-          补充要求（可选）
-          <textarea
-            disabled={busy || importing || awaiting || !!running}
-            value={request}
-            maxLength={1400}
-            onChange={(e) => setRequest(e.target.value)}
-            placeholder="例如：15 分钟组会，重点说明实验设计"
-          />
-        </label>
-        <details>
-          <summary>生成选项</summary>
-          <label>
-            页数
-            <select
-              disabled={busy || importing || awaiting || !!running}
-              value={count}
-              onChange={(e) => setCount(e.target.value)}
-            >
-              <option value="">根据论文安排</option>
-              {pptPageCounts.map((n) => (
-                <option key={n} value={n}>
-                  {n} 页
-                </option>
-              ))}
-            </select>
-          </label>
-        </details>
-        <button
-          className="rp-primary"
-          disabled={
-            !paper || loading || restoreFailed || importing || busy || !!running
-          }
-          onClick={() => void generate()}
-        >
-          {loading
-            ? "正在恢复记录…"
-            : busy
-              ? "正在提交…"
-              : awaiting
-                ? "查询／重试提交"
-                : turn?.status === "cancelled" || turn?.status === "failed"
-                  ? "按当前要求重试"
-                  : artifactId && !draftOnly
-                    ? "按当前要求生成新版本"
-                    : "生成汇报"}
-        </button>
+            onClick={() => void generate()}
+          >
+            {loading
+              ? "正在恢复记录…"
+              : busy
+                ? "正在提交…"
+                : awaiting
+                  ? "查询／重试提交"
+                  : turn?.status === "cancelled" || turn?.status === "failed"
+                    ? "按当前要求重试"
+                    : artifactId && !draftOnly
+                      ? "按当前要求生成新版本"
+                      : "生成汇报"}
+          </button>
+        </div>
       </div>
       {awaiting && !busy && (
         <p>上次提交尚未确认。点击查询／重试会沿用同一任务编号。</p>
@@ -726,11 +765,7 @@ export function PptGeneration({
           </button>
         </p>
       )}
-      {turn && terminal(turn.status) && turn.status !== "completed" && (
-        <p role="alert">
-          {turn.error ?? turn.reply?.nextStep ?? "本次未完成，可重新生成。"}
-        </p>
-      )}
+      {feedback && <p role={feedback.role}>{feedback.text}</p>}
       {!!versions.length && (
         <div className="tg-version-browser">
           <strong>当前汇报的版本</strong>
@@ -918,6 +953,15 @@ export function PlanGeneration({
     [restoreFailed, setRestoreFailed] = useState(false),
     [restoreAttempt, setRestoreAttempt] = useState(0);
   const active = job && !planJobDone(job);
+  const feedback =
+    job && planJobDone(job) && job.status !== "completed"
+      ? generationFeedback(
+          job.status,
+          job.error
+            ? `${job.error} 已有内容保留，可调整输入重新生成。`
+            : undefined,
+        )
+      : undefined;
   useArtifactIntake(
     "plan",
     plan?.id || draftId,
@@ -1251,13 +1295,18 @@ export function PlanGeneration({
           if (plan?.id === id || draftId === id) newPlan();
         }}
       />
-      <header>
-        <h2>研究方案</h2>
+      <header className="tg-intake-heading">
+        <h2>{plan ? "调整研究方案" : "新建研究方案"}</h2>
         <p>描述一个医学研究想法，获得适合与老师讨论的完整草案。</p>
       </header>
-      <div className="tg-card">
-        <label>
-          研究方向或问题 <span aria-label="必填">*</span>
+      <div className="tg-intake tg-plan-intake">
+        <label className="tg-plan-question">
+          <span className="tg-field-label">
+            研究方向或问题{" "}
+            <span className="tg-field-required" aria-label="必填">
+              *
+            </span>
+          </span>
           <textarea
             disabled={busy || importing || awaiting || !!active}
             required
@@ -1268,26 +1317,34 @@ export function PlanGeneration({
             placeholder="例如：想研究某种干预如何影响某疾病的过程"
           />
         </label>
-        <label>
-          已有条件与限制（可选）
-          <textarea
-            disabled={busy || importing || awaiting || !!active}
-            maxLength={5000}
-            value={form.conditions}
-            onChange={(e) => setForm({ ...form, conditions: e.target.value })}
-            placeholder="已有材料、可用数据、时间或资源；不清楚可以直说"
-          />
-        </label>
-        <label>
-          想法与补充要求（可选）
-          <textarea
-            disabled={busy || importing || awaiting || !!active}
-            maxLength={3000}
-            value={form.instruction}
-            onChange={(e) => setForm({ ...form, instruction: e.target.value })}
-            placeholder="你希望重点考虑什么，或已有怎样的初步思路"
-          />
-        </label>
+        <div className="tg-plan-context-grid">
+          <label>
+            <span className="tg-field-label">
+              已有条件与限制 <span className="tg-field-optional">可选</span>
+            </span>
+            <textarea
+              disabled={busy || importing || awaiting || !!active}
+              maxLength={5000}
+              value={form.conditions}
+              onChange={(e) => setForm({ ...form, conditions: e.target.value })}
+              placeholder="已有材料、可用数据、时间或资源；不清楚可以直说"
+            />
+          </label>
+          <label>
+            <span className="tg-field-label">
+              想法与补充要求 <span className="tg-field-optional">可选</span>
+            </span>
+            <textarea
+              disabled={busy || importing || awaiting || !!active}
+              maxLength={3000}
+              value={form.instruction}
+              onChange={(e) =>
+                setForm({ ...form, instruction: e.target.value })
+              }
+              placeholder="你希望重点考虑什么，或已有怎样的初步思路"
+            />
+          </label>
+        </div>
         <PaperPicker
           papers={papers}
           selected={form.paperIds}
@@ -1300,30 +1357,33 @@ export function PlanGeneration({
             onImported(p);
           }}
         />
-        <button
-          className="rp-primary"
-          disabled={
-            !form.question.trim() ||
-            loading ||
-            restoreFailed ||
-            importing ||
-            busy ||
-            !!active
-          }
-          onClick={() => void generate()}
-        >
-          {loading
-            ? "正在恢复记录…"
-            : busy
-              ? "正在提交…"
-              : awaiting
-                ? "查询／重试提交"
-                : job?.status === "cancelled" || job?.status === "failed"
-                  ? "按当前要求重试"
-                  : plan
-                    ? "按当前要求生成新版本"
-                    : "生成完整草案"}
-        </button>
+        <div className="tg-plan-controls">
+          <span className="tg-action-note">生成适合与老师讨论的研究草案</span>
+          <button
+            className="rp-primary"
+            disabled={
+              !form.question.trim() ||
+              loading ||
+              restoreFailed ||
+              importing ||
+              busy ||
+              !!active
+            }
+            onClick={() => void generate()}
+          >
+            {loading
+              ? "正在恢复记录…"
+              : busy
+                ? "正在提交…"
+                : awaiting
+                  ? "查询／重试提交"
+                  : job?.status === "cancelled" || job?.status === "failed"
+                    ? "按当前要求重试"
+                    : plan
+                      ? "按当前要求生成新版本"
+                      : "生成完整草案"}
+          </button>
+        </div>
       </div>
       {awaiting && !busy && (
         <p>上次提交尚未确认。点击查询／重试会沿用同一任务编号。</p>
@@ -1354,9 +1414,7 @@ export function PlanGeneration({
           </button>
         </p>
       )}
-      {job?.error && (
-        <p role="alert">{job.error} 已有内容保留，可调整输入重新生成。</p>
-      )}
+      {feedback && <p role={feedback.role}>{feedback.text}</p>}
       {!!plan?.versions.length && (
         <div className="tg-version-browser">
           <strong>当前方案的版本</strong>
