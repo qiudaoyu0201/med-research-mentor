@@ -20,6 +20,7 @@ import { useArtifactIntake } from "./artifact-intake.ts";
 import { isPptPageCount, pptPageCounts } from "../shared/ppt-page-count.ts";
 import { slideImageKey } from "../shared/image-region.ts";
 import { ResearchIcon } from "./research-icons.tsx";
+import { generationFeedback } from "./generation-feedback.ts";
 
 const terminal = (status: string) =>
   [
@@ -272,6 +273,10 @@ export function PptGeneration({
   const current = versions.find((v) => v.id === selected) ?? versions.at(-1);
   const paper = current?.sourceSnapshot ?? papers.find((p) => p.id === paperId);
   const running = turn && !terminal(turn.status);
+  const feedback =
+    turn && terminal(turn.status) && turn.status !== "completed"
+      ? generationFeedback(turn.status, turn.error ?? turn.reply?.nextStep)
+      : undefined;
   useArtifactIntake(
     "ppt",
     artifactId,
@@ -760,11 +765,7 @@ export function PptGeneration({
           </button>
         </p>
       )}
-      {turn && terminal(turn.status) && turn.status !== "completed" && (
-        <p role="alert">
-          {turn.error ?? turn.reply?.nextStep ?? "本次未完成，可重新生成。"}
-        </p>
-      )}
+      {feedback && <p role={feedback.role}>{feedback.text}</p>}
       {!!versions.length && (
         <div className="tg-version-browser">
           <strong>当前汇报的版本</strong>
@@ -952,6 +953,15 @@ export function PlanGeneration({
     [restoreFailed, setRestoreFailed] = useState(false),
     [restoreAttempt, setRestoreAttempt] = useState(0);
   const active = job && !planJobDone(job);
+  const feedback =
+    job && planJobDone(job) && job.status !== "completed"
+      ? generationFeedback(
+          job.status,
+          job.error
+            ? `${job.error} 已有内容保留，可调整输入重新生成。`
+            : undefined,
+        )
+      : undefined;
   useArtifactIntake(
     "plan",
     plan?.id || draftId,
@@ -1404,9 +1414,7 @@ export function PlanGeneration({
           </button>
         </p>
       )}
-      {job?.error && (
-        <p role="alert">{job.error} 已有内容保留，可调整输入重新生成。</p>
-      )}
+      {feedback && <p role={feedback.role}>{feedback.text}</p>}
       {!!plan?.versions.length && (
         <div className="tg-version-browser">
           <strong>当前方案的版本</strong>
