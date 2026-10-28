@@ -89,7 +89,7 @@ export function ResearchNavigation({
             aria-label="关闭导航"
             onClick={close}
           >
-            ×
+            <ResearchIcon name="close" />
           </button>
         </div>
         <nav className="rw-main-nav" aria-label="主导航">

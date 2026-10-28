@@ -41,6 +41,7 @@ import {
   useResearchFont,
 } from "./research-theme.ts";
 import { ResearchIcon } from "./research-icons.tsx";
+import { useDialogFocus } from "./use-dialog-focus.ts";
 import "./research-appearance.css";
 
 type Management = {
@@ -129,9 +130,7 @@ export function ResearchWorkspace() {
     [records, setRecords] = useState(false);
   const [planTitle, setPlanTitle] = useState("新医学课题");
   const recordsDialog = useRef<HTMLDialogElement>(null);
-  useEffect(() => {
-    if (records) recordsDialog.current?.showModal();
-  }, [records]);
+  useDialogFocus(recordsDialog, records);
   const [index, setIndex] = useState<WorkspaceIndex>(emptyIndex);
   const [papers, setPapers] = useState<PaperBundle[]>([]);
   const [conversations, setConversations] = useState<ConversationState[]>([]);
@@ -157,9 +156,7 @@ export function ResearchWorkspace() {
   const [start, setStart] = useState<ReadingStart>();
   const [panel, setPanel] = useState<"sources" | "notes" | null>(null);
   const pptSourcesDialog = useRef<HTMLDialogElement>(null);
-  useEffect(() => {
-    if (mode !== "research" && panel) pptSourcesDialog.current?.showModal();
-  }, [mode, panel]);
+  useDialogFocus(pptSourcesDialog, mode !== "research" && !!panel);
   const [sourceId, setSourceId] = useState<string>();
   const [sourceRevision, setSourceRevision] = useState(0);
   const [extraSource, setExtraSource] = useState<Source>();
@@ -497,9 +494,7 @@ export function ResearchWorkspace() {
     window.addEventListener("keydown", escape);
     return () => window.removeEventListener("keydown", escape);
   }, [wide]);
-  useEffect(() => {
-    if (management) dialog.current?.showModal();
-  }, [!!management]);
+  useDialogFocus(dialog, !!management);
   useEffect(() => {
     if (!notice) return;
     const timer = setTimeout(() => setNotice(""), 5000);
@@ -1054,7 +1049,13 @@ export function ResearchWorkspace() {
         <header className="rp-topbar">
           <button
             className="rp-mobile-menu"
-            aria-label="打开导航"
+            aria-label={
+              (innerWidth > 1000 ? !collapsed : mobile)
+                ? "收起导航"
+                : "展开导航"
+            }
+            title="展开或收起导航"
+            aria-expanded={innerWidth > 1000 ? !collapsed : mobile}
             onClick={() => {
               if (innerWidth > 1000) setCollapsed((old) => !old);
               else setMobile((old) => !old);
@@ -1085,6 +1086,8 @@ export function ResearchWorkspace() {
           {mode === "research" && (
             <>
               <button
+                className="rw-toolbar-action"
+                title={panel ? "收起资料面板" : "显示论文资料"}
                 aria-expanded={!!panel}
                 disabled={loading || mode !== "research" || !paper}
                 onClick={() => {
@@ -1095,6 +1098,7 @@ export function ResearchWorkspace() {
                   }
                 }}
               >
+                <ResearchIcon name="book" />
                 资料
               </button>
               <ObjectMenu
@@ -1411,7 +1415,7 @@ export function ResearchWorkspace() {
                       aria-label="关闭错误提示"
                       onClick={() => setError("")}
                     >
-                      ×
+                      <ResearchIcon name="close" />
                     </button>
                   </div>
                 )}
@@ -1463,7 +1467,7 @@ export function ResearchWorkspace() {
                         retry.current = undefined;
                       }}
                     >
-                      ×
+                      <ResearchIcon name="close" />
                     </button>
                   </div>
                 )}
@@ -1690,7 +1694,7 @@ export function ResearchWorkspace() {
           <header className="rp-modal-heading">
             <h2 title={currentName}>个人记录 · {currentName}</h2>
             <button aria-label="关闭个人记录" onClick={() => setRecords(false)}>
-              ×
+              <ResearchIcon name="close" />
             </button>
           </header>
           <PersonalRecordsPanel
@@ -1745,13 +1749,14 @@ export function ResearchWorkspace() {
                 disabled={working}
                 onClick={() => setManagement(undefined)}
               >
-                ×
+                <ResearchIcon name="close" />
               </button>
             </div>
             <label>
               名称
               <input
                 autoFocus
+                data-dialog-autofocus
                 aria-label="名称"
                 value={management.name}
                 maxLength={120}

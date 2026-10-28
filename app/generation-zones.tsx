@@ -123,43 +123,64 @@ function PaperPicker({
     [error, setError] = useState("");
   return (
     <div className="tg-papers">
-      <div>
-        <span>{multiple ? "参考论文（可选）" : "选择论文"}</span>
-        <div
-          className="tg-paper-picker"
-          role={multiple ? "group" : "radiogroup"}
-          aria-label={multiple ? "参考论文" : "选择论文"}
+      <div className="tg-paper-heading">
+        <span className="tg-field-label">
+          {multiple ? "参考论文" : "来源论文"}
+          {multiple && <span className="tg-field-optional">可选</span>}
+        </span>
+        <button
+          className="rw-control"
+          disabled={busy || disabled}
+          onClick={() => input.current?.click()}
         >
-          {!papers.length && (
-            <span className="hint">暂无可选论文，请先导入 PDF。</span>
-          )}
-          {papers.map((p) => {
-            const checked = selected.includes(p.id);
-            return (
-              <label
-                className={`tg-paper-option ${checked ? "is-selected" : ""}`}
-                key={p.id}
-              >
-                <input
-                  type={multiple ? "checkbox" : "radio"}
-                  name={multiple ? undefined : "generation-paper"}
-                  checked={checked}
-                  disabled={busy || disabled}
-                  onChange={() =>
-                    onSelect(
-                      multiple
-                        ? checked
-                          ? selected.filter((id) => id !== p.id)
-                          : [...selected, p.id]
-                        : [p.id],
-                    )
-                  }
-                />
-                <span>{p.title}</span>
-              </label>
-            );
-          })}
-        </div>
+          <ResearchIcon name="plus" />
+          {busy ? "正在导入…" : "导入 PDF"}
+        </button>
+      </div>
+      <div
+        className="tg-paper-picker"
+        role={multiple ? "group" : "radiogroup"}
+        aria-label={multiple ? "参考论文" : "选择论文"}
+      >
+        {!papers.length && (
+          <div className="tg-paper-empty">
+            <ResearchIcon name="book" />
+            <div>
+              <span>尚未导入论文</span>
+              <small>
+                {multiple
+                  ? "可以添加参考论文，也可以直接描述研究想法。"
+                  : "导入 PDF 后，在这里选择用于汇报的论文。"}
+              </small>
+            </div>
+          </div>
+        )}
+        {papers.map((p) => {
+          const checked = selected.includes(p.id);
+          return (
+            <label
+              className={`tg-paper-option ${checked ? "is-selected" : ""}`}
+              key={p.id}
+            >
+              <input
+                type={multiple ? "checkbox" : "radio"}
+                name={multiple ? undefined : "generation-paper"}
+                checked={checked}
+                disabled={busy || disabled}
+                onChange={() =>
+                  onSelect(
+                    multiple
+                      ? checked
+                        ? selected.filter((id) => id !== p.id)
+                        : [...selected, p.id]
+                      : [p.id],
+                  )
+                }
+              />
+              <span>{p.title}</span>
+            </label>
+          );
+        })}
       </div>
       {multiple && <small>可勾选多篇，也可以不选，由助手检索文献。</small>}
       <input
@@ -191,12 +212,6 @@ function PaperPicker({
           }
         }}
       />
-      <button
-        disabled={busy || disabled}
-        onClick={() => input.current?.click()}
-      >
-        {busy ? "正在导入…" : "导入 PDF"}
-      </button>
       {error && <p role="alert">{error}</p>}
     </div>
   );
@@ -617,11 +632,11 @@ export function PptGeneration({
           if (id === artifactId) newPpt();
         }}
       />
-      <header>
-        <h2>论文汇报</h2>
-        <p>选一篇论文，生成汇报 PPT 与独立讲述提示。下载后可自行修改。</p>
+      <header className="tg-intake-heading">
+        <h2>{artifactId && !draftOnly ? "调整汇报" : "新建论文汇报"}</h2>
+        <p>从论文到清晰的汇报，附独立讲述提示，下载后可继续编辑。</p>
       </header>
-      <div className="tg-card tg-ppt-intake">
+      <div className="tg-intake tg-ppt-intake">
         {artifactId && paper && !papers.some((p) => p.id === paper.id) && (
           <p className="hint">
             来源论文已归档或移除，当前汇报继续使用保存的资料副本。
@@ -651,27 +666,27 @@ export function PptGeneration({
               />
             )}
           </div>
-          <label className="tg-ppt-request">
-            <span className="tg-field-label">
-              补充要求 <span className="tg-field-optional">可选</span>
-            </span>
-            <textarea
-              disabled={busy || importing || awaiting || !!running}
-              value={request}
-              maxLength={1400}
-              onChange={(e) => setRequest(e.target.value)}
-              placeholder="例如：15 分钟组会，重点说明实验设计"
-            />
-          </label>
-        </div>
-        <div className="tg-ppt-controls">
-          <details>
-            <summary>
-              生成选项 <ResearchIcon name="chevron" />
-            </summary>
-            <label>
-              页数
+          <section className="tg-ppt-options" aria-label="汇报设置">
+            <label className="tg-ppt-request">
+              <span className="tg-field-label">
+                补充要求 <span className="tg-field-optional">可选</span>
+              </span>
+              <textarea
+                disabled={busy || importing || awaiting || !!running}
+                value={request}
+                rows={3}
+                maxLength={1400}
+                onChange={(e) => setRequest(e.target.value)}
+                placeholder="例如：15 分钟组会，重点说明实验设计"
+              />
+            </label>
+            <label className="tg-option-row">
+              <span>
+                汇报页数
+                <small>也可以交给助手根据论文安排</small>
+              </span>
               <select
+                aria-label="汇报页数"
                 disabled={busy || importing || awaiting || !!running}
                 value={count}
                 onChange={(e) => setCount(e.target.value)}
@@ -684,7 +699,10 @@ export function PptGeneration({
                 ))}
               </select>
             </label>
-          </details>
+          </section>
+        </div>
+        <div className="tg-ppt-controls">
+          <span className="tg-action-note">PPT 与讲述提示将一并生成</span>
           <button
             className="rp-primary"
             disabled={
@@ -1267,11 +1285,11 @@ export function PlanGeneration({
           if (plan?.id === id || draftId === id) newPlan();
         }}
       />
-      <header>
-        <h2>研究方案</h2>
+      <header className="tg-intake-heading">
+        <h2>{plan ? "调整研究方案" : "新建研究方案"}</h2>
         <p>描述一个医学研究想法，获得适合与老师讨论的完整草案。</p>
       </header>
-      <div className="tg-card tg-plan-intake">
+      <div className="tg-intake tg-plan-intake">
         <label className="tg-plan-question">
           <span className="tg-field-label">
             研究方向或问题{" "}
@@ -1330,6 +1348,7 @@ export function PlanGeneration({
           }}
         />
         <div className="tg-plan-controls">
+          <span className="tg-action-note">生成适合与老师讨论的研究草案</span>
           <button
             className="rp-primary"
             disabled={

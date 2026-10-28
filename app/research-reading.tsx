@@ -8,6 +8,7 @@ import type { ResearchNote } from "../shared/workspace.ts";
 import type { ResearchSelection } from "./research-discussion.tsx";
 import { SelectionActions } from "./research-menu.tsx";
 import { ResearchImage } from "./research-image.tsx";
+import { ResearchIcon } from "./research-icons.tsx";
 import { BilingualSource } from "./source-translation.tsx";
 
 function NoteEditor({
@@ -360,8 +361,9 @@ export function ResearchReading({
             {wide ? "返回资料" : "展开阅读"}
           </button>
         )}
-        <button aria-label={returnLabel} onClick={onClose}>
-          × {returnLabel}
+        <button aria-label={returnLabel} title={returnLabel} onClick={onClose}>
+          <ResearchIcon name="close" />
+          {returnLabel}
         </button>
       </header>
       <div className="rp-tabs" role="tablist" aria-label="阅读面板">
